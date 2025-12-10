@@ -1,0 +1,101 @@
+
+name: AGIcore CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Automated Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Run test suite
+        run: |
+          chmod +x ./run_all_tests.sh
+          ./run_all_tests.sh
+
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: test # This job runs only if the 'test' job succeeds
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' # Only run on push to main
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}' # Requires a secret named GCP_SA_KEY
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+
+      - name: Build and Push Images
+        run: |
+          chmod +x ./scripts/build_images.sh
+          # The script needs to be modified to push images
+          # For now, we assume it's been updated to do so.
+          # We also need to replace placeholder variables.
+          sed -i 's/your-gcp-project-id/${{ secrets.GCP_PROJECT_ID }}/g' ./scripts/build_images.sh
+          sed -i 's|# docker push|docker push|g' ./scripts/build_images.sh # Uncomment the push command
+          ./scripts/build_images.sh
+  
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: build-and-push # This job runs only if images are built successfully
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Deploy Services
+        run: |
+          chmod +x ./scripts/deploy.sh
+          # Replace placeholder variables in the deploy script
+          sed -i 's/your-gcp-project-id/${{ secrets.GCP_PROJECT_ID }}/g' ./scripts/deploy.sh
+          sed -i 's/your-service-account-email@your-gcp-project-id.iam.gserviceaccount.com/${{ secrets.GCP_RUN_SERVICE_ACCOUNT }}/g' ./scripts/deploy.sh
+          ./scripts/deploy.sh
+
+# --- GitHub Secrets Required for this workflow ---
+#
+# 1. GCP_PROJECT_ID: Your Google Cloud project ID.
+#
+# 2. GCP_REGION: The region for your Artifact Registry and Cloud Run services (e.g., us-central1).
+#
+# 3. GCP_SA_KEY: A JSON service account key with the following roles:
+#    - Artifact Registry Writer (to push images)
+#    - Cloud Run Admin (to deploy services)
+#    - Service Account User (to allow Cloud Run to use the specified service account)
+#
+# 4. GCP_RUN_SERVICE_ACCOUNT: The email address of the service account that Cloud Run services will run as.
+#
+# Store these in your GitHub repository's Settings > Secrets and Variables > Actions.
