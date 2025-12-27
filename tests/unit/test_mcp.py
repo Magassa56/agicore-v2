@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'services' / 'agicore-mcp'))
 
 # Now import the app
-from main import app
+from services.agicore_mcp.main import app
 
 client = TestClient(app)
 
