@@ -1,0 +1,44 @@
+
+# --- Cloud Shell / Home junk ---
+**/.bash_history
+**/.bash_logout
+**/.bashrc
+**/.profile
+**/.selected_editor
+**/.sudo_as_admin_successful
+**/.lesshst
+
+# SSH & credentials (NEVER COMMIT)
+**/.ssh/
+**/*oauth*.json
+**/*auth*.json
+**/*credentials*.json
+**/*token*.json
+
+# Common caches
+**/.cache/
+**/.npm/
+**/.codeoss/
+**/.vscode/
+**/.docker/
+**/.gemini/
+**/.gcloud/
+**/.gsutil/
+**/.keras/
+**/.local/
+**/.rustup/
+
+# Logs / temp / outputs
+**/logs/
+**/*.log
+**/*.pid
+**/tmp/
+**/*.tmp
+**/*.bak
+
+# Large artifacts
+**/*.pdf
+**/*.xlsx
+**/*.png
+**/*.stl
+**/*.gcode
