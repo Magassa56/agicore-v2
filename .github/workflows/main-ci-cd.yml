@@ -23,6 +23,12 @@ jobs:
         with:
           python-version: '3.9'
 
+      - name: Install Dependencies
+        run: |
+          for req in $(find services -name "requirements.txt"); do
+            pip install -r $req
+          done
+
       - name: Run test suite
         run: |
           chmod +x ./run_all_tests.sh
