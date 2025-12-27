@@ -21,11 +21,16 @@ jobs:
           python-version: '3.9'
       - name: Install Dependencies
         run: |
+          # Add project root to PYTHONPATH to ensure consistent imports
+          export PYTHONPATH=$PWD
+          # Install dependencies for all services
           for req in $(find services -name "requirements.txt"); do
             pip install -r $req
           done
       - name: Run test suite
         run: |
+          # Add project root to PYTHONPATH to ensure consistent imports
+          export PYTHONPATH=$PWD
           chmod +x ./run_all_tests.sh
           ./run_all_tests.sh
 
@@ -34,28 +39,31 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: 'read'
+      id-token: 'write' # Required for Workload Identity Federation
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
       - name: 'Validate Secrets and Variables'
         run: |
-          if [ "${{ secrets.GCP_SA_KEY == '' }}" == "true" ]; then echo "::error::GCP_SA_KEY secret is NOT set." && exit 1; else echo "GCP_SA_KEY is SET."; fi
-          if [ "${{ vars.GCP_PROJECT_ID == '' }}" == "true" ]; then echo "::error::GCP_PROJECT_ID var is NOT set." && exit 1; else echo "GCP_PROJECT_ID is SET."; fi
-          if [ "${{ vars.GCP_REGION == '' }}" == "true" ]; then echo "::error::GCP_REGION var is NOT set." && exit 1; else echo "GCP_REGION is SET."; fi
-          if [ "${{ vars.GAR_REPOSITORY == '' }}" == "true" ]; then echo "::error::GAR_REPOSITORY var is NOT set." && exit 1; else echo "GAR_REPOSITORY is SET."; fi
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+          if [ -z "${{ secrets.GCP_SA_KEY || 'false' }}" ]; then echo "::error::GCP_SA_KEY secret is NOT set." && exit 1; else echo "GCP_SA_KEY is SET."; fi
+          if [ -z "${{ vars.GCP_PROJECT_ID || '' }}" ]; then echo "::error::GCP_PROJECT_ID var is NOT set." && exit 1; else echo "GCP_PROJECT_ID is SET."; fi
+          if [ -z "${{ vars.GCP_REGION || '' }}" ]; then echo "::error::GCP_REGION var is NOT set." && exit 1; else echo "GCP_REGION is SET."; fi
+          if [ -z "${{ vars.GAR_REPOSITORY || '' }}" ]; then echo "::error::GAR_REPOSITORY var is NOT set." && exit 1; else echo "GAR_REPOSITORY is SET."; fi
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v1
+        uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
       - name: Configure Docker
-        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
       - name: Build and Push Images
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION }}
           GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+          # Pass the commit SHA to be used as the image tag
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           chmod +x ./scripts/build_images.sh
           ./scripts/build_images.sh
@@ -65,23 +73,31 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
       - name: 'Validate Secrets and Variables'
         run: |
-          if [ "${{ secrets.GCP_SA_KEY == '' }}" == "true" ]; then echo "::error::GCP_SA_KEY secret is NOT set." && exit 1; else echo "GCP_SA_KEY is SET."; fi
-          if [ "${{ secrets.GCP_RUN_SERVICE_ACCOUNT == '' }}" == "true" ]; then echo "::error::GCP_RUN_SERVICE_ACCOUNT secret is NOT set." && exit 1; else echo "GCP_RUN_SERVICE_ACCOUNT is SET."; fi
-          if [ "${{ vars.GCP_PROJECT_ID == '' }}" == "true" ]; then echo "::error::GCP_PROJECT_ID var is NOT set." && exit 1; else echo "GCP_PROJECT_ID is SET."; fi
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+          if [ -z "${{ secrets.GCP_SA_KEY || 'false' }}" ]; then echo "::error::GCP_SA_KEY secret is NOT set." && exit 1; else echo "GCP_SA_KEY is SET."; fi
+          if [ -z "${{ vars.GCP_PROJECT_ID || '' }}" ]; then echo "::error::GCP_PROJECT_ID var is NOT set." && exit 1; else echo "GCP_PROJECT_ID is SET."; fi
+          if [ -z "${{ vars.GCP_REGION || '' }}" ]; then echo "::error::GCP_REGION var is NOT set." && exit 1; else echo "GCP_REGION is SET."; fi
+          if [ -z "${{ vars.GAR_REPOSITORY || '' }}" ]; then echo "::error::GAR_REPOSITORY var is NOT set." && exit 1; else echo "GAR_REPOSITORY is SET."; fi
+          if [ -z "${{ vars.GCP_SERVICE || '' }}" ]; then echo "::error::GCP_SERVICE var is NOT set." && exit 1; else echo "GCP_SERVICE is SET."; fi
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v1
+        uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
       - name: Deploy Services
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+          GCP_SERVICE: ${{ vars.GCP_SERVICE }}
+          GCP_RUN_SERVICE_ACCOUNT: ${{ vars.GCP_RUN_SERVICE_ACCOUNT || '' }} # Optional
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           chmod +x ./scripts/deploy.sh
-          sed -i "s/your-gcp-project-id/${{ vars.GCP_PROJECT_ID }}/g" ./scripts/deploy.sh
-          sed -i "s/your-service-account-email@your-gcp-project-id.iam.gserviceaccount.com/${{ secrets.GCP_RUN_SERVICE_ACCOUNT }}/g" ./scripts/deploy.sh
           ./scripts/deploy.sh

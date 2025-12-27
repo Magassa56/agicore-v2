@@ -1,43 +1,56 @@
 #!/bin/bash
-set -e
+# Fail on any error, undefined variable, or pipe failure
+set -euo pipefail
 
-# Configuration is now expected to be in environment variables:
-# GCP_PROJECT_ID, GCP_REGION, GAR_REPOSITORY
+# --- Configuration & Validation ---
+# These variables are expected to be set by the CI/CD environment.
+# GITHUB_SHA is automatically provided by GitHub Actions.
 
-if [ -z "$GCP_PROJECT_ID" ] || [ -z "$GCP_REGION" ] || [ -z "$GAR_REPOSITORY" ]; then
-  echo "::error::GCP_PROJECT_ID, GCP_REGION, and GAR_REPOSITORY must be set as environment variables."
+if [ -z "${GCP_PROJECT_ID:-}" ]; then
+  echo "::error:: Required environment variable GCP_PROJECT_ID is not set."
+  exit 1
+fi
+if [ -z "${GCP_REGION:-}" ]; then
+  echo "::error:: Required environment variable GCP_REGION is not set."
+  exit 1
+fi
+if [ -z "${GAR_REPOSITORY:-}" ]; then
+  echo "::error:: Required environment variable GAR_REPOSITORY is not set."
+  exit 1
+fi
+# Use IMAGE_TAG from env, fallback to a truncated GITHUB_SHA if not set.
+IMAGE_TAG=${IMAGE_TAG:-$(echo "$GITHUB_SHA" | cut -c1-12)}
+if [ -z "${IMAGE_TAG:-}" ]; then
+  echo "::error:: IMAGE_TAG could not be determined. Set IMAGE_TAG or ensure GITHUB_SHA is available."
   exit 1
 fi
 
 SERVICES_DIR="services"
-# Filter out directories that don't have a Dockerfile
-SERVICES=$(find "${SERVICES_DIR}" -mindepth 2 -maxdepth 2 -type f -name "Dockerfile" -print | xargs -n 1 dirname | xargs -n 1 basename)
 
+# --- Main Build Loop ---
 echo "--- Building AGIcore Service Images ---"
-echo "Project: ${GCP_PROJECT_ID}, Region: ${GCP_REGION}"
-echo "Services to build: ${SERVICES}"
+echo "Project: ${GCP_PROJECT_ID}, Region: ${GCP_REGION}, Repo: ${GAR_REPOSITORY}, Tag: ${IMAGE_TAG}"
 
-for SERVICE in ${SERVICES}; do
-  # The actual path might be different depending on the project structure, adjust if needed
-  # Assuming service names with hyphens are valid and need to be found
-  SERVICE_PATH=$(find "${SERVICES_DIR}" -type d -name "${SERVICE}" -print -quit)
-
-  if [ -z "${SERVICE_PATH}" ]; then
-    echo "::error::Could not find directory for service ${SERVICE}"
-    exit 1
-  fi
+# Find all directories inside SERVICES_DIR that contain a Dockerfile
+# Use a while loop to handle spaces or special characters in paths safely.
+find "${SERVICES_DIR}" -mindepth 2 -maxdepth 2 -type f -name "Dockerfile" -print0 | while IFS= read -r -d '' dockerfile_path; do
+  SERVICE_PATH=$(dirname "${dockerfile_path}")
+  SERVICE_NAME=$(basename "${SERVICE_PATH}")
   
-  IMAGE_NAME=$(echo "${SERVICE}" | tr '[:upper:]' '[:lower:]')
-  IMAGE_TAG="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME}:latest"
+  # Ensure image name is lowercase, as required by Docker and GAR
+  IMAGE_NAME_LOWER=$(echo "${SERVICE_NAME}" | tr '[:upper:]' '[:lower:]')
+  IMAGE_URL="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_LOWER}:${IMAGE_TAG}"
 
   echo "-----------------------------------------"
-  echo "Building image for service: ${SERVICE}"
-  echo "Image Tag: ${IMAGE_TAG}"
+  echo "Building image for service: ${SERVICE_NAME}"
+  echo "Image URL: ${IMAGE_URL}"
   echo "-----------------------------------------"
 
-  DOCKER_BUILDKIT=1 docker build -t "${IMAGE_TAG}" "${SERVICE_PATH}"
-  echo "Pushing image: ${IMAGE_TAG}"
-  docker push "${IMAGE_TAG}"
+  # Use Docker BuildKit for faster builds
+  DOCKER_BUILDKIT=1 docker build -t "${IMAGE_URL}" "${SERVICE_PATH}"
+  
+  echo "Pushing image: ${IMAGE_URL}"
+  docker push "${IMAGE_URL}"
 done
 
 echo "--- All service images built and pushed successfully! ---"

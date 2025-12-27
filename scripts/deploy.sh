@@ -1,69 +1,74 @@
 #!/bin/bash
+# Fail on any error, undefined variable, or pipe failure
+set -euo pipefail
 
-# This script deploys all AGIcore microservices to Google Cloud Run.
+# --- Configuration & Validation ---
+# These variables are expected to be set by the CI/CD environment.
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
-
-# --- Configuration ---
-# Google Cloud Project ID and region.
-# **REPLACE WITH YOUR ACTUAL VALUES**.
-GCP_PROJECT_ID="your-gcp-project-id"
-GCP_REGION="us-central1"
-ARTIFACT_REGISTRY_REPO="agicore-repo"
-
-# Service account for the Cloud Run instances.
-# It's recommended to use a dedicated service account with minimal permissions.
-# **REPLACE WITH YOUR SERVICE ACCOUNT EMAIL**.
-SERVICE_ACCOUNT="your-service-account-email@your-gcp-project-id.iam.gserviceaccount.com"
-
-# Base directory for services
-SERVICES_DIR="../services"
-
-# --- Pre-flight Checks ---
-echo "--- Starting AGIcore Deployment to Cloud Run ---"
-
-if [[ "${GCP_PROJECT_ID}" == "your-gcp-project-id" ]]; then
-    echo "ERROR: GCP_PROJECT_ID is not set. Please edit this script and replace 'your-gcp-project-id' with your actual Google Cloud Project ID."
-    exit 1
+if [ -z "${GCP_PROJECT_ID:-}" ]; then
+  echo "::error:: Required environment variable GCP_PROJECT_ID is not set."
+  exit 1
+fi
+if [ -z "${GCP_REGION:-}" ]; then
+  echo "::error:: Required environment variable GCP_REGION is not set."
+  exit 1
+fi
+if [ -z "${GAR_REPOSITORY:-}" ]; then
+  echo "::error:: Required environment variable GAR_REPOSITORY is not set."
+  exit 1
+fi
+# The primary service to deploy, as specified in the workflow
+if [ -z "${GCP_SERVICE:-}" ]; then
+  echo "::error:: Required environment variable GCP_SERVICE is not set."
+  exit 1
+fi
+# Use IMAGE_TAG from env, fallback to a truncated GITHUB_SHA if not set.
+IMAGE_TAG=${IMAGE_TAG:-$(echo "$GITHUB_SHA" | cut -c1-12)}
+if [ -z "${IMAGE_TAG:-}" ]; then
+  echo "::error:: IMAGE_TAG could not be determined. Set IMAGE_TAG or ensure GITHUB_SHA is available."
+  exit 1
 fi
 
-echo "Project: ${GCP_PROJECT_ID}"
-echo "Region: ${GCP_REGION}"
+# --- Main Deployment Logic ---
+echo "--- Deploying AGIcore Service to Cloud Run ---"
+echo "Project: ${GCP_PROJECT_ID}, Region: ${GCP_REGION}"
+echo "Service to deploy: ${GCP_SERVICE}"
 echo "-------------------------------------------------"
 
-# --- Main Deployment Loop ---
-# Get a list of all service directories
-SERVICES=$(ls -d ${SERVICES_DIR}/*/ | xargs -n 1 basename)
+# The service name might have underscores from the repo name, but Cloud Run prefers hyphens.
+# This ensures consistency.
+SERVICE_NAME_LOWER=$(echo "${GCP_SERVICE}" | tr '_' '-' | tr '[:upper:]' '[:lower:]')
 
-for SERVICE in ${SERVICES}; do
-  SERVICE_NAME=$(echo "${SERVICE}" | tr '[:upper:]' '[:lower:]') # Cloud Run service names must be lowercase
-  IMAGE_TAG="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}/${SERVICE_NAME}:latest"
+# The image name in GAR should correspond to the service name.
+# We assume the image was built using the same naming convention.
+IMAGE_NAME_LOWER=$(echo "${GCP_SERVICE}" | tr '_' '-' | tr '[:upper:]' '[:lower:]')
+IMAGE_URL="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_LOWER}:${IMAGE_TAG}"
 
-  echo "Deploying service: ${SERVICE_NAME}"
-  echo "Using image: ${IMAGE_TAG}"
+echo "Verifying image exists: ${IMAGE_URL}"
+# The `gcloud artifacts docker images describe` command will exit with a non-zero status if the image is not found.
+gcloud artifacts docker images describe "${IMAGE_URL}" --quiet
 
-  # Check if the image exists before deploying.
-  # The `gcloud container images describe` command will exit with a non-zero status if the image is not found.
-  echo "Verifying image exists..."
-  gcloud container images describe "${IMAGE_TAG}" --quiet
+echo "Deploying service: ${SERVICE_NAME_LOWER}"
 
-  # Deploy to Cloud Run
-  gcloud run deploy "${SERVICE_NAME}" \
-    --image "${IMAGE_TAG}" \
-    --region "${GCP_REGION}" \
-    --platform "managed" \
-    --quiet \
-    --allow-unauthenticated \
-    --service-account="${SERVICE_ACCOUNT}" \
-    --port=8080 \
-    # Add any other flags as needed, e.g., environment variables:
-    # --set-env-vars="LOG_LEVEL=info"
+# Base deploy command
+DEPLOY_CMD=(gcloud run deploy "${SERVICE_NAME_LOWER}"
+  --image "${IMAGE_URL}"
+  --region "${GCP_REGION}"
+  --platform "managed"
+  --quiet
+  --allow-unauthenticated # WARNING: This makes the service publicly accessible
+)
 
-  SERVICE_URL=$(gcloud run services describe ${SERVICE_NAME} --platform managed --region ${GCP_REGION} --format 'value(status.url)')
-  echo "Service ${SERVICE_NAME} deployed successfully."
-  echo "URL: ${SERVICE_URL}"
-  echo "-------------------------------------------------"
-done
+# Conditionally add the runtime service account if the variable is set
+if [ -n "${GCP_RUN_SERVICE_ACCOUNT:-}" ]; then
+  echo "Using runtime service account: ${GCP_RUN_SERVICE_ACCOUNT}"
+  DEPLOY_CMD+=(--service-account="${GCP_RUN_SERVICE_ACCOUNT}")
+else
+  echo "Using default compute service account."
+fi
 
-echo "--- All services deployed successfully! ---"
+# Execute the deploy command
+"${DEPLOY_CMD[@]}"
+
+SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME_LOWER}" --platform managed --region "${GCP_REGION}" --format 'value(status.url)')
+echo "✅ Deployment successful. Service available at: ${SERVICE_URL}"
