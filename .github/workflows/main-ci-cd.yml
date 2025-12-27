@@ -42,6 +42,7 @@ jobs:
           if [ "${{ secrets.GCP_SA_KEY == '' }}" == "true" ]; then echo "::error::GCP_SA_KEY secret is NOT set." && exit 1; else echo "GCP_SA_KEY is SET."; fi
           if [ "${{ vars.GCP_PROJECT_ID == '' }}" == "true" ]; then echo "::error::GCP_PROJECT_ID var is NOT set." && exit 1; else echo "GCP_PROJECT_ID is SET."; fi
           if [ "${{ vars.GCP_REGION == '' }}" == "true" ]; then echo "::error::GCP_REGION var is NOT set." && exit 1; else echo "GCP_REGION is SET."; fi
+          if [ "${{ vars.GAR_REPOSITORY == '' }}" == "true" ]; then echo "::error::GAR_REPOSITORY var is NOT set." && exit 1; else echo "GAR_REPOSITORY is SET."; fi
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
       - name: Authenticate to Google Cloud
@@ -51,10 +52,12 @@ jobs:
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev
       - name: Build and Push Images
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
         run: |
           chmod +x ./scripts/build_images.sh
-          sed -i "s/your-gcp-project-id/${{ vars.GCP_PROJECT_ID }}/g" ./scripts/build_images.sh
-          sed -i 's|# docker push|docker push|g' ./scripts/build_images.sh
           ./scripts/build_images.sh
 
   deploy:
