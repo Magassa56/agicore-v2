@@ -35,6 +35,13 @@ echo "Image URL: ${IMAGE_URL}"
 DOCKER_BUILDKIT=1 docker build -t "${IMAGE_URL}" "${SERVICE_SOURCE_DIR}"
 docker push "${IMAGE_URL}"
 
+# Also tag and push as 'latest'
+LATEST_IMAGE_URL="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${DOCKER_IMAGE_NAME_LOWER}:latest"
+echo "--- Tagging and Pushing 'latest' tag ---"
+echo "Latest Image URL: ${LATEST_IMAGE_URL}"
+docker tag "${IMAGE_URL}" "${LATEST_IMAGE_URL}"
+docker push "${LATEST_IMAGE_URL}"
+
 echo "✅ Image built and pushed successfully."
 
 # --- 2. Deploy to Cloud Run ---
@@ -62,3 +69,42 @@ fi
 
 SERVICE_URL=$(gcloud run services describe "${CLOUD_RUN_SERVICE_NAME_LOWER}" --platform managed --region "${GCP_REGION}" --format 'value(status.url)')
 echo "✅ Deployment successful. Service available at: ${SERVICE_URL}"
+
+# --- 3. Smoke Test ---
+echo "--- Running Smoke Test ---"
+# The health check path can be customized per-service via this env var
+HEALTH_CHECK_PATH=${HEALTH_CHECK_PATH:-"/"}
+echo "Using health check path: ${HEALTH_CHECK_PATH}"
+
+# Wait for up to 60 seconds for the service to become available
+n=0
+until [ $n -ge 12 ]; do
+  # Use --fail to exit with an error code if the request fails
+  # Use -s to silence progress meter, -L to follow redirects
+  # Use -o /dev/null to discard the body, we only care about the status code
+  # Use --write-out '%{http_code}' to print the status code
+  STATUS_CODE=$(curl -s -L -o /dev/null --write-out '%{http_code}' "${SERVICE_URL}${HEALTH_CHECK_PATH}")
+  if [ "${STATUS_CODE}" -ge 200 ] && [ "${STATUS_CODE}" -lt 400 ]; then
+    echo "✅ Smoke test on '${HEALTH_CHECK_PATH}' passed with status ${STATUS_CODE}."
+    
+    # If the health check was not the root, also test the root path.
+    if [ "${HEALTH_CHECK_PATH}" != "/" ]; then
+        echo "--- Checking root path ('/') as well ---"
+        ROOT_STATUS_CODE=$(curl -s -L -o /dev/null --write-out '%{http_code}' "${SERVICE_URL}/")
+        if [ "${ROOT_STATUS_CODE}" -ge 200 ] && [ "${ROOT_STATUS_CODE}" -lt 400 ]; then
+            echo "✅ Root path ('/') is also responsive with status ${ROOT_STATUS_CODE}."
+            exit 0 # Both checks passed, successful exit
+        else
+            echo "::error::Smoke test on root path ('/') failed with status ${ROOT_STATUS_CODE}."
+            exit 1 # Root check failed
+        fi
+    fi
+    exit 0 # Primary health check passed, successful exit
+  fi
+  echo "Smoke test failed with status ${STATUS_CODE}. Retrying in 5 seconds..."
+  n=$((n+1))
+  sleep 5
+done
+
+echo "::error:: Service did not become healthy after 60 seconds."
+exit 1
