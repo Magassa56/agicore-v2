@@ -72,7 +72,7 @@ jobs:
           - service: operator
             cloud_run_service: 'bama-operator-agi-core-v2'
             docker_image_name: 'operator'
-            health_check_path: '/'
+            health_check_path: '/health'
           - service: trader
             cloud_run_service: 'trader-agent'
             docker_image_name: 'agicore-trader'
@@ -94,6 +94,7 @@ jobs:
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
       - name: Build, Push, and Deploy ${{ matrix.service }}
+        id: deploy
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION }}
@@ -106,3 +107,9 @@ jobs:
         run: |
           chmod +x ./scripts/build-and-deploy.sh
           ./scripts/build-and-deploy.sh
+      - name: Smoke Test
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ matrix.cloud_run_service }} --region ${{ vars.GCP_REGION }} --project ${{ vars.GCP_PROJECT_ID }} --format 'value(status.url)')
+          echo "Service URL: $SERVICE_URL"
+          curl -f "$SERVICE_URL/"
+          curl -f "$SERVICE_URL/${{ matrix.health_check_path }}"

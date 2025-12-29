@@ -86,3 +86,8 @@ async def diagnose_and_remediate(health_report: ServiceHealth, background_tasks:
 @app.get("/")
 async def root():
     return {"message": "AGIcore Operator is running."}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
