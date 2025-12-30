@@ -1,11 +1,14 @@
 
 import os
-from fastapi import FastAPI, HTTPException, Depends
+import re
+from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from pydantic import BaseModel, Field
 import logging
 from typing import Dict, Any, List
 import alpaca_trade_api as tradeapi
 from alpaca_trade_api.rest import APIError
+# from starlette.requests import Request # Moved this import
+
 
 # --- Configuration & Environment Variables ---
 
@@ -19,7 +22,9 @@ ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 # Ensure we are not using a live account by mistake
 TRADING_MODE = os.getenv("TRADING_MODE", "paper") 
-BASE_URL = "https://paper-api.alpaca.markets" if TRADING_MODE == "paper" else "https://api.alpaca.markets"
+raw_alpaca_base_url = os.getenv("ALPACA_BASE_URL", "")
+ALPACA_BASE_URL = raw_alpaca_base_url.strip() # <-- enlève \n et espaces
+BASE_URL = ALPACA_BASE_URL if ALPACA_BASE_URL else ("https://paper-api.alpaca.markets" if TRADING_MODE == "paper" else "https://api.alpaca.markets")
 
 # Safeguards
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
@@ -35,10 +40,84 @@ app = FastAPI(
     version="1.1.0"
 )
 
+# --- New Endpoints and Helpers ---
+
+def env_bool(name: str, default: bool = False) -> bool:
+    """Converts an environment variable to a boolean."""
+    return os.getenv(name, str(default)).lower() in ("true", "1", "yes")
+
+def env_int(name: str, default: int = 0) -> int:
+    """Converts an environment variable to an integer."""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+def is_sensitive(key: str) -> bool:
+    """Checks if an environment variable key is sensitive."""
+    return bool(re.search(r"KEY|SECRET|TOKEN|PASS|PASSWORD|PRIVATE|CREDENTIAL|AUTH|SIGNATURE", key, re.IGNORECASE))
+
+def mask_value(key: str, value: str) -> str:
+    """Masks sensitive values."""
+    if not is_sensitive(key):
+        return value
+    if len(value) > 12:
+        return f"{value[:4]}...{value[-4:]}"
+    return "***"
+
+# --- Public Config Endpoint ---
+
+@app.get("/config", response_model=Dict[str, Any])
+async def get_config():
+    """
+    Returns the public, non-sensitive configuration of the service.
+    """
+    return {
+        "service": "trader-agent",
+        "TRADING_MODE": TRADING_MODE,
+        "DRY_RUN": env_bool("DRY_RUN", True),
+        "ALLOWED_SYMBOLS": ALLOWED_SYMBOLS,
+        "MAX_QTY": env_int("MAX_QTY", 1),
+        "ALPACA_BASE_URL": BASE_URL,
+        "K_REVISION": os.getenv("K_REVISION", "local"),
+        "GCP_PROJECT": os.getenv("GCP_PROJECT", None),
+    }
+
+# --- Protected Debug Endpoint ---
+
+DEBUG_ENDPOINTS_ENABLED = env_bool("DEBUG_ENDPOINTS", False)
+DEBUG_TOKEN = os.getenv("DEBUG_TOKEN")
+
+# if DEBUG_ENDPOINTS_ENABLED: # Commented out conditional block for debugging
+@app.get("/debug/env", response_model=Dict[str, str])
+async def get_debug_env(x_debug_token: str = Header(None)):
+    """
+    [PROTECTED] Returns a masked and truncated dump of environment variables.
+    Requires DEBUG_ENDPOINTS=true and a valid X-Debug-Token header.
+    """
+    if not DEBUG_TOKEN or x_debug_token != DEBUG_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Debug-Token.")
+    
+    env_dump = {}
+    for key, value in os.environ.items():
+        masked_value = mask_value(key, str(value))
+        env_dump[key] = masked_value[:200] + "..." if len(masked_value) > 200 else masked_value
+        
+    return env_dump
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"Incoming request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    return response
+
 # --- Alpaca API Client ---
 
 def get_alpaca_api():
     """Dependency to create and validate the Alpaca API client."""
+    logger.info(f"Attempting to initialize Alpaca API client.")
+    logger.info(f"TRADING_MODE: {TRADING_MODE}")
+    logger.info(f"BASE_URL: {BASE_URL}")
+
     if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         logger.error("Alpaca API keys are not configured. Set ALPACA_API_KEY and ALPACA_SECRET_KEY.")
         raise HTTPException(status_code=500, detail="Alpaca API credentials are not configured.")
@@ -49,13 +128,14 @@ def get_alpaca_api():
     try:
         api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url=BASE_URL, api_version='v2')
         # Validate connection by trying to get account info
-        api.get_account()
+        account_info = api.get_account()
+        logger.info(f"Successfully connected to Alpaca API. Account status: {account_info.status}")
         return api
     except APIError as e:
-        logger.error(f"Failed to connect to Alpaca API: {e}")
+        logger.error(f"Failed to connect to Alpaca API: {e}", exc_info=True)
         raise HTTPException(status_code=503, detail=f"Could not connect to Alpaca: {e}")
     except Exception as e:
-        logger.error(f"An unexpected error occurred during Alpaca client initialization: {e}")
+        logger.error(f"An unexpected error occurred during Alpaca client initialization: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during API client setup.")
 
 
@@ -99,6 +179,7 @@ async def get_alpaca_account(api: tradeapi.REST = Depends(get_alpaca_api)):
             "is_paper": TRADING_MODE == "paper",
         }
     except APIError as e:
+        logger.error(f"Failed to fetch Alpaca account: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch Alpaca account: {e}")
 
 @app.post("/alpaca/order", response_model=TradeResponse)

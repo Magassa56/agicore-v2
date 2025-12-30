@@ -16,4 +16,4 @@ EXPOSE 8080
 
 # Command to run the application using a production-grade server
 # The --host 0.0.0.0 flag is crucial for Cloud Run to receive requests
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh","-c","PORT=${PORT:-8080}; exec uvicorn main:app --host 0.0.0.0 --port $PORT"]
