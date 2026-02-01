@@ -41,7 +41,7 @@ def test_diagnose_and_remediate_triggers_restart(mock_restart, unhealthy_report)
     """Test that an unhealthy report triggers a remediation action."""
     # We patch the background task function to check if it's called.
     
-    response = client.post("/diagnose-and-remediate", json=unhealthy_report.dict())
+    response = client.post("/diagnose-and-remediate", json=unhealthy_report.model_dump())
     
     assert response.status_code == 200
     assert response.json()["action_taken"] == "queued_restart"
@@ -60,7 +60,7 @@ def test_diagnose_and_remediate_triggers_restart(mock_restart, unhealthy_report)
 def test_diagnose_and_remediate_for_healthy_service():
     """Test that a healthy report results in no action."""
     healthy_report = ServiceHealth(service_name="agicore-mediamaker", status="healthy")
-    response = client.post("/diagnose-and-remediate", json=healthy_report.dict())
+    response = client.post("/diagnose-and-remediate", json=healthy_report.model_dump())
     assert response.status_code == 200
     assert response.json()["action_taken"] == "none"
 

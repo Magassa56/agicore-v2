@@ -42,3 +42,11 @@
 **/*.png
 **/*.stl
 **/*.gcode
+
+# Python
+__pycache__/
+*.pyc
+
+# Local Dev
+docker-compose.yml
+

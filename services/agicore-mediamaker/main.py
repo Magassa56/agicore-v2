@@ -2,7 +2,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import logging
-from typing import Dict, Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

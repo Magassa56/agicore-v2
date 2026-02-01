@@ -4,7 +4,7 @@ import re
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from pydantic import BaseModel, Field
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 import alpaca_trade_api as tradeapi
 from alpaca_trade_api.rest import APIError
 # from starlette.requests import Request # Moved this import
@@ -114,7 +114,7 @@ async def log_requests(request: Request, call_next):
 
 def get_alpaca_api():
     """Dependency to create and validate the Alpaca API client."""
-    logger.info(f"Attempting to initialize Alpaca API client.")
+    logger.info("Attempting to initialize Alpaca API client.")
     logger.info(f"TRADING_MODE: {TRADING_MODE}")
     logger.info(f"BASE_URL: {BASE_URL}")
 

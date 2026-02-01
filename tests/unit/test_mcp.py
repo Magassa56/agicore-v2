@@ -1,7 +1,6 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
 
 # Add the service directory to the Python path to allow imports
 import sys
@@ -37,10 +36,9 @@ def test_create_plan_success(goal_payload):
 def test_execute_plan_success():
     """Test the /execute-plan endpoint for a known plan."""
     # This test simulates the execution flow. In a real scenario, you'd mock the HTTP calls.
-    with patch('asyncio.sleep', new_callable=MagicMock) as mock_sleep:
-        response = client.post("/execute-plan/plan_001")
-        assert response.status_code == 200
-        assert response.json() == {"plan_id": "plan_001", "status": "completed"}
+    response = client.post("/execute-plan/plan_001")
+    assert response.status_code == 200
+    assert response.json() == {"plan_id": "plan_001", "status": "completed"}
 
 def test_execute_plan_not_found():
     """Test the /execute-plan endpoint with a non-existent plan ID."""

@@ -1,6 +1,5 @@
 
 import pytest
-import asyncio
 from unittest.mock import patch, AsyncMock
 
 # Add relevant directories to sys.path to allow imports
@@ -10,8 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'services' / 'agicore-mcp'))
 
 # Import the components to be tested
-from tools import market_analysis, image_generation
-from services.agicore_mcp.main import create_plan as mcp_create_plan
+from tools import image_generation
 
 # This is an integration test, which tests the interaction between components.
 # We will simulate a high-level user goal and check if the MCP and tools interact correctly.
@@ -27,7 +25,7 @@ async def test_planning_and_tool_execution_flow():
     3. A step in the plan involves calling a tool.
     4. We verify the tool is called with the correct parameters.
     """
-    goal = {"description": "Generate an image of a futuristic city"}
+
 
     # Mock the plan generation to return a plan that uses the image generation tool
     # Instead of calling the full MCP service, we can directly test the planning logic

@@ -73,7 +73,7 @@ async def diagnose_and_remediate(health_report: ServiceHealth, background_tasks:
         
         return RemediationEvent(
             service_name=health_report.service_name,
-            action_taken=f"queued_restart",
+            action_taken="queued_restart",
             success=True
         )
 
