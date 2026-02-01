@@ -15,26 +15,47 @@ This system is built to be deployed on Google Cloud Run, leveraging other cloud-
 
 The system is designed as a set of communicating microservices, ready for deployment on a serverless container platform like Google Cloud Run.
 
-```
-[ High-Level Goal ]
-       |
-       v
-[ agicore-mcp ]  (Creates & Executes Plan)
-       |
-       |--------------------------------------------------|
-       |                   (Delegates Tasks)              |
-       v                                                  v
-[ agicore-trader ]                                 [ agicore-mediamaker ]
-  (Executes Trades)                                 (Generates Images)
-       |                                                  |
-       v                                                  v
-[ Brokerage API ]                                  [ Generative AI API ]
+```mermaid
+graph TD
+    subgraph "Primary Execution Flow"
+        direction LR
+        User([User]) -- "High-Level Goal" --> MCP[agicore-mcp];
+        MCP -- "Creates Plan & Delegates" --> Trader[agicore-trader];
+        MCP -- "Creates Plan & Delegates" --> MediaMaker[agicore-mediamaker];
+        MCP -- "Creates Plan & Delegates" --> Analytics[agicore-analytics];
+        MCP -- "Creates Plan & Delegates" --> Storage[agicore-storage];
 
+        Trader -- "Interacts with" --> BrokerageAPI[(Brokerage API)];
+        MediaMaker -- "Interacts with" --> GenAI_API[(Generative AI API)];
+        Analytics -- "Uses" --> Tools[Shared Tools Library];
+        Storage -- "Uses" --> Tools;
+    end
 
-[ Monitoring System ] -> [ Operator ] -> (Remediates unhealthy services)
-                          (Auto-Healing)
+    subgraph "SRE / Auto-Healing Flow"
+        direction TB
+        subgraph "All Services"
+            direction LR
+            MCP_service[agicore-mcp];
+            Trader_service[agicore-trader];
+            MediaMaker_service[agicore-mediamaker];
+            Analytics_service[agicore-analytics];
+            Storage_service[agicore-storage];
+        end
+        
+        Monitoring[(Monitoring System)] -- "Health & Perf Data" --> Operator[operator];
+        Operator -- "Performs Remediation (e.g., Restart)" --> All_Services_Group(All Services);
+
+    end
+
+    classDef service fill:#ddebf7,stroke:#333,stroke-width:2px;
+    class MCP,Trader,MediaMaker,Analytics,Storage,Operator,MCP_service,Trader_service,MediaMaker_service,Analytics_service,Storage_service service;
+
+    classDef external fill:#d5e8d4,stroke:#333,stroke-width:2px;
+    class User,BrokerageAPI,GenAI_API,Monitoring external;
+
+    classDef grouping fill:none,stroke:#ccc,stroke-dasharray:5,5;
+    class All_Services_Group,Primary_Execution_Flow,SRE__Auto_Healing_Flow grouping;
 ```
-*(Note: This is a simplified diagram. A full architecture diagram should be generated and placed here.)*
 
 ## Project Structure
 
