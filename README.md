@@ -117,42 +117,26 @@ To run the entire test suite:
 
 ## Deployment
 
-The system is designed for automated deployment via the CI/CD pipeline in `.github/workflows/main-ci-cd.yml`.
+Deployment is handled automatically by the CI/CD pipeline defined in `.github/workflows/main-ci-cd.yml`.
 
-### Manual Deployment Steps
+### Automated CI/CD Pipeline
+The pipeline automates the **Test -> Build -> Deploy** process. On every push to the `main` branch, it will:
+1.  Detect which services under the `services/` directory have changed.
+2.  Run the complete automated test suite.
+3.  If tests pass, it will build a new Docker image for each changed service and push it to Google Artifact Registry.
+4.  Deploy the new image to the corresponding Google Cloud Run service.
+5.  Perform a smoke test to ensure the service is responsive.
 
-1.  **Set up Prerequisites**:
-    - A Google Cloud Project.
-    - An [Artifact Registry repository](https://cloud.google.com/artifact-registry/docs/docker/create-repos).
-    - A [Service Account](https://cloud.google.com/iam/docs/creating-managing-service-accounts) with `Artifact Registry Writer` and `Cloud Run Admin` roles.
-    - Save the service account's JSON key.
+The pipeline is fully dynamic. Any new service added to the `services/` directory with a `Dockerfile` will be automatically included in this process.
 
-2.  **Configure Scripts**:
-    - Edit `scripts/build_images.sh` and `scripts/deploy.sh` to replace placeholder values (`your-gcp-project-id`, etc.) with your actual GCP configuration.
+### Configuration
+To enable the CI/CD pipeline, you must configure the following secrets and variables in your GitHub repository's **Settings > Secrets and variables > Actions**:
 
-3.  **Build and Push Images**:
-    - Authenticate Docker with GCP:
-      ```bash
-      gcloud auth configure-docker <your-gcp-region>-docker.pkg.dev
-      ```
-    - Run the build script:
-      ```bash
-      cd scripts
-      ./build_images.sh
-      ```
-      *(You may need to uncomment the `docker push` lines in the script).*
+**Repository Secrets:**
+-   `GCP_SA_KEY`: The JSON key for your Google Cloud service account. The service account requires roles like `Artifact Registry Writer` and `Cloud Run Admin`.
 
-4.  **Deploy to Cloud Run**:
-    - Run the deploy script:
-      ```bash
-      ./deploy.sh
-      ```
-
-### CI/CD Pipeline
-The included GitHub Actions workflow automates the **Test -> Build -> Deploy** process on every push to the `main` branch.
-
-To enable it, you must configure the following secrets in your GitHub repository's settings:
-- `GCP_PROJECT_ID`: Your Google Cloud project ID.
-- `GCP_REGION`: The region for your services (e.g., `us-central1`).
-- `GCP_SA_KEY`: The JSON key for your deployment service account.
-- `GCP_RUN_SERVICE_ACCOUNT`: The email of the service account Cloud Run services will use.
+**Repository Variables:**
+-   `GCP_PROJECT_ID`: Your Google Cloud project ID.
+-   `GCP_REGION`: The region for your services (e.g., `us-central1`).
+-   `GAR_REPOSITORY`: The name of your Google Artifact Registry repository (e.g., `agicore-repo`).
+-   `GCP_RUN_SERVICE_ACCOUNT`: The email of the runtime service account that Cloud Run services will use.

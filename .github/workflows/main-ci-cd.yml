@@ -18,18 +18,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Generate dynamic service filters
+        id: generate_filters
+        run: |
+          chmod +x ./scripts/generate-ci-filters.py
+          ./scripts/generate-ci-filters.py > .github/dynamic_filters.yml
+      
       - name: Use paths-filter action
         uses: dorny/paths-filter@v2
         id: filter
         with:
           # Enable listing of changed files for the output
           list-files: 'json'
-          # Define filters for each service
-          filters: |
-            operator:
-              - 'services/operator/**'
-            trader:
-              - 'services/agicore-trader/**'
+          # Use the dynamically generated filters
+          filters: .github/dynamic_filters.yml
 
   test:
     name: Run Automated Tests
@@ -41,6 +44,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
       - name: Install Dependencies
         run: |
           export PYTHONPATH=$PWD
@@ -67,49 +77,58 @@ jobs:
       matrix:
         # The 'service' matrix is dynamically populated by the JSON output of the 'changes' job
         service: ${{ fromJson(needs.changes.outputs.services) }}
-        # Include static configuration for each service
-        include:
-          - service: operator
-            cloud_run_service: 'bama-operator-agi-core-v2'
-            docker_image_name: 'operator'
-            health_check_path: '/health'
-          - service: trader
-            cloud_run_service: 'trader-agent'
-            docker_image_name: 'agicore-trader'
-            health_check_path: '/health'
             
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: 'Setup Environment Variables for ${{ matrix.service }}'
+        id: setup_vars
+        run: |
+          # Set image name, defaulting to service name
+          DOCKER_IMAGE_NAME="${{ matrix.service }}"
+          # Set Cloud Run service name based on convention
+          CLOUD_RUN_SERVICE="bama-${{ matrix.service }}-agi-core-v2"
+          
+          echo "DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME}" >> $GITHUB_ENV
+          echo "CLOUD_RUN_SERVICE=${CLOUD_RUN_SERVICE}" >> $GITHUB_ENV
+          echo "HEALTH_CHECK_PATH=/health" >> $GITHUB_ENV
+
       - name: 'Validate Secrets and Variables'
         run: |
           if [ -z "${{ secrets.GCP_SA_KEY || '' }}" ]; then echo "::error::Secret GCP_SA_KEY is not set." && exit 1; fi
           if [ -z "${{ vars.GCP_PROJECT_ID || '' }}" ]; then echo "::error::Variable GCP_PROJECT_ID is not set." && exit 1; fi
           if [ -z "${{ vars.GCP_REGION || '' }}" ]; then echo "::error::Variable GCP_REGION is not set." && exit 1; fi
           if [ -z "${{ vars.GAR_REPOSITORY || '' }}" ]; then echo "::error::Variable GAR_REPOSITORY is not set." && exit 1; fi
+      
       - name: Authenticate to Google Cloud
         uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
       - name: Build, Push, and Deploy ${{ matrix.service }}
         id: deploy
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION }}
           GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
-          DOCKER_IMAGE_NAME: ${{ matrix.docker_image_name }}
-          CLOUD_RUN_SERVICE: ${{ matrix.cloud_run_service }}
+          # DOCKER_IMAGE_NAME is now set in the environment
+          # CLOUD_RUN_SERVICE is now set in the environment
           IMAGE_TAG: ${{ github.sha }}
-          HEALTH_CHECK_PATH: ${{ matrix.health_check_path }}
+          # HEALTH_CHECK_PATH is now set in the environment
           GCP_RUN_SERVICE_ACCOUNT: ${{ vars.GCP_RUN_SERVICE_ACCOUNT || '' }}
         run: |
+          # The script will now use the environment variables set in the previous step
           chmod +x ./scripts/build-and-deploy.sh
           ./scripts/build-and-deploy.sh
+      
       - name: Smoke Test
         run: |
-          SERVICE_URL=$(gcloud run services describe ${{ matrix.cloud_run_service }} --region ${{ vars.GCP_REGION }} --project ${{ vars.GCP_PROJECT_ID }} --format 'value(status.url)')
+          SERVICE_URL=$(gcloud run services describe ${{ env.CLOUD_RUN_SERVICE }} --region ${{ vars.GCP_REGION }} --project ${{ vars.GCP_PROJECT_ID }} --format 'value(status.url)')
           echo "Service URL: $SERVICE_URL"
           curl -f "$SERVICE_URL/"
-          curl -f "$SERVICE_URL/${{ matrix.health_check_path }}"
+          # Use the health check path from the environment
+          curl -f "$SERVICE_URL/${{ env.HEALTH_CHECK_PATH }}"
