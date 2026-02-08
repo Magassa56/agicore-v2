@@ -3,3 +3,7 @@ uvicorn[standard]
 pydantic
 python-decouple
 google-cloud-pubsub
+python-json-logger
+prometheus-fastapi-instrumentator
+pybreaker
+httpx
