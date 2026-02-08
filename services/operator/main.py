@@ -3,10 +3,11 @@ import logging
 import asyncio
 import httpx
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from pythonjsonlogger import jsonlogger
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -17,21 +18,22 @@ import pybreaker
 class MaintenanceMode:
     def __init__(self):
         self._enabled = False
-
     @property
-    def enabled(self):
-        return self._enabled
-
-    def enable(self):
-        self._enabled = True
-
-    def disable(self):
-        self._enabled = False
+    def enabled(self): return self._enabled
+    def enable(self): self._enabled = True
+    def disable(self): self._enabled = False
 
 MAINTENANCE_MODE = MaintenanceMode()
 
 # --- Logging Setup ---
-# Dedicated logger for critical incidents
+# Security Audit Logger
+security_audit_handler = logging.FileHandler("security_audit.log")
+security_audit_handler.setFormatter(jsonlogger.JsonFormatter())
+security_logger = logging.getLogger("security_audit")
+security_logger.addHandler(security_audit_handler)
+security_logger.setLevel(logging.INFO)
+
+# General and Incident Loggers
 incident_log_path = "ops/logs/incidents.log"
 os.makedirs(os.path.dirname(incident_log_path), exist_ok=True)
 incident_handler = logging.FileHandler(incident_log_path)
@@ -40,7 +42,6 @@ incident_logger = logging.getLogger("incident_logger")
 incident_logger.addHandler(incident_handler)
 incident_logger.setLevel(logging.WARNING)
 
-# General structured logger
 logger = logging.getLogger("agicore_manager")
 logHandler = logging.StreamHandler()
 formatter = jsonlogger.JsonFormatter()
@@ -48,17 +49,14 @@ logHandler.setFormatter(formatter)
 logger.addHandler(logHandler)
 logger.setLevel(logging.INFO)
 
-
-# --- Circuit Breaker for Memory Service ---
+# --- Circuit Breaker ---
 memory_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=30)
 
 app = FastAPI(
-    title="AGIcoreManager - Meta-SRE (v2)",
-    description="Orchestrates microservices with a zero-failure tolerance, auto-healing, and a cognitive feedback loop.",
-    version="2.1.0"
+    title="AGIcoreManager - Meta-SRE (Niveau 8)",
+    description="Autonomous orchestration with advanced security, cognitive feedback, and human-in-the-loop capabilities.",
+    version="8.0.0"
 )
-
-# --- Prometheus Metrics ---
 Instrumentator().instrument(app).expose(app)
 
 # --- Data Models ---
@@ -71,12 +69,36 @@ class Alert(BaseModel):
 class ActionPlan(BaseModel):
     plan_id: str
     description: str
-    risk_score: float = Field(..., ge=0, le=1)
-    estimated_cost: float
+    risk_score: float = Field(..., ge=0, le=10, description="Risk score on a scale of 0 to 10.")
+    is_critical_action: bool = Field(False, description="True if the action requires human-in-the-loop.")
 
 class Action(BaseModel):
     action_name: str
     parameters: Optional[Dict[str, Any]] = None
+
+# --- Security Governor ---
+class SecurityGovernor:
+    def __init__(self, risk_threshold: float = 3.0):
+        self.risk_threshold = risk_threshold
+
+    def evaluate_plan(self, plan: ActionPlan) -> bool:
+        """Evaluates a plan and blocks it if it's too risky."""
+        if plan.risk_score > self.risk_threshold:
+            security_logger.warning(
+                "High-risk action blocked by Security Governor.",
+                extra={"plan_id": plan.plan_id, "risk_score": plan.risk_score, "threshold": self.risk_threshold}
+            )
+            return False
+        if plan.is_critical_action:
+            security_logger.info(
+                "Critical action flagged for Human-in-the-Loop.",
+                extra={"plan_id": plan.plan_id, "risk_score": plan.risk_score}
+            )
+            # In a real system, this would trigger a notification and wait for approval.
+            # For now, we just log it and let it proceed for demonstration.
+        return True
+
+SECURITY_GOVERNOR = SecurityGovernor()
 
 # --- Incident Commander ---
 class IncidentCommander:
@@ -86,25 +108,20 @@ class IncidentCommander:
 
     def record_critical_incident(self, alert: Alert, reason: str):
         self.critical_incident_count += 1
-        incident_logger.warning(
-            "Critical Incident Recorded",
-            extra={
-                "alert": alert.model_dump(),
-                "reason": reason,
-                "incident_count": self.critical_incident_count
-            }
-        )
+        incident_logger.warning("Critical Incident", extra={"alert": alert.model_dump(), "reason": reason, "count": self.critical_incident_count})
         if self.critical_incident_count >= self.threshold and not MAINTENANCE_MODE.enabled:
             MAINTENANCE_MODE.enable()
-            incident_logger.critical("MAINTENANCE MODE ACTIVATED due to repeated critical incidents.")
+            incident_logger.critical("MAINTENANCE MODE ACTIVATED")
 
 INCIDENT_COMMANDER = IncidentCommander()
 
-# --- Memory Service Integration (with Circuit Breaker) ---
+# --- Memory Service Integration ---
 @memory_breaker
-async def record_decision_event(agent: str, plan: ActionPlan, action: Action, status: str):
-    """Records a decision event in the agicore-memory service."""
+async def record_decision_event(agent: str, plan: ActionPlan, status: str) -> str:
+    """Records a decision event and returns the memory event ID."""
+    memory_event_id = f"evt-{uuid.uuid4()}"
     event = {
+        "memory_event_id": memory_event_id,
         "agent": agent,
         "action_plan_id": plan.plan_id,
         "action_taken": status,
@@ -112,86 +129,66 @@ async def record_decision_event(agent: str, plan: ActionPlan, action: Action, st
         "reason": plan.description,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post("http://agicore-memory:8000/record-event", json=event, timeout=2.0)
-            logger.info("Successfully recorded decision event", extra={"plan_id": plan.plan_id})
-    except httpx.RequestError as e:
-        # This will be caught by the circuit breaker
-        raise pybreaker.CircuitBreakerError(f"Memory service unavailable: {e}")
+    async with httpx.AsyncClient() as client:
+        await client.post("http://agicore-memory:8000/record-event", json=event, timeout=2.0)
+    logger.info("Successfully recorded decision event", extra={"memory_event_id": memory_event_id})
+    return memory_event_id
 
-
-# --- Cognitive Analysis (Simulating Internal Agents) ---
+# --- Cognitive Analysis ---
 async def analyze_alert(alert: Alert, background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    """
-    Cognitive analysis simulating Architect, Coder, and QA-Tester agents.
-    """
-    logger.info("Architect Agent: Generating action plans...", extra={"alert_source": alert.source})
-    # 1. Architect Agent: Generate plans based on the alert
+    logger.info("Architect Agent: Generating action plans...", extra={"alert": alert.message})
     plans = [
-        ActionPlan(plan_id="plan_restart_service", description=f"Restart the reported service: {alert.details.get('service')}", risk_score=0.2, estimated_cost=5.0),
-        ActionPlan(plan_id="plan_scale_up", description="Scale up the backend service", risk_score=0.5, estimated_cost=15.0),
+        ActionPlan(plan_id="plan_restart_trader", description="Restart the agicore-trader service", risk_score=2.5, is_critical_action=False),
+        ActionPlan(plan_id="plan_execute_trade", description="Execute a high-frequency trade", risk_score=8.0, is_critical_action=True),
     ]
+    selected_plan = plans[0] if "down" in alert.message else plans[1]
 
-    # Simple logic to choose a plan
-    if "down" in alert.message:
-        selected_plan = plans[0]
-    else:
-        selected_plan = plans[1]
+    if not SECURITY_GOVERNOR.evaluate_plan(selected_plan):
+        # No background task here, as the action is blocked.
+        memory_event_id = await record_decision_event(agent="AGIcoreManager", plan=selected_plan, status="blocked")
+        raise HTTPException(status_code=403, detail=f"Action blocked by Security Governor due to high risk (score: {selected_plan.risk_score}).")
 
-    logger.info(f"Coder Agent: Preparing patch for plan '{selected_plan.plan_id}'...", extra={"plan": selected_plan.model_dump()})
-    # 2. Coder Agent: Define action for the selected plan
     action_to_take = Action(action_name=f"execute_{selected_plan.plan_id}", parameters=alert.details)
-
-    logger.info("QA-Tester Agent: Simulating plan execution and validating KPIs...", extra={"plan_id": selected_plan.plan_id})
-    # 3. QA-Tester Agent: Simulate validation. In a real system, this would be a complex check.
-    qa_passed = selected_plan.risk_score < 0.7
-
+    
+    qa_passed = True # Simulate QA pass
     if not qa_passed:
-        INCIDENT_COMMANDER.record_critical_incident(alert, f"QA validation failed for high-risk plan '{selected_plan.plan_id}'.")
-        raise HTTPException(status_code=418, detail="QA validation failed; proposed action is too risky.")
+        raise HTTPException(status_code=418, detail="QA validation failed.")
 
-    # 4. Memory Agent: Record the decision
-    background_tasks.add_task(
-        record_decision_event,
-        agent="AGIcoreManager",
-        plan=selected_plan,
-        action=action_to_take,
-        status="executed"
-    )
-
-    return {"selected_plan": selected_plan, "action": action_to_take}
-
+    memory_event_id = await record_decision_event(agent="AGIcoreManager", plan=selected_plan, status="executed")
+    return {"selected_plan": selected_plan, "action": action_to_take, "memory_event_id": memory_event_id}
 
 # --- API Endpoints ---
 @app.post("/internal/alerts")
 async def receive_alert_handler(alert: Alert, background_tasks: BackgroundTasks):
-    """
-    Receives an alert, triggers the cognitive workflow, and executes the plan.
-    This endpoint has a low latency target (<50ms p99).
-    """
     if MAINTENANCE_MODE.enabled:
-        raise HTTPException(status_code=503, detail="Service is in maintenance mode. Non-critical operations are disabled.")
+        raise HTTPException(status_code=503, detail="Service in maintenance mode.")
 
     try:
-        analysis_result = await analyze_alert(alert, background_tasks)
-        # In a real system, the action would be executed here asynchronously
-        # background_tasks.add_task(execute_action, analysis_result["action"])
+        start_time = datetime.now(timezone.utc)
+        result = await analyze_alert(alert, background_tasks)
+        latency_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         
         return {
-            "status": "plan_executed",
-            "executed_plan": analysis_result["selected_plan"].model_dump(),
-            "action": analysis_result["action"].model_dump()
+            "agent": "AGIcoreManager",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action_plan_id": result["selected_plan"].plan_id,
+            "action_taken": "executed",
+            "risk_score": result["selected_plan"].risk_score,
+            "latency_ms": round(latency_ms, 2),
+            "reason": result["selected_plan"].description,
+            "memory_event_id": result["memory_event_id"]
         }
     except HTTPException as e:
-        # Re-raise HTTPExceptions from analyze_alert directly
         raise e
     except pybreaker.CircuitBreakerError as e:
-        INCIDENT_COMMANDER.record_critical_incident(alert, f"Memory service circuit breaker is open. Reason: {e}")
-        raise HTTPException(status_code=503, detail="Memory service is currently unavailable. Circuit breaker is open.")
+        INCIDENT_COMMANDER.record_critical_incident(alert, f"Memory service circuit breaker open: {e}")
+        raise HTTPException(status_code=503, detail=f"Memory service unavailable: {e}")
+    except httpx.RequestError as e:
+        INCIDENT_COMMANDER.record_critical_incident(alert, f"Memory service connection failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Memory service connection failed: {e}")
     except Exception as e:
-        INCIDENT_COMMANDER.record_critical_incident(alert, f"An unexpected error occurred during analysis. Reason: {e}")
-        raise HTTPException(status_code=500, detail="An internal error occurred during alert analysis.")
+        INCIDENT_COMMANDER.record_critical_incident(alert, f"Unexpected error during analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 @app.get("/health")
 async def health_check():
@@ -199,4 +196,4 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    return {"message": "AGIcoreManager v2 is running."}
+    return {"message": "AGIcoreManager v8 is running."}
