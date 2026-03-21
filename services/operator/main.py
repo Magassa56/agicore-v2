@@ -4,8 +4,10 @@ import asyncio
 import httpx
 import os
 import uuid
+import subprocess
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv # Import load_dotenv
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -24,6 +26,9 @@ class MaintenanceMode:
     def disable(self): self._enabled = False
 
 MAINTENANCE_MODE = MaintenanceMode()
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Logging Setup ---
 # Security Audit Logger
@@ -157,6 +162,21 @@ async def analyze_alert(alert: Alert, background_tasks: BackgroundTasks) -> Dict
     memory_event_id = await record_decision_event(agent="AGIcoreManager", plan=selected_plan, status="executed")
     return {"selected_plan": selected_plan, "action": action_to_take, "memory_event_id": memory_event_id}
 
+# --- Background task to run agicore_sentinel.py ---
+def run_sentinel():
+    script_path = os.path.join(os.path.dirname(__file__), 'app', 'agicore_sentinel.py')
+    logger.info(f"Starting agicore_sentinel.py at {script_path} in background.")
+    # Use unbuffered output for the subprocess
+    process = subprocess.Popen(['python3', '-u', script_path], env=os.environ.copy())
+    # You might want to store the process object or its PID if you need to manage it later
+    logger.info(f"agicore_sentinel.py started with PID: {process.pid}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    run_sentinel()
+    logger.info("AGIcoreManager startup complete.")
+
 # --- API Endpoints ---
 @app.post("/internal/alerts")
 async def receive_alert_handler(alert: Alert, background_tasks: BackgroundTasks):
@@ -197,3 +217,4 @@ async def health_check():
 @app.get("/")
 async def root():
     return {"message": "AGIcoreManager v8 is running."}
+

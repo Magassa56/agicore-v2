@@ -1,0 +1,5 @@
+==============================
+AGICORE SENTINEL ACTIVE
+==============================
+2026-02-14 00:29:54,194 - ERROR - Alpaca API credentials (APCA_API_KEY_ID, APCA_API_SECRET_KEY, APCA_API_BASE_URL) are not set in environment variables.
+2026-02-14 00:29:54,195 - WARNING - Telegram credentials not set. Skipping Telegram notification.
