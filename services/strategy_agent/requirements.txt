@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-decouple
+google-cloud-pubsub
+prometheus-fastapi-instrumentator
+yfinance
+pandas
+numpy
+ta
+scikit-learn
+scipy
+xgboost
+prometheus-client

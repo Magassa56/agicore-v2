@@ -1,0 +1,44 @@
+[
+    {
+        "timestamp": 3016,
+        "market": {
+            "price": 151.0311061734808,
+            "volume": 4396,
+            "trend": "DOWN"
+        },
+        "system": {
+            "cpu": 15.0,
+            "ram": 17.2,
+            "disk": 55.2
+        },
+        "action": "```json\n{\n  \"action_type\": \"TRADING\",\n  \"details\": {\n    \"operation\": \"HOLD\",\n    \"reason\": \"Market trend is DOWN with moderate volume (4396). Current price is 151.03. Technical indicators suggest waiting for a stabilization point or a reversal signal before entry. System resources are healthy (CPU 15%, RAM 17.2%), requiring no immediate technical intervention.\"\n  },\n  \"priority\": \"MEDIUM\"\n}\n```\n"
+    },
+    {
+        "timestamp": 3016,
+        "market": {
+            "price": 153.41962668693967,
+            "volume": 1362,
+            "trend": "UP"
+        },
+        "system": {
+            "cpu": 14.6,
+            "ram": 17.2,
+            "disk": 55.2
+        },
+        "action": "```json\n{\n  \"action_type\": \"TRADING\",\n  \"details\": {\n    \"operation\": \"BUY\",\n    \"reason\": \"Market trend has shifted to UP with a price increase to 153.42 from 151.03. Although volume is lower (1362), the momentum reversal from the previous DOWN trend justifies a tactical entry. System health is optimal (CPU 14.6%, RAM 17.2%), allowing for immediate execution without performance risk.\"\n  },\n  \"priority\": \"HIGH\"\n}\n```\n"
+    },
+    {
+        "timestamp": 3016,
+        "market": {
+            "price": 152.30802797837384,
+            "volume": 2118,
+            "trend": "SIDEWAYS"
+        },
+        "system": {
+            "cpu": 12.5,
+            "ram": 17.2,
+            "disk": 55.2
+        },
+        "action": "```json\n{\n  \"action_type\": \"TRADING\",\n  \"details\": {\n    \"operation\": \"HOLD\",\n    \"reason\": \"Market trend has shifted to SIDEWAYS with a price correction to 152.31 from 153.42. Although volume has increased to 2118, the lack of a clear directional trend following the previous UP momentum suggests a wait-and-see approach. Trading into a sideways market with declining prices increases risk without clear reward signals. System resources remain excellent (CPU 12.5%, RAM 17.2%), ensuring full readiness for the next high-probability move.\"\n  },\n  \"priority\": \"MEDIUM\"\n}\n```\n"
+    }
+]

@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import logging
 from typing import Dict
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # Import the core AGIcoreManager
 from .meta_agents import AGIcoreManager
@@ -15,6 +16,9 @@ app = FastAPI(
     description="This service orchestrates the entire AGIcore system using a multi-agent architecture.",
     version="2.0.0"  # Version updated to reflect the evolution
 )
+
+# Instrument the app with Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 class Objective(BaseModel):
     description: str

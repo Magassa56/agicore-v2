@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-decouple
+google-cloud-pubsub
+alpaca-trade-api
+python-json-logger
+prometheus-fastapi-instrumentator

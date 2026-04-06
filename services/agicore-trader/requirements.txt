@@ -1,6 +1,0 @@
-fastapi
-uvicorn[standard]
-pydantic
-python-decouple
-google-cloud-pubsub
-alpaca-trade-api

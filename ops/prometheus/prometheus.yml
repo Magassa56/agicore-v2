@@ -2,7 +2,22 @@
 global:
   scrape_interval: 15s
 
+rule_files:
+  - 'alert.rules.yml'
+
 scrape_configs:
   - job_name: 'agicore-mcp'
     static_configs:
-      - targets: ['mcp:8080']
+      - targets: ['agicore-mcp:8000']
+  - job_name: 'execution_agent'
+    static_configs:
+      - targets: ['execution_agent:8000']
+  - job_name: 'risk_agent'
+    static_configs:
+      - targets: ['risk_agent:8000']
+  - job_name: 'security_agent'
+    static_configs:
+      - targets: ['security_agent:8000']
+  - job_name: 'pushgateway'
+    static_configs:
+      - targets: ['pushgateway:9091']

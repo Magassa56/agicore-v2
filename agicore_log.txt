@@ -9,3 +9,4 @@
 2026-02-14 01:00:02,996 - ERROR - Alpaca API credentials (APCA_API_KEY_ID, APCA_API_SECRET_KEY, APCA_API_BASE_URL) are not set in environment variables.
 2026-02-14 01:00:02,996 - WARNING - Telegram credentials not set. Skipping Telegram notification.
 [Sat Mar 14 09:41:22 AM UTC 2026] - AGICORE SRE SAFE SHUTDOWN command received. Terminating all processes. Entering SAFE_IDLE_MODE.
+2026-04-06 12:00:00 - CRITICAL - Database connection lost. Max retries exceeded.

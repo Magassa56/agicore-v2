@@ -1,0 +1,27 @@
+groups:
+- name: AGICoreAlerts
+  rules:
+  - alert: AbnormalLosses
+    expr: pnl < -1000
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Abnormal losses detected"
+      description: "The trading system has experienced abnormal losses of over $1000 in the last 5 minutes."
+  - alert: SystemFailure
+    expr: up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "System failure detected"
+      description: "A component of the AGICore system is down."
+  - alert: LatencySpike
+    expr: http_request_duration_seconds_sum / http_request_duration_seconds_count > 0.5
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Latency spike detected"
+      description: "The average API response time is over 0.5 seconds."
