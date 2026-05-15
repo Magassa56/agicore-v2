@@ -42,3 +42,7 @@
 **/*.png
 **/*.stl
 **/*.gcode
+
+# Python cache
+__pycache__/
+*.pyc
