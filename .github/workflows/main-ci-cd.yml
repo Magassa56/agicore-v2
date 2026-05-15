@@ -21,15 +21,12 @@ jobs:
           python-version: '3.9'
       - name: Install Dependencies
         run: |
-          export PYTHONPATH=$PWD
-          for req in $(find services -name "requirements.txt"); do
-            pip install -r $req
-          done
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
       - name: Run test suite
         run: |
-          export PYTHONPATH=$PWD
-          chmod +x ./run_all_tests.sh
-          ./run_all_tests.sh
+          python -m pytest -q
 
   build-and-deploy-operator:
     name: Build and Deploy Operator to Cloud Run
