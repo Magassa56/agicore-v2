@@ -11,6 +11,7 @@ from typing import Iterator
 import structlog
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 logger = structlog.get_logger(__name__)
 
@@ -38,10 +39,13 @@ class SqlAlchemyEngine:
         future: bool = True,
     ) -> None:
         connect_args: dict[str, object] = {}
+        engine_kwargs: dict[str, object] = {}
         if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
+            if ":memory:" in url:
+                engine_kwargs["poolclass"] = StaticPool
         self._engine: Engine = create_engine(
-            url, echo=echo, future=future, connect_args=connect_args
+            url, echo=echo, future=future, connect_args=connect_args, **engine_kwargs
         )
         self._sessionmaker = sessionmaker(
             bind=self._engine, autoflush=False, expire_on_commit=False, future=future
