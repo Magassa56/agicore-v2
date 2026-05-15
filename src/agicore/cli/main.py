@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "version":
-        print("agicore-v2 0.1.0-phase9c")
+        sys.stdout.write("agicore-v2 0.1.0-phase9c\n")
         return 0
 
     if args.command == "run":
@@ -82,9 +82,9 @@ def main(argv: list[str] | None = None) -> int:
         mgr = AGIcoreManager(config=cfg)
         try:
             mgr.start()
-            print(
+            sys.stdout.write(
                 f"AGIcore runtime started (mode={cfg.runtime_mode}, "
-                f"dryrun={settings.dryrun}). Press Ctrl+C to stop."
+                f"dryrun={settings.dryrun}). Press Ctrl+C to stop.\n"
             )
             import signal
             signal.pause()
