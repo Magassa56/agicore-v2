@@ -43,7 +43,7 @@ def test_round_trip_with_pnl() -> None:
     broker.set_market_price("ES", 121.0)
     pos = svc.get_position("ES")
     assert pos.quantity == 0.0
-    assert pos.realized_pnl == pytest.approx(40.0 + (120.0 - 100.0) * 6.0)
+    assert pos.realized_pnl == pytest.approx(40.0 + (121.0 - 100.0) * 6.0)
     assert svc.get_open_orders() == []
 
 

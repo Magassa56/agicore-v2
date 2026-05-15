@@ -138,9 +138,12 @@ class ExecutionAgent:
                 order_id=feedback["order_id"],
                 symbol=feedback["symbol"],
                 side=feedback["side"],
+                quantity=feedback["quantity"],
                 order_status=feedback["order_status"],
                 fill_price=feedback["fill_price"],
+                filled_quantity=feedback["filled_quantity"],
                 realized_pnl=feedback["realized_pnl"],
+                broker_message=feedback["broker_message"],
             )
 
         self._processed_count += 1
