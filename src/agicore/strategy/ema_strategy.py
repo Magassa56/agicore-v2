@@ -108,6 +108,10 @@ class EMACrossoverStrategy:
                     self._position_open = False
                 else:
                     reason = "no_cross"
+            elif new_fast > new_slow and not self._position_open:
+                action = Action.BUY
+                reason = "bullish_cross"
+                self._position_open = True
             else:
                 reason = "no_cross"
 
