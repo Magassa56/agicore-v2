@@ -178,7 +178,7 @@ class StrategyAgent:
         # 3. Run backtest
         result = runner.run(strategy, ohlcv)
 
-        runtime_duration_ms = round((time.monotonic() - t0) * 1000.0, 3)
+        runtime_duration_ms = max(round((time.monotonic() - t0) * 1000.0, 3), 0.001)
 
         # 4. Build summary
         summary: dict[str, Any] = {
