@@ -19,7 +19,7 @@ The system is designed as a set of communicating microservices, ready for deploy
 [ High-Level Goal ]
        |
        v
-[ agicore-mcp ]  (Creates & Executes Plan)
+[ agicore_mcp ]  (Creates & Executes Plan)
        |
        |--------------------------------------------------|
        |                   (Delegates Tasks)              |
@@ -43,15 +43,14 @@ agicore-v2/
 ├── .github/workflows/      # GitHub Actions CI/CD pipeline
 │   └── main-ci-cd.yml
 ├── services/               # Source code for all micro-agent services
-│   ├── agicore-mcp/        # Multi-Cognitive Planner
+│   ├── agicore_mcp/        # Multi-Cognitive Planner
 │   ├── operator/           # Auto-healing SRE agent
 │   ├── agicore-trader/
 │   ├── agicore-mediamaker/
 │   ├── agicore-analytics/
 │   └── agicore-storage/
 ├── scripts/                # DevOps and utility scripts
-│   ├── build_images.sh     # Builds all Docker images
-│   ├── deploy.sh           # Deploys all services to Cloud Run
+│   ├── build-and-deploy.sh # Builds and deploys Docker images
 │   └── local_dev.sh        # Placeholder for local development setup
 ├── tests/                  # Automated tests
 │   ├── unit/
@@ -67,14 +66,14 @@ agicore-v2/
 ### Prerequisites
 - Docker
 - Google Cloud SDK (`gcloud`)
-- Python 3.9+
+- Python 3.11+
 
 ### Local Development
 While a full local environment is best managed with Docker Compose, you can run individual services directly.
 
 1.  **Navigate to a service directory:**
     ```bash
-    cd services/agicore-mcp
+    cd services/agicore_mcp
     ```
 
 2.  **Install dependencies:**
@@ -107,7 +106,7 @@ The system is designed for automated deployment via the CI/CD pipeline in `.gith
     - Save the service account's JSON key.
 
 2.  **Configure Scripts**:
-    - Edit `scripts/build_images.sh` and `scripts/deploy.sh` to replace placeholder values (`your-gcp-project-id`, etc.) with your actual GCP configuration.
+    - Edit `scripts/build-and-deploy.sh` to replace placeholder values (`your-gcp-project-id`, etc.) with your actual GCP configuration.
 
 3.  **Build and Push Images**:
     - Authenticate Docker with GCP:
@@ -117,14 +116,14 @@ The system is designed for automated deployment via the CI/CD pipeline in `.gith
     - Run the build script:
       ```bash
       cd scripts
-      ./build_images.sh
+      ./build-and-deploy.sh
       ```
       *(You may need to uncomment the `docker push` lines in the script).*
 
 4.  **Deploy to Cloud Run**:
-    - Run the deploy script:
+    - Run the build and deploy script:
       ```bash
-      ./deploy.sh
+      ./build-and-deploy.sh
       ```
 
 ### CI/CD Pipeline

@@ -1,26 +1,30 @@
+import logging
 import yaml
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
 
 def main():
     """
     Operator main entry point.
     """
-    print("Hello from AGIcore Operator!")
+    logging.basicConfig(level=logging.INFO)
+    logger.info("AGIcore Operator starting")
 
     # Build a robust path to the state file from the project root
     state_file = Path(__file__).resolve().parent.parent.parent.parent / "ops" / "state" / "STATE.yml"
 
     if state_file.exists():
-        print(f"Found state file at {state_file}, attempting to read...")
+        logger.info("Found state file at %s, attempting to read...", state_file)
         try:
-            with open(state_file, 'r') as f:
+            with open(state_file, "r") as f:
                 state = yaml.safe_load(f)
-            print("Successfully read state:")
-            print(yaml.dump(state, indent=2))
+            logger.info("Successfully read state:\n%s", yaml.dump(state, indent=2))
         except Exception as e:
-            print(f"Error reading or parsing state file: {e}")
+            logger.error("Error reading or parsing state file: %s", e)
     else:
-        print(f"State file not found at {state_file}. Continuing without state.")
+        logger.info("State file not found at %s. Continuing without state.", state_file)
 
 if __name__ == "__main__":
     main()

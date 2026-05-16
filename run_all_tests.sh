@@ -7,17 +7,19 @@ set -e
 
 echo "--- Starting AGIcore Test Suite ---"
 
-# Install dependencies for testing
-echo "Installing testing dependencies..."
-pip install pytest pytest-asyncio httpx requests
+# Install dependencies exactly like the CI job.
+echo "Installing development dependencies..."
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
 
 # Run Unit Tests
 echo "--- Running Unit Tests ---"
-pytest tests/unit/
+python -m pytest tests/unit/
 
 # Run Integration Tests
 echo "--- Running Integration Tests ---"
-pytest tests/integration/
+python -m pytest tests/integration/
 
 echo "--- All tests passed successfully! ---"
 

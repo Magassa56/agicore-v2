@@ -76,12 +76,21 @@ def test_clear_context_removes_bound_vars() -> None:
 
 
 def test_no_print_in_source() -> None:
-    """AST-strict scan : aucun print() réel dans src/agicore (docstrings exclues)."""
-    root = pathlib.Path(__file__).resolve().parents[3] / "src" / "agicore"
+    """AST-strict scan: no real print() calls in logging-controlled scope."""
+    project_root = pathlib.Path(__file__).resolve().parents[3]
+    paths = [
+        project_root / "src" / "agicore",
+        project_root / "services" / "operator" / "app" / "main.py",
+        project_root / "tools" / "utils.py",
+    ]
     offending: list[str] = []
-    for py in root.rglob("*.py"):
-        if "__pycache__" in str(py):
-            continue
+    files = []
+    for path in paths:
+        if path.is_dir():
+            files.extend(path.rglob("*.py"))
+        else:
+            files.append(path)
+    for py in files:
         tree = ast.parse(py.read_text())
         for node in ast.walk(tree):
             if (
