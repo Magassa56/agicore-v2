@@ -233,9 +233,13 @@ class TestHeartbeatScheduler:
         queue.enqueue.side_effect = fail_then_ok
 
         sch = HeartbeatScheduler(queue, interval_s=0.03, poll_resolution_s=0.01)
-        sch.start()
-        time.sleep(0.15)
-        sch.stop()
+        deadline = time.monotonic() + 1.0
+        try:
+            sch.start()
+            while calls["n"] < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+        finally:
+            sch.stop()
         # on s'attend à plusieurs tentatives malgré le premier échec
         assert calls["n"] >= 2
 
