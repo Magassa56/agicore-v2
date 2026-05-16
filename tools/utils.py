@@ -62,7 +62,7 @@ if __name__ == '__main__':
 
     async def run_example():
         result = await potentially_failing_function()
-        print(result)
+        logger.info("Example result: %s", result)
     
     import asyncio
     asyncio.run(run_example())
