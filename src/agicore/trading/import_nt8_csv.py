@@ -36,6 +36,9 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "entry",
         "open time",
         "time",
+        "heure d'entrée",
+        "heure d’entree",
+        "heure d’entrée",
     ),
     "exit_time": (
         "exit time",
@@ -44,6 +47,7 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "exit datetime",
         "exit",
         "close time",
+        "heure de sortie",
     ),
     "pnl": (
         "pnl",
@@ -54,10 +58,24 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "net profit",
         "pl",
     ),
-    "quantity": ("quantity", "qty", "size", "contracts", "filled"),
+    "quantity": ("quantity", "qty", "size", "contracts", "filled", "qté", "qte"),
     "instrument": ("instrument", "symbol", "market", "name"),
-    "entry_price": ("entry price", "avg entry price", "entryprice", "open price"),
-    "exit_price": ("exit price", "avg exit price", "exitprice", "close price"),
+    "entry_price": (
+        "entry price",
+        "avg entry price",
+        "entryprice",
+        "open price",
+        "prix d'entrée",
+        "prix d’entree",
+        "prix d’entrée",
+    ),
+    "exit_price": (
+        "exit price",
+        "avg exit price",
+        "exitprice",
+        "close price",
+        "prix de sortie",
+    ),
     "mae": ("mae", "max adverse excursion", "maximum adverse excursion"),
     "mfe": ("mfe", "max favorable excursion", "maximum favorable excursion"),
 }
@@ -113,9 +131,23 @@ def _normalize_row(
     *,
     row_number: int,
 ) -> NormalizedTrade:
-    entry_time = _parse_datetime(_get(row, column_map, "entry_time"), row_number=row_number)
+    entry_column = column_map["entry_time"]
+    exit_column = column_map.get("exit_time")
+    entry_time = _parse_datetime(
+        _get(row, column_map, "entry_time"),
+        row_number=row_number,
+        day_first=_is_day_first_datetime_column(entry_column),
+    )
     exit_value = _get(row, column_map, "exit_time")
-    exit_time = _parse_datetime(exit_value, row_number=row_number) if exit_value else entry_time
+    exit_time = (
+        _parse_datetime(
+            exit_value,
+            row_number=row_number,
+            day_first=_is_day_first_datetime_column(exit_column or entry_column),
+        )
+        if exit_value
+        else entry_time
+    )
     return NormalizedTrade(
         entry_time=entry_time,
         exit_time=exit_time,
@@ -139,11 +171,11 @@ def _get(row: dict[str, Any], column_map: dict[str, str], target: str) -> str | 
     return str(value).strip() if value is not None else None
 
 
-def _parse_datetime(value: str | None, *, row_number: int) -> datetime:
+def _parse_datetime(value: str | None, *, row_number: int, day_first: bool = False) -> datetime:
     if not value:
         raise ValueError(f"Missing datetime on CSV row {row_number}")
 
-    candidates = (
+    month_first_candidates = (
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
         "%m/%d/%Y %H:%M:%S",
@@ -152,6 +184,16 @@ def _parse_datetime(value: str | None, *, row_number: int) -> datetime:
         "%d/%m/%Y %H:%M",
         "%Y-%m-%dT%H:%M:%S",
     )
+    day_first_candidates = (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+    )
+    candidates = day_first_candidates if day_first else month_first_candidates
     cleaned = value.strip()
     try:
         return datetime.fromisoformat(cleaned)
@@ -169,9 +211,13 @@ def _parse_datetime(value: str | None, *, row_number: int) -> datetime:
 def _parse_float(value: str | None, field_name: str, *, row_number: int) -> float:
     if value is None or value == "":
         raise ValueError(f"Missing {field_name} on CSV row {row_number}")
-    cleaned = value.strip().replace("$", "").replace(",", "").replace(" ", "")
+    cleaned = value.strip().replace("$", "").replace(" ", "")
     if cleaned.startswith("(") and cleaned.endswith(")"):
         cleaned = f"-{cleaned[1:-1]}"
+    if "," in cleaned and "." not in cleaned:
+        cleaned = cleaned.replace(",", ".")
+    else:
+        cleaned = cleaned.replace(",", "")
     try:
         return float(cleaned)
     except ValueError as exc:
@@ -193,6 +239,10 @@ def _parse_optional_text(value: str | None) -> str | None:
 
 def _normalize_column(name: str) -> str:
     return " ".join(name.strip().lower().replace("_", " ").split())
+
+
+def _is_day_first_datetime_column(name: str) -> bool:
+    return "heure" in _normalize_column(name)
 
 
 __all__ = ["NormalizedTrade", "import_nt8_csv"]

@@ -50,6 +50,42 @@ def test_import_nt8_csv_accepts_semicolon_and_aliases(tmp_path) -> None:
     assert trades[0].quantity == 1.0
 
 
+def test_import_nt8_csv_accepts_french_nt8_export_columns(tmp_path) -> None:
+    path = tmp_path / "nt8_french.csv"
+    path.write_text(
+        "Instrument;Qté;Prix d’entrée;Prix de sortie;Heure d’entrée;Heure de sortie;Profit;MAE;MFE\n"
+        "NQ 03-26;2;25409,50;25395,50;15/12/2025 20:11:06;15/12/2025 20:12:03;-560,00 $;610,00 $;10,00 $\n",
+        encoding="utf-8",
+    )
+
+    trades = import_nt8_csv(path)
+
+    assert len(trades) == 1
+    assert trades[0].entry_time == datetime(2025, 12, 15, 20, 11, 6)
+    assert trades[0].exit_time == datetime(2025, 12, 15, 20, 12, 3)
+    assert trades[0].instrument == "NQ 03-26"
+    assert trades[0].quantity == 2.0
+    assert trades[0].entry_price == 25409.50
+    assert trades[0].exit_price == 25395.50
+    assert trades[0].pnl == -560.0
+    assert trades[0].mae == 610.0
+    assert trades[0].mfe == 10.0
+
+
+def test_import_nt8_csv_uses_day_first_dates_for_french_time_columns(tmp_path) -> None:
+    path = tmp_path / "nt8_french_ambiguous_date.csv"
+    path.write_text(
+        "Heure d’entrée;Heure de sortie;Profit\n"
+        "08/01/2026 20:11:06;08/01/2026 20:12:03;85,00 $\n",
+        encoding="utf-8",
+    )
+
+    trades = import_nt8_csv(path)
+
+    assert trades[0].entry_time == datetime(2026, 1, 8, 20, 11, 6)
+    assert trades[0].exit_time == datetime(2026, 1, 8, 20, 12, 3)
+
+
 def test_import_nt8_csv_requires_datetime_and_pnl(tmp_path) -> None:
     path = tmp_path / "invalid.csv"
     path.write_text("Instrument,Qty\nNQ,1\n", encoding="utf-8")
