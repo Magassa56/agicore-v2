@@ -173,8 +173,11 @@ class TestPatterns:
             tick_interval_s=0.01, poll_resolution_s=0.005, max_ticks=n,
         )
         feed.start()
-        time.sleep(0.5)
+        deadline = time.monotonic() + 2.0
+        while feed.published_count < n and time.monotonic() < deadline:
+            time.sleep(0.01)
         feed.stop()
+        assert feed.published_count == n
         return prices
 
     def test_constant_pattern(self) -> None:
