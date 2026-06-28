@@ -53,6 +53,8 @@ def test_ci_workflow_exists_and_runs_required_checks():
     assert "pull_request" in workflow
     assert "branches:" in workflow
     assert "- main" in workflow
+    assert "python -m pip install --upgrade pip" in workflow
+    assert "python -m pip install -r requirements-dev.txt" in workflow
     assert "python -m pytest tests/unit/ -q" in workflow
     assert "git diff --check" in workflow
     assert "secrets." not in workflow
