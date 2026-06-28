@@ -1,0 +1,115 @@
+name: AGIcore Phase
+description: Standard issue template for an AGIcore delivery phase.
+title: "[AGIcore Phase] <phase name>"
+labels:
+  - agicore
+  - phase
+body:
+  - type: input
+    id: phase_name
+    attributes:
+      label: Phase name
+      description: Exact phase name.
+      placeholder: AGICORE DELIVERY FACTORY V1
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Concrete outcome expected from this phase.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Relevant project context and previous validated phase.
+    validations:
+      required: true
+  - type: textarea
+    id: allowed_files
+    attributes:
+      label: Allowed files
+      description: Files or directories Codex is allowed to create or modify.
+    validations:
+      required: true
+  - type: textarea
+    id: forbidden_files
+    attributes:
+      label: Forbidden files
+      description: Files or directories that must not be touched.
+      value: |
+        data/
+        .env
+    validations:
+      required: true
+  - type: textarea
+    id: required_functions_or_deliverables
+    attributes:
+      label: Required functions or deliverables
+      description: Required functions, documents, scripts, tests or outputs.
+    validations:
+      required: true
+  - type: textarea
+    id: safety_constraints
+    attributes:
+      label: Safety constraints
+      description: Security and offline constraints.
+      value: |
+        - No real broker
+        - No real Alpaca
+        - No API key
+        - No HTTP
+        - No websocket
+        - No socket
+        - No external API
+        - No real order
+        - No real account access
+        - No real position mutation
+        - Do not touch data/
+    validations:
+      required: true
+  - type: textarea
+    id: required_tests
+    attributes:
+      label: Required tests
+      description: Commands that must be executed before final report.
+      value: |
+        python -m pytest tests/unit/ -q
+        git diff --check
+        git status --short
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Conditions required for approval.
+    validations:
+      required: true
+  - type: textarea
+    id: stop_condition
+    attributes:
+      label: Stop condition
+      description: When Codex must stop and wait for validation.
+      value: STOP before commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: expected_final_decision
+    attributes:
+      label: Expected final decision
+      options:
+        - VALIDE
+        - A CORRIGER
+        - RISQUE
+    validations:
+      required: true
+  - type: input
+    id: next_phase
+    attributes:
+      label: Next phase
+      description: Explicit next phase, if validated.
+    validations:
+      required: true
