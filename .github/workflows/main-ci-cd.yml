@@ -1,12 +1,13 @@
-name: AGIcore CI/CD Pipeline
+name: AGIcore Manual Cloud Run Deployment
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: Confirm the manual Cloud Run deployment from main
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -14,9 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install Dependencies
@@ -32,13 +33,13 @@ jobs:
     name: Build and Deploy Operator to Cloud Run
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: ${{ inputs.confirm_deploy == true && github.ref == 'refs/heads/main' }}
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: 'Validate Secrets and Variables'
         run: |
           if [ -z "${{ secrets.GCP_SA_KEY || '' }}" ]; then echo "::error::Secret GCP_SA_KEY is not set." && exit 1; fi
@@ -68,13 +69,13 @@ jobs:
     name: Build and Deploy Trader to Cloud Run
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: ${{ inputs.confirm_deploy == true && github.ref == 'refs/heads/main' }}
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: 'Validate Secrets and Variables'
         run: |
           if [ -z "${{ secrets.GCP_SA_KEY || '' }}" ]; then echo "::error::Secret GCP_SA_KEY is not set." && exit 1; fi

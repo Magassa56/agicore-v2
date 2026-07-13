@@ -55,9 +55,22 @@ def test_ci_workflow_exists_and_runs_required_checks():
     assert "- main" in workflow
     assert "python -m pip install --upgrade pip" in workflow
     assert "python -m pip install -r requirements-dev.txt" in workflow
-    assert "python -m pytest tests/unit/ -q" in workflow
+    assert "python -m pip install -e ." in workflow
+    assert "python -m pytest -q" in workflow
+    assert "python -m pytest tests/unit/ -q" not in workflow
     assert "git diff --check" in workflow
     assert "secrets." not in workflow
+
+
+def test_cloud_run_deployment_requires_manual_confirmation_from_main():
+    workflow = _read(".github/workflows/main-ci-cd.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_deploy:" in workflow
+    assert "inputs.confirm_deploy == true" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "\n  push:" not in workflow
+    assert "\n  pull_request:" not in workflow
 
 
 def test_pr_template_contains_security_confirmations():
