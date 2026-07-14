@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "AGIcore-v2 — multi-agent World Model orchestrator"
 requires-python = ">=3.11"
 
+[project.scripts]
+agicore = "agicore.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
