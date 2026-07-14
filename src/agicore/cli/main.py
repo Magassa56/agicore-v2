@@ -16,6 +16,62 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+
+def _default_analysis_output(csv_path: Path) -> Path:
+    return Path("reports") / "local" / f"{csv_path.stem}-analysis.md"
+
+
+def _write_text_atomically(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(path)
+    except OSError:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        finally:
+            raise
+
+
+def _run_trading_analyze(csv_arg: str, output_arg: str | None) -> int:
+    csv_path = Path(csv_arg).resolve()
+    if not csv_path.exists():
+        sys.stderr.write(f"error: CSV file not found: {csv_path}\n")
+        return 2
+    if not csv_path.is_file():
+        sys.stderr.write(f"error: CSV path is not a file: {csv_path}\n")
+        return 2
+
+    try:
+        from agicore.trading.analyze_trades import analyze_trades
+        from agicore.trading.import_nt8_csv import import_nt8_csv
+        from agicore.trading.report import generate_markdown_report
+        from agicore.trading.risk_guard import evaluate_risk
+
+        trades = import_nt8_csv(csv_path)
+        if not trades:
+            sys.stderr.write(f"error: CSV contains no usable trades: {csv_path}\n")
+            return 2
+        stats = analyze_trades(trades)
+        risk = evaluate_risk(stats)
+        report = generate_markdown_report(stats, risk)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"error: unable to analyze CSV: {exc}\n")
+        return 2
+
+    output_path = Path(output_arg).resolve() if output_arg else _default_analysis_output(csv_path)
+    try:
+        _write_text_atomically(output_path, report)
+    except OSError as exc:
+        sys.stderr.write(f"error: unable to write report: {exc}\n")
+        return 2
+
+    sys.stdout.write(f"Trading analysis report written to: {output_path}\n")
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -45,6 +101,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dryrun",
         action="store_true",
         help="Start in dry-run mode (no side effects).",
+    )
+
+    trading_p = sub.add_parser("trading", help="Offline trading utilities.")
+    trading_sub = trading_p.add_subparsers(dest="trading_command", required=True)
+    analyze_p = trading_sub.add_parser(
+        "analyze",
+        help="Analyze an explicit local NinjaTrader CSV export offline.",
+    )
+    analyze_p.add_argument("csv", help="Path to the local NinjaTrader CSV export.")
+    analyze_p.add_argument(
+        "--output",
+        help=(
+            "Markdown report path. Defaults to "
+            "reports/local/<csv-name>-analysis.md."
+        ),
     )
 
     return parser
@@ -93,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             mgr.stop()
         return 0
+
+    if args.command == "trading" and args.trading_command == "analyze":
+        return _run_trading_analyze(args.csv, args.output)
 
     parser.print_help()
     return 1

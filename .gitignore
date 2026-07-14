@@ -49,3 +49,7 @@ __pycache__/
 
 # Python packaging artifacts
 *.egg-info/
+
+# Local data and generated trading reports
+/data/
+/reports/local/

@@ -1,8 +1,25 @@
 # AGIcore-v2: A Multi-Agent System for Autonomous Operations
 
+## AGIcore Trading Offline  demarrage rapide
+
+Analyse locale et offline d'un export CSV NinjaTrader, sans broker, sans ordre reel,
+sans reseau et sans secret.
+
+```bash
+python -m pip install -e .
+agicore --help
+agicore trading analyze --help
+agicore trading analyze chemin/vers/trades.csv
+agicore trading analyze chemin/vers/trades.csv --output rapport.md
+```
+
+Sans `--output`, le rapport Markdown est ecrit dans
+`reports/local/<nom-du-csv>-analysis.md`. Les rapports locaux sous
+`reports/local/` sont ignores par Git.
+
 AGIcore-v2 is a distributed, multi-agent system designed for autonomous task planning, execution, and self-healing. It follows a microservices architecture, where each agent is an independent, containerized service that can be deployed and scaled individually.
 
-This system is built to be deployed on Google Cloud Run, leveraging other cloud-native services like Artifact Registry for container storage and IAM for secure operations.
+Cloud Run deployment is manual and requires explicit human confirmation before execution. The system can leverage cloud-native services like Artifact Registry for container storage and IAM for secure operations when that manual deployment path is approved.
 
 ## Core Concepts
 
@@ -95,7 +112,7 @@ To run the entire test suite:
 
 ## Deployment
 
-The system is designed for automated deployment via the CI/CD pipeline in `.github/workflows/main-ci-cd.yml`.
+Cloud Run deployment is manual and subject to explicit human confirmation. The CI/CD pipeline must not be treated as automatic production deployment approval.
 
 ### Manual Deployment Steps
 
@@ -127,7 +144,7 @@ The system is designed for automated deployment via the CI/CD pipeline in `.gith
       ```
 
 ### CI/CD Pipeline
-The included GitHub Actions workflow automates the **Test -> Build -> Deploy** process on every push to the `main` branch.
+The included GitHub Actions workflow supports validation and packaging. Cloud Run deployment remains manual and subject to explicit human confirmation.
 
 To enable it, you must configure the following secrets in your GitHub repository's settings:
 - `GCP_PROJECT_ID`: Your Google Cloud project ID.
