@@ -50,7 +50,17 @@ def test_heartbeat_periodic_full_pipeline() -> None:
 
         # Capture all bus events
         seen: list[str] = []
-        rt.subscribe("*", lambda ev: seen.append(ev.event_type))
+        observed_two_heartbeats = threading.Event()
+
+        def capture_event(ev) -> None:
+            seen.append(ev.event_type)
+            if (
+                ev.event_type == EVT_HEARTBEAT_TICK
+                and int(ev.payload.get("counter", 0)) >= 2
+            ):
+                observed_two_heartbeats.set()
+
+        rt.subscribe("*", capture_event)
 
         # Producer thread = scheduler; consumer thread = runtime loop
         scheduler = HeartbeatScheduler(
@@ -63,10 +73,16 @@ def test_heartbeat_periodic_full_pipeline() -> None:
 
         consumer.start()
         scheduler.start()
-        time.sleep(0.25)  # ≈ 5–6 ticks
-        scheduler.stop()
-        rt.stop()
-        consumer.join(timeout=5.0)
+        try:
+            assert observed_two_heartbeats.wait(timeout=5.0)
+            enqueue_deadline = time.monotonic() + 1.0
+            while scheduler.enqueued_count < 3 and time.monotonic() < enqueue_deadline:
+                time.sleep(0.005)
+            assert scheduler.enqueued_count >= 3, scheduler.enqueued_count
+        finally:
+            scheduler.stop()
+            rt.stop()
+            consumer.join(timeout=5.0)
 
         # Le consumer doit avoir terminé proprement
         assert not consumer.is_alive(), "runtime consumer did not exit"

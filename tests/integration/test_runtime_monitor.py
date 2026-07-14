@@ -114,16 +114,27 @@ def test_monitor_observes_heartbeat() -> None:
         )
 
         scheduler = HeartbeatScheduler(rt.queue, interval_s=0.04, poll_resolution_s=0.01)
+        observed_two_heartbeats = threading.Event()
+
+        def mark_second_heartbeat(ev) -> None:
+            if int(ev.payload.get("counter", 0)) >= 2:
+                observed_two_heartbeats.set()
+
+        rt.subscribe(EVT_HEARTBEAT_TICK, mark_second_heartbeat)
         consumer = threading.Thread(
             target=lambda: rt.run_forever(max_iterations=200),
             name="runtime-consumer",
         )
         consumer.start()
         scheduler.start()
-        time.sleep(0.2)
-        scheduler.stop()
-        rt.stop()
-        consumer.join(timeout=5.0)
+        try:
+            assert observed_two_heartbeats.wait(timeout=5.0)
+        finally:
+            scheduler.stop()
+            rt.stop()
+            consumer.join(timeout=5.0)
+
+        assert not consumer.is_alive(), "runtime consumer did not exit"
 
         s = monitor.get_runtime_status()
         assert s["last_heartbeat_counter"] is not None
