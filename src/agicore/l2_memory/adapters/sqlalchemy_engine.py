@@ -6,6 +6,7 @@ in-memory SQLite. Production swaps to PostgreSQL by changing the URL.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from threading import RLock
 from typing import Iterator
 
 import structlog
@@ -40,10 +41,13 @@ class SqlAlchemyEngine:
     ) -> None:
         connect_args: dict[str, object] = {}
         engine_kwargs: dict[str, object] = {}
+        self._serialize_sessions = False
         if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
             if ":memory:" in url:
                 engine_kwargs["poolclass"] = StaticPool
+                self._serialize_sessions = True
+        self._session_lock = RLock()
         self._engine: Engine = create_engine(
             url, echo=echo, future=future, connect_args=connect_args, **engine_kwargs
         )
@@ -68,7 +72,19 @@ class SqlAlchemyEngine:
 
     @contextmanager
     def session(self) -> Iterator[Session]:
-        """Context manager — commit auto si pas d'exception, rollback sinon."""
+        """Context manager: commit on success, rollback on exception."""
+        if self._serialize_sessions:
+            with self._session_lock:
+                with self._session_context() as s:
+                    yield s
+            return
+
+        with self._session_context() as s:
+            yield s
+
+    @contextmanager
+    def _session_context(self) -> Iterator[Session]:
+        """Create one isolated SQLAlchemy Session for a single unit of work."""
         s = self._sessionmaker()
         try:
             yield s
