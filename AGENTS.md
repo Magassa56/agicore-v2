@@ -1,92 +1,114 @@
-# AGENTS.md — Pipeline d'exécution AGIcore-v2
+# AGENTS.md — Cadre de travail gouverné AGIcore
 
-> Contrat opératoire pour tout agent (humain ou IA) travaillant sur ce repo.
-> S'applique en complément de `CLAUDE.md` (identité système).
+Ce contrat persistant s'applique à toute mission Codex exécutée dans ce dépôt. Il complète `CLAUDE.md`. En cas de doute, protéger les données et demander une décision humaine avant toute action irréversible ou externe.
 
----
+## A. Mission
 
-## Rules
+Codex contribue à transformer AGIcore en produit local, stable, sécurisé, testable et utile avec le minimum de complexité nécessaire.
 
-1. **Travailler sur la feature branch courante uniquement** — jamais sur `main`.
-2. **Ne pas pousser sur `main`** — push uniquement sur `feature/*`.
-3. **Stop après chaque phase** — attendre la validation explicite (`bootstrap OK`, `migration OK`, etc.) avant d'enchaîner.
-4. **Si une erreur survient → corriger avant de continuer.** Pas de phase suivante tant qu'une phase n'est pas verte.
-5. **Aucun changement d'architecture sans validation J'ai.** L'architecture World Model est immuable.
-6. **Aucun secret hardcodé.** `.env` uniquement, jamais committé.
-7. **Tous les chemins doivent être portables** (`$env:USERPROFILE`, `$env:APPDATA`, ou relatifs). Pas de `C:\Users\<nom>\...`.
+## B. Priorités
 
----
+Toujours travailler dans cet ordre :
 
-## Phases
+1. sécurité et données personnelles ;
+2. fonctionnement offline ;
+3. exactitude et déterminisme ;
+4. stabilité ;
+5. valeur utilisateur ;
+6. simplicité ;
+7. tests ;
+8. documentation ;
+9. performance ;
+10. nouvelles fonctionnalités ;
+11. rentabilité.
 
-| # | Phase | Sortie attendue | Stop ? |
-|---|---|---|---|
-| 1 | **BOOTSTRAP** | venv créé, deps installées, `import agicore` fonctionne | Oui — attendre `bootstrap OK` |
-| 2 | **MIGRATION** | Schéma DB initialisé sans erreur runtime | Oui — attendre `migration OK` |
-| 3 | **GIT STATE CHECK** | Sortie de `git log --oneline -5` | Oui — vérification visuelle |
-| 4 | **LOGGING LAYER** | structlog configuré, logs JSON, niveaux info/debug/error, plus aucun `print` | Oui — attendre validation |
-| 5 | **MEMORY L2** | SQLite STM + SQLAlchemy LTM, schémas `events` / `tasks` / `agent_state` | Oui — attendre validation |
-| 6 | **ORCHESTRATOR L4 (minimal)** | reçoit une tâche, route vers logging/memory/bootstrap, retourne un résultat exécutable | Oui — attendre validation |
-| 7 | **TESTS** | pytest passe sur : bootstrap, migration, logging, memory STM insert/retrieve, orchestrator routing | Oui — feu vert final |
+## C. Interdictions absolues
 
----
+Ne jamais :
 
-## Output format
+- modifier, lire, supprimer, ajouter ou versionner `data/` ;
+- lire ou modifier des secrets ;
+- afficher une clé ou un token ;
+- connecter un broker réel ;
+- passer un ordre réel ;
+- accéder à un compte réel ;
+- muter une position réelle ;
+- activer un réseau sans autorisation explicite ;
+- lancer Cloud Run ;
+- publier un package ;
+- créer ou pousser un tag ;
+- fusionner une PR ;
+- pousser directement sur `main` ;
+- réécrire l'historique Git ;
+- supprimer un fichier utilisateur ;
+- contourner ou affaiblir un test ;
+- masquer une erreur ;
+- déclarer une réussite sans preuve.
 
-Après chaque phase, l'agent produit un rapport au format :
+## D. Règles de phase
 
-```
-PHASE       : <numéro et nom>
-STATUS      : OK | FAIL
-ARTIFACTS   : <fichiers créés ou modifiés>
-COMMANDS    : <commandes clés exécutées>
-EVIDENCE    : <extrait de sortie qui prouve le succès>
-NEXT        : STOP — attendre validation
-```
+- Une seule priorité produit par phase.
+- Une seule branche dédiée.
+- Modifications cohérentes et limitées.
+- Trois à cinq fichiers maximum par défaut.
+- Aucun grand refactoring mélangé à une fonctionnalité.
+- Réutiliser les modules existants avant d'en créer de nouveaux.
+- Ne pas créer de module Python uniquement pour valider une checklist documentaire.
+- Les règles de release vivent dans `docs/`, GitHub ou `tools/`, jamais dans le cœur runtime.
+- Ajouter un test de non-régression pour chaque bug corrigé lorsque possible.
+- STOP avant commit sauf autorisation explicite.
+- STOP avant push, PR, fusion, tag, publication ou déploiement selon la mission.
 
-En cas de FAIL :
+## E. Contrôles obligatoires
 
-```
-PHASE       : <numéro>
-STATUS      : FAIL
-ERROR       : <message d'erreur exact>
-ROOT_CAUSE  : <analyse>
-FIX         : <correction proposée ou appliquée>
-RETRY       : <commande pour réessayer>
-```
+Avant modification :
 
----
-
-## Stop conditions
-
-L'agent **doit s'arrêter** dans les cas suivants :
-
-- Fin d'une phase (succès ou échec).
-- Détection d'un changement d'architecture non documenté.
-- Tentative de push sur `main`.
-- Working tree dirty avant une opération git.
-- Erreur d'import du package `agicore` après bootstrap.
-- Tests rouges après implémentation d'une phase.
-- Toute action listée dans `CLAUDE.md` § 8 comme "Confirmation explicite requise" (push main, déploiement, suppression de fichiers, modification `.env`/secrets, dépenses cloud).
-
-L'agent **ne reprend** que sur instruction explicite de J'ai.
-
----
-
-## Format de réponse pour les phases
-
-Aligné avec le format obligatoire de `CLAUDE.md` § 9 :
-
-```
-Layer concerné          : Lx (ou "transverse")
-Modules concernés       : ...
-Actions effectuées      : ...
-Tests exécutés          : ...
-Fichiers créés/modifiés : ...
-Risques éventuels       : ...
-Prochaine étape suggérée : STOP — attendre <signal>
+```text
+git status --short
+git diff --check
 ```
 
----
+Après modification :
 
-*Dernière mise à jour : 2026-05-08*
+- exécuter les tests ciblés ;
+- exécuter les tests d'intégration concernés ;
+- exécuter la suite complète lorsque raisonnable ;
+- exécuter `git diff --check` ;
+- exécuter `git status --short` ;
+- exécuter `git diff --name-only` ;
+- vérifier qu'aucun fichier hors périmètre n'est modifié.
+
+Toute erreur doit être corrigée dans le périmètre avant de poursuivre. Une erreur non corrigeable, un fichier suivi modifié sans explication ou une violation de sécurité impose un STOP avec preuves.
+
+## F. Rapport obligatoire
+
+Toujours terminer exactement avec les rubriques suivantes, dans cet ordre :
+
+```text
+PHASE       : <nom de la phase>
+STATUS      : OK ou BLOCKED
+NEXT        : <arrêt ou action soumise à autorisation>
+
+Résultat
+État du produit
+Modifications
+Tests
+Sécurité
+Valeur utilisateur et rentabilité
+Risques restants
+Décisions demandées
+Prochaine étape recommandée
+Git status
+```
+
+Chaque réussite annoncée doit être étayée par une commande, un test ou un diff vérifiable.
+
+## G. Politique Git
+
+- `main` reste protégée.
+- Utiliser une branche dédiée par phase.
+- Créer un commit seulement après validation humaine.
+- Garder les PR courtes et limitées à leur objectif.
+- Exiger une CI verte.
+- Fusionner uniquement après autorisation de l'AGIcore Manager.
+- Supprimer les branches fusionnées seulement après vérification.
