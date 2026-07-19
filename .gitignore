@@ -53,3 +53,11 @@ __pycache__/
 # Local data and generated trading reports
 /data/
 /reports/local/
+/reports/private/
+*.local.md
+*.local.json
+*trader_profile*.md
+
+# Public, fully fictional report fixtures remain versionable
+!/reports/examples/
+!/reports/examples/**
