@@ -37,7 +37,20 @@ def _write_text_atomically(path: Path, content: str) -> None:
             raise
 
 
-def _run_trading_analyze(csv_arg: str, output_arg: str | None) -> int:
+def _run_trading_analyze(
+    csv_arg: str, output_arg: str | None, output_dir_arg: str | None
+) -> int:
+    if output_dir_arg:
+        try:
+            from agicore.trading.analysis_run import AnalysisRunError, create_analysis_run
+
+            bundle_dir = create_analysis_run(csv_arg, output_dir_arg)
+        except AnalysisRunError as exc:
+            sys.stderr.write(f"error: {exc}\n")
+            return 2
+        sys.stdout.write(f"Trading analysis bundle written to: {bundle_dir}\n")
+        return 0
+
     csv_path = Path(csv_arg).resolve()
     if not csv_path.exists():
         sys.stderr.write(f"error: CSV file not found: {csv_path}\n")
@@ -110,12 +123,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Analyze an explicit local NinjaTrader CSV export offline.",
     )
     analyze_p.add_argument("csv", help="Path to the local NinjaTrader CSV export.")
-    analyze_p.add_argument(
+    output_group = analyze_p.add_mutually_exclusive_group()
+    output_group.add_argument(
         "--output",
         help=(
             "Markdown report path. Defaults to "
             "reports/local/<csv-name>-analysis.md."
         ),
+    )
+    output_group.add_argument(
+        "--output-dir",
+        help="Directory in which to create the complete local analysis bundle.",
     )
 
     return parser
@@ -166,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "trading" and args.trading_command == "analyze":
-        return _run_trading_analyze(args.csv, args.output)
+        return _run_trading_analyze(args.csv, args.output, args.output_dir)
 
     parser.print_help()
     return 1
