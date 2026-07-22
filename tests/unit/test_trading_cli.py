@@ -88,3 +88,42 @@ def test_trading_analyze_invalid_csv_does_not_use_data_directory(
     assert "Missing required" in captured.err
     assert not output_path.exists()
     assert not (tmp_path / "reports").exists()
+
+
+def test_trading_analyze_output_dir_creates_bundle(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    csv_path = tmp_path / "trades.csv"
+    csv_path.write_text(
+        "Entry time,Exit time,Profit\n"
+        "2026-07-01 09:30:00,2026-07-01 09:31:00,10\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "bundle"
+
+    code = main(["trading", "analyze", str(csv_path), "--output-dir", str(output_dir)])
+
+    assert code == 0
+    assert {path.name for path in output_dir.iterdir()} == {
+        "manifest.json",
+        "report.md",
+        "summary.json",
+    }
+    assert str(output_dir) in capsys.readouterr().out
+
+
+def test_trading_analyze_output_options_are_mutually_exclusive(tmp_path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "trading",
+                "analyze",
+                str(tmp_path / "trades.csv"),
+                "--output",
+                str(tmp_path / "report.md"),
+                "--output-dir",
+                str(tmp_path / "bundle"),
+            ]
+        )
+
+    assert exc.value.code == 2
