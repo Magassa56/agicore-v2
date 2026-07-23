@@ -87,6 +87,28 @@ def _run_trading_analyze(
     return 0
 
 
+def _run_trading_simulate_risk(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.risk_rule_simulator import (
+            RiskRuleConfig,
+            RiskSimulationError,
+            create_risk_rule_simulation,
+        )
+
+        config = RiskRuleConfig(
+            daily_loss_limit=args.daily_loss_limit,
+            max_consecutive_losses=args.max_consecutive_losses,
+            max_trades_per_day=args.max_trades_per_day,
+            forbidden_hours=tuple(args.forbid_hour or []),
+        )
+        bundle_dir = create_risk_rule_simulation(args.csv, args.output_dir, config)
+    except (RiskSimulationError, ValueError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 2
+    sys.stdout.write(f"Historical risk simulation bundle written to: {bundle_dir}\n")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agicore",
@@ -131,6 +153,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "reports/local/<csv-name>-analysis.md."
         ),
     )
+
+    simulate_p = trading_sub.add_parser(
+        "simulate-risk", help="Simulate explicit offline risk rules on a local CSV export."
+    )
+    simulate_p.add_argument("csv", help="Path to the local NinjaTrader CSV export.")
+    simulate_p.add_argument("--output-dir", required=True, help="New directory for the simulation bundle.")
+    simulate_p.add_argument("--daily-loss-limit", type=float, default=300.0)
+    simulate_p.add_argument("--max-consecutive-losses", type=int, default=3)
+    simulate_p.add_argument("--max-trades-per-day", type=int, default=10)
+    simulate_p.add_argument("--forbid-hour", type=int, action="append", default=[])
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -185,6 +217,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "trading" and args.trading_command == "analyze":
         return _run_trading_analyze(args.csv, args.output, args.output_dir)
+
+    if args.command == "trading" and args.trading_command == "simulate-risk":
+        return _run_trading_simulate_risk(args)
 
     parser.print_help()
     return 1

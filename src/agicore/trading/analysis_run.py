@@ -1,15 +1,12 @@
 """Deterministic local bundle generation for explicit NinjaTrader CSV analysis."""
 from __future__ import annotations
 
-import hashlib
-import json
-import shutil
-import tempfile
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .analyze_trades import TradeStats, analyze_trades
 from .import_nt8_csv import import_nt8_csv
+from .local_bundle import LocalBundleError, deterministic_json, publish_local_bundle, sha256_file
 from .report import generate_markdown_report
 from .risk_guard import RiskGuardResult, evaluate_risk
 
@@ -31,7 +28,7 @@ def create_analysis_run(csv_path: str | Path, output_dir: str | Path) -> Path:
         raise AnalysisRunError(f"Output directory already exists: {final_dir}")
 
     try:
-        input_sha256 = _sha256_file(input_path)
+        input_sha256 = sha256_file(input_path)
         trades = import_nt8_csv(input_path)
         if not trades:
             raise AnalysisRunError("CSV contains no usable trades")
@@ -43,27 +40,10 @@ def create_analysis_run(csv_path: str | Path, output_dir: str | Path) -> Path:
     except (OSError, ValueError) as exc:
         raise AnalysisRunError(f"Unable to analyze CSV: {exc}") from exc
 
-    temp_dir: Path | None = None
     try:
-        final_dir.parent.mkdir(parents=True, exist_ok=True)
-        if final_dir.exists():
-            raise AnalysisRunError(f"Output directory already exists: {final_dir}")
-        temp_dir = Path(
-            tempfile.mkdtemp(prefix=f".{final_dir.name}.tmp-", dir=final_dir.parent)
-        )
-        for filename, content in files.items():
-            (temp_dir / filename).write_text(content, encoding="utf-8", newline="\n")
-        if final_dir.exists():
-            raise AnalysisRunError(f"Output directory already exists: {final_dir}")
-        temp_dir.rename(final_dir)
-        return final_dir
-    except AnalysisRunError:
-        raise
-    except OSError as exc:
-        raise AnalysisRunError(f"Unable to publish analysis bundle: {exc}") from exc
-    finally:
-        if temp_dir is not None and temp_dir.exists():
-            shutil.rmtree(temp_dir)
+        return publish_local_bundle(final_dir, files)
+    except LocalBundleError as exc:
+        raise AnalysisRunError(str(exc)) from exc
 
 
 def _validate_input_file(path: Path) -> None:
@@ -71,14 +51,6 @@ def _validate_input_file(path: Path) -> None:
         raise AnalysisRunError(f"CSV file not found: {path}")
     if not path.is_file():
         raise AnalysisRunError(f"CSV path is not a file: {path}")
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _bundle_files(
@@ -89,8 +61,8 @@ def _bundle_files(
 ) -> dict[str, str]:
     return {
         "report.md": generate_markdown_report(stats, risk),
-        "summary.json": _json_text(_summary(stats, risk)),
-        "manifest.json": _json_text(
+        "summary.json": deterministic_json(_summary(stats, risk)),
+        "manifest.json": deterministic_json(
             {
                 "schema_version": "1.0",
                 "run_id": f"analysis-{input_sha256[:12]}",
@@ -125,10 +97,6 @@ def _summary(stats: TradeStats, risk: RiskGuardResult) -> dict[str, object]:
         "worst_days": risk.worst_days,
         "worst_hours": risk.worst_hours,
     }
-
-
-def _json_text(value: dict[str, object]) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def _agicore_version() -> str:
