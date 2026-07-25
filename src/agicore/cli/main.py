@@ -109,6 +109,26 @@ def _run_trading_simulate_risk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_trading_replay_market(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.market_replay import (
+            MarketReplayConfig,
+            MarketReplayError,
+            create_market_replay,
+        )
+
+        bundle_dir = create_market_replay(
+            args.csv,
+            args.output_dir,
+            MarketReplayConfig(fast_ema=args.fast_ema, slow_ema=args.slow_ema),
+        )
+    except (MarketReplayError, ValueError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 2
+    sys.stdout.write(f"Historical market replay bundle written to: {bundle_dir}\n")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agicore",
@@ -163,6 +183,13 @@ def _build_parser() -> argparse.ArgumentParser:
     simulate_p.add_argument("--max-consecutive-losses", type=int, default=3)
     simulate_p.add_argument("--max-trades-per-day", type=int, default=10)
     simulate_p.add_argument("--forbid-hour", type=int, action="append", default=[])
+    replay_p = trading_sub.add_parser(
+        "replay-market", help="Replay an explicit local OHLCV CSV with EMA crossover."
+    )
+    replay_p.add_argument("csv", help="Path to the local OHLCV CSV file.")
+    replay_p.add_argument("--output-dir", required=True, help="New directory for the replay bundle.")
+    replay_p.add_argument("--fast-ema", type=int, default=19)
+    replay_p.add_argument("--slow-ema", type=int, default=50)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -220,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "trading" and args.trading_command == "simulate-risk":
         return _run_trading_simulate_risk(args)
+
+    if args.command == "trading" and args.trading_command == "replay-market":
+        return _run_trading_replay_market(args)
 
     parser.print_help()
     return 1
