@@ -120,7 +120,11 @@ def _run_trading_replay_market(args: argparse.Namespace) -> int:
         bundle_dir = create_market_replay(
             args.csv,
             args.output_dir,
-            MarketReplayConfig(fast_ema=args.fast_ema, slow_ema=args.slow_ema),
+            MarketReplayConfig(
+                fast_ema=args.fast_ema,
+                slow_ema=args.slow_ema,
+                round_trip_cost_points=args.round_trip_cost_points,
+            ),
         )
     except (MarketReplayError, ValueError) as exc:
         sys.stderr.write(f"error: {exc}\n")
@@ -190,6 +194,7 @@ def _build_parser() -> argparse.ArgumentParser:
     replay_p.add_argument("--output-dir", required=True, help="New directory for the replay bundle.")
     replay_p.add_argument("--fast-ema", type=int, default=19)
     replay_p.add_argument("--slow-ema", type=int, default=50)
+    replay_p.add_argument("--round-trip-cost-points", type=float, default=0.0)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
