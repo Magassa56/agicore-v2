@@ -60,6 +60,33 @@ def test_long_short_reversals_pnl_and_closed_drawdown(tmp_path) -> None:
     assert "max_closed_equity_drawdown_points" in summary["performance"]
 
 
+def test_round_trip_cost_is_applied_once_without_changing_gross_prices(tmp_path) -> None:
+    path = tmp_path / "bars.csv"
+    _csv(path, [10, 10, 10, 20, 20, 5, 5, 25, 25])
+    config = MarketReplayConfig(fast_ema=2, slow_ema=3, round_trip_cost_points=0.5)
+    result = replay_ema_crossover(load_ohlcv_csv(path), config)
+    assert all(trade.cost_points == 0.5 for trade in result.trades)
+    assert all(trade.net_pnl_points == trade.pnl_points - 0.5 for trade in result.trades)
+    bundle = create_market_replay(path, tmp_path / "costs", config)
+    summary = json.loads((bundle / "summary.json").read_text(encoding="utf-8"))["performance"]
+    ledger = json.loads((bundle / "trades.json").read_text(encoding="utf-8"))
+    assert summary["total_cost_points"] == pytest.approx(len(ledger) * 0.5)
+    assert summary["net_total_pnl_points"] == pytest.approx(summary["gross_total_pnl_points"] - summary["total_cost_points"])
+    assert all(item["gross_pnl_points"] == item["pnl_points"] for item in ledger)
+
+
+def test_cost_changes_run_id_and_negative_cost_is_rejected(tmp_path, capsys) -> None:
+    path = tmp_path / "bars.csv"
+    _csv(path, [10] * 49 + [20, 20])
+    free = create_market_replay(path, tmp_path / "free", MarketReplayConfig())
+    costed = create_market_replay(path, tmp_path / "costed", MarketReplayConfig(round_trip_cost_points=0.5))
+    free_manifest = json.loads((free / "manifest.json").read_text(encoding="utf-8"))
+    costed_manifest = json.loads((costed / "manifest.json").read_text(encoding="utf-8"))
+    assert free_manifest["run_id"] != costed_manifest["run_id"]
+    assert main(["trading", "replay-market", str(path), "--output-dir", str(tmp_path / "bad"), "--round-trip-cost-points", "-0.1"]) == 2
+    assert "greater than or equal" in capsys.readouterr().err
+
+
 def test_bundle_determinism_privacy_conflict_and_cli(tmp_path, capsys) -> None:
     path = tmp_path / "bars.csv"
     _csv(path, [10] * 49 + [20, 20])

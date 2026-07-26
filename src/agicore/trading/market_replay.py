@@ -17,6 +17,7 @@ _WARNINGS = [
     "no proof of future profitability",
     "no commissions or slippage",
     "results expressed in points, not currency",
+    "round-trip cost is user-provided and may not match broker or real execution conditions",
 ]
 
 
@@ -42,6 +43,7 @@ class MarketReplayConfig:
 
     fast_ema: int = 19
     slow_ema: int = 50
+    round_trip_cost_points: float = 0.0
 
     def __post_init__(self) -> None:
         if self.fast_ema < 1:
@@ -50,6 +52,8 @@ class MarketReplayConfig:
             raise ValueError("slow_ema must be at least 2")
         if self.fast_ema >= self.slow_ema:
             raise ValueError("fast_ema must be less than slow_ema")
+        if not math.isfinite(self.round_trip_cost_points) or self.round_trip_cost_points < 0:
+            raise ValueError("round_trip_cost_points must be greater than or equal to 0")
 
 
 @dataclass(frozen=True)
@@ -64,10 +68,21 @@ class ReplayTrade:
     entry_bar_index: int
     exit_bar_index: int
     exit_reason: str
+    cost_points: float = 0.0
 
     @property
     def pnl_points(self) -> float:
         return self.exit_price - self.entry_price if self.side == "LONG" else self.entry_price - self.exit_price
+
+    @property
+    def gross_pnl_points(self) -> float:
+        """Return the price-only PnL retained for compatibility."""
+        return self.pnl_points
+
+    @property
+    def net_pnl_points(self) -> float:
+        """Return gross points minus the explicit round-trip cost."""
+        return self.gross_pnl_points - self.cost_points
 
 
 @dataclass(frozen=True)
@@ -138,7 +153,7 @@ def replay_ema_crossover(bars: list[OHLCVBar], config: MarketReplayConfig) -> Ma
     for index, bar in enumerate(ordered):
         if pending_side is not None:
             if position is not None:
-                trades.append(_close_trade(position, bar, index, "SIGNAL_REVERSAL"))
+                trades.append(_close_trade(position, bar, index, "SIGNAL_REVERSAL", cost=config.round_trip_cost_points))
             position = (pending_side, bar.timestamp, bar.open, index)
             pending_side = None
 
@@ -151,7 +166,7 @@ def replay_ema_crossover(bars: list[OHLCVBar], config: MarketReplayConfig) -> Ma
 
     if position is not None:
         last_index = len(ordered) - 1
-        trades.append(_close_trade(position, ordered[-1], last_index, "END_OF_DATA", price=ordered[-1].close))
+        trades.append(_close_trade(position, ordered[-1], last_index, "END_OF_DATA", price=ordered[-1].close, cost=config.round_trip_cost_points))
     return MarketReplayResult(ordered, config, tuple(trades))
 
 
@@ -218,9 +233,10 @@ def _close_trade(
     reason: str,
     *,
     price: float | None = None,
+    cost: float = 0.0,
 ) -> ReplayTrade:
     side, entry_timestamp, entry_price, entry_index = position
-    return ReplayTrade(side, entry_timestamp, entry_price, bar.timestamp, bar.open if price is None else price, entry_index, index, reason)
+    return ReplayTrade(side, entry_timestamp, entry_price, bar.timestamp, bar.open if price is None else price, entry_index, index, reason, cost)
 
 
 def _bundle_files(input_filename: str, input_sha256: str, result: MarketReplayResult) -> dict[str, str]:
@@ -247,28 +263,27 @@ def _bundle_files(input_filename: str, input_sha256: str, result: MarketReplayRe
 
 
 def _summary(result: MarketReplayResult) -> dict[str, object]:
-    pnls = [trade.pnl_points for trade in result.trades]
+    pnls = [trade.gross_pnl_points for trade in result.trades]
+    net_pnls = [trade.net_pnl_points for trade in result.trades]
     wins = [pnl for pnl in pnls if pnl > 0]
     losses = [pnl for pnl in pnls if pnl < 0]
     gross_profit = sum(wins)
     gross_loss = sum(losses)
-    equity = 0.0
-    peak = 0.0
-    drawdown = 0.0
-    for pnl in pnls:
-        equity += pnl
-        peak = max(peak, equity)
-        drawdown = max(drawdown, peak - equity)
+    net_profit = sum(pnl for pnl in net_pnls if pnl > 0)
+    net_loss = sum(pnl for pnl in net_pnls if pnl < 0)
+    gross_drawdown = _closed_equity_drawdown(pnls)
+    net_drawdown = _closed_equity_drawdown(net_pnls)
+    total_cost = sum(trade.cost_points for trade in result.trades)
     return {
         "schema_version": "1.0",
-        "strategy": {"name": "EMA_CROSSOVER", "fast_ema": result.config.fast_ema, "slow_ema": result.config.slow_ema, "execution": "next_bar_open", "position_size": 1},
+        "strategy": {"name": "EMA_CROSSOVER", "fast_ema": result.config.fast_ema, "slow_ema": result.config.slow_ema, "execution": "next_bar_open", "position_size": 1, "round_trip_cost_points": result.config.round_trip_cost_points},
         "market_data": {"bar_count": len(result.bars), "first_timestamp": result.bars[0].timestamp.isoformat(), "last_timestamp": result.bars[-1].timestamp.isoformat()},
-        "performance": {"total_trades": len(pnls), "winning_trades": len(wins), "losing_trades": len(losses), "win_rate": len(wins) / len(pnls) if pnls else 0.0, "total_pnl_points": sum(pnls), "average_trade_points": sum(pnls) / len(pnls) if pnls else 0.0, "largest_gain_points": max(pnls, default=0.0), "largest_loss_points": min(pnls, default=0.0), "gross_profit_points": gross_profit, "gross_loss_points": gross_loss, "profit_factor": gross_profit / abs(gross_loss) if gross_loss else None, "max_closed_equity_drawdown_points": drawdown},
+        "performance": {"total_trades": len(pnls), "winning_trades": len(wins), "losing_trades": len(losses), "win_rate": len(wins) / len(pnls) if pnls else 0.0, "total_pnl_points": sum(pnls), "average_trade_points": sum(pnls) / len(pnls) if pnls else 0.0, "largest_gain_points": max(pnls, default=0.0), "largest_loss_points": min(pnls, default=0.0), "gross_profit_points": gross_profit, "gross_loss_points": gross_loss, "profit_factor": gross_profit / abs(gross_loss) if gross_loss else None, "max_closed_equity_drawdown_points": gross_drawdown, "breakeven_trades": sum(pnl == 0 for pnl in net_pnls), "gross_total_pnl_points": sum(pnls), "total_cost_points": total_cost, "net_total_pnl_points": sum(net_pnls), "gross_average_trade_points": sum(pnls) / len(pnls) if pnls else 0.0, "net_average_trade_points": sum(net_pnls) / len(net_pnls) if net_pnls else 0.0, "gross_profit_factor": gross_profit / abs(gross_loss) if gross_loss else None, "net_profit_factor": net_profit / abs(net_loss) if net_loss else None, "gross_closed_equity_drawdown_points": gross_drawdown, "net_closed_equity_drawdown_points": net_drawdown},
     }
 
 
 def _trade_data(index: int, trade: ReplayTrade) -> dict[str, object]:
-    return {"trade_index": index, "side": trade.side, "entry_timestamp": trade.entry_timestamp.isoformat(), "entry_price": trade.entry_price, "exit_timestamp": trade.exit_timestamp.isoformat(), "exit_price": trade.exit_price, "pnl_points": trade.pnl_points, "entry_bar_index": trade.entry_bar_index, "exit_bar_index": trade.exit_bar_index, "exit_reason": trade.exit_reason}
+    return {"trade_index": index, "side": trade.side, "entry_timestamp": trade.entry_timestamp.isoformat(), "entry_price": trade.entry_price, "exit_timestamp": trade.exit_timestamp.isoformat(), "exit_price": trade.exit_price, "pnl_points": trade.pnl_points, "gross_pnl_points": trade.gross_pnl_points, "cost_points": trade.cost_points, "net_pnl_points": trade.net_pnl_points, "entry_bar_index": trade.entry_bar_index, "exit_bar_index": trade.exit_bar_index, "exit_reason": trade.exit_reason}
 
 
 def _report(input_filename: str, summary: dict[str, object], trades: list[dict[str, object]]) -> str:
@@ -280,6 +295,8 @@ def _report(input_filename: str, summary: dict[str, object], trades: list[dict[s
     worst = sorted(trades, key=lambda trade: float(trade["pnl_points"]))[:5]
     profit_factor = performance["profit_factor"]
     profit_factor_text = "n/a" if profit_factor is None else f"{profit_factor:.2f}"
+    net_profit_factor = performance["net_profit_factor"]
+    net_profit_factor_text = "n/a" if net_profit_factor is None else f"{net_profit_factor:.2f}"
     best_lines = [_trade_line(trade) for trade in best] or ["- No trades"]
     worst_lines = [_trade_line(trade) for trade in worst] or ["- No trades"]
     lines = [
@@ -303,9 +320,17 @@ def _report(input_filename: str, summary: dict[str, object], trades: list[dict[s
         "",
         f"- Total trades: {performance['total_trades']}",
         f"- Total PnL points: {performance['total_pnl_points']:.2f}",
+        f"- Gross PnL points: {performance['gross_total_pnl_points']:.2f}",
+        f"- Round-trip cost per trade: {strategy['round_trip_cost_points']:.2f}",
+        f"- Total cost points: {performance['total_cost_points']:.2f}",
+        f"- Net PnL points: {performance['net_total_pnl_points']:.2f}",
         f"- Win rate: {performance['win_rate']:.2%}",
         f"- Profit factor: {profit_factor_text}",
+        f"- Gross profit factor: {profit_factor_text}",
+        f"- Net profit factor: {net_profit_factor_text}",
         f"- Closed equity drawdown points: {performance['max_closed_equity_drawdown_points']:.2f}",
+        f"- Gross closed equity drawdown points: {performance['gross_closed_equity_drawdown_points']:.2f}",
+        f"- Net closed equity drawdown points: {performance['net_closed_equity_drawdown_points']:.2f}",
         "",
         "## Five Best Trades",
         "",
@@ -325,6 +350,17 @@ def _report(input_filename: str, summary: dict[str, object], trades: list[dict[s
 
 def _trade_line(trade: dict[str, object]) -> str:
     return f"- #{trade['trade_index']} {trade['side']}: {trade['pnl_points']:.2f} points"
+
+
+def _closed_equity_drawdown(pnls: list[float]) -> float:
+    equity = 0.0
+    peak = 0.0
+    drawdown = 0.0
+    for pnl in pnls:
+        equity += pnl
+        peak = max(peak, equity)
+        drawdown = max(drawdown, peak - equity)
+    return drawdown
 
 
 def _agicore_version() -> str:
