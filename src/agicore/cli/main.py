@@ -133,6 +133,19 @@ def _run_trading_replay_market(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_trading_diagnose_replay(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.market_replay import MarketReplayConfig
+        from agicore.trading.replay_diagnostics import ReplayDiagnosticsConfig, ReplayDiagnosticsError, create_replay_diagnostics
+
+        bundle_dir = create_replay_diagnostics(args.csv, args.output_dir, MarketReplayConfig(args.fast_ema, args.slow_ema, args.round_trip_cost_points), ReplayDiagnosticsConfig(args.rolling_window_trades))
+    except (ReplayDiagnosticsError, ValueError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 2
+    sys.stdout.write(f"Replay diagnostics bundle written to: {bundle_dir}\n")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agicore",
@@ -195,6 +208,13 @@ def _build_parser() -> argparse.ArgumentParser:
     replay_p.add_argument("--fast-ema", type=int, default=19)
     replay_p.add_argument("--slow-ema", type=int, default=50)
     replay_p.add_argument("--round-trip-cost-points", type=float, default=0.0)
+    diagnose_p = trading_sub.add_parser("diagnose-replay", help="Describe an explicit local EMA replay by regime and period.")
+    diagnose_p.add_argument("csv", help="Path to the local OHLCV CSV file.")
+    diagnose_p.add_argument("--output-dir", required=True)
+    diagnose_p.add_argument("--fast-ema", type=int, default=19)
+    diagnose_p.add_argument("--slow-ema", type=int, default=50)
+    diagnose_p.add_argument("--round-trip-cost-points", type=float, default=0.0)
+    diagnose_p.add_argument("--rolling-window-trades", type=int, default=100)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -255,6 +275,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "trading" and args.trading_command == "replay-market":
         return _run_trading_replay_market(args)
+
+    if args.command == "trading" and args.trading_command == "diagnose-replay":
+        return _run_trading_diagnose_replay(args)
 
     parser.print_help()
     return 1
