@@ -146,6 +146,16 @@ def _run_trading_diagnose_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_trading_performance_gate(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.market_replay import MarketReplayConfig
+        from agicore.trading.performance_gate import PerformanceGateConfig, PerformanceGateError, create_performance_gate
+        bundle_dir = create_performance_gate(args.csv, args.output_dir, MarketReplayConfig(args.fast_ema, args.slow_ema, args.round_trip_cost_points), PerformanceGateConfig(args.gate_window_trades))
+    except (PerformanceGateError, ValueError) as exc:
+        sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Causal performance gate bundle written to: {bundle_dir}\n"); return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agicore",
@@ -215,6 +225,10 @@ def _build_parser() -> argparse.ArgumentParser:
     diagnose_p.add_argument("--slow-ema", type=int, default=50)
     diagnose_p.add_argument("--round-trip-cost-points", type=float, default=0.0)
     diagnose_p.add_argument("--rolling-window-trades", type=int, default=100)
+    gate_p = trading_sub.add_parser("replay-performance-gate", help="Replay EMA with a causal trailing shadow-performance gate.")
+    gate_p.add_argument("csv"); gate_p.add_argument("--output-dir", required=True)
+    gate_p.add_argument("--fast-ema", type=int, default=19); gate_p.add_argument("--slow-ema", type=int, default=50)
+    gate_p.add_argument("--round-trip-cost-points", type=float, default=0.0); gate_p.add_argument("--gate-window-trades", type=int, default=100)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -278,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "trading" and args.trading_command == "diagnose-replay":
         return _run_trading_diagnose_replay(args)
+    if args.command == "trading" and args.trading_command == "replay-performance-gate":
+        return _run_trading_performance_gate(args)
 
     parser.print_help()
     return 1
