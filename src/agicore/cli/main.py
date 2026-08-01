@@ -163,6 +163,15 @@ def _run_trading_breakout(args: argparse.Namespace) -> int:
     sys.stdout.write(f"Causal breakout replay bundle written to: {bundle}\n"); return 0
 
 
+def _run_trading_resample_ohlcv(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.ohlcv_resampler import OHLCVResamplerError, resample_ohlcv
+        output = resample_ohlcv(args.csv, args.output, args.minutes)
+    except OHLCVResamplerError as exc:
+        sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Resampled OHLCV written to: {output}\n"); return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agicore",
@@ -238,6 +247,8 @@ def _build_parser() -> argparse.ArgumentParser:
     gate_p.add_argument("--round-trip-cost-points", type=float, default=0.0); gate_p.add_argument("--gate-window-trades", type=int, default=100)
     breakout_p=trading_sub.add_parser("replay-breakout",help="Replay a causal prior-bar price-channel breakout.")
     breakout_p.add_argument("csv"); breakout_p.add_argument("--output-dir",required=True); breakout_p.add_argument("--lookback-bars",type=int,default=240); breakout_p.add_argument("--round-trip-cost-points",type=float,default=1.0)
+    resample_p = trading_sub.add_parser("resample-ohlcv", help="Resample explicit one-minute OHLCV into complete buckets.")
+    resample_p.add_argument("csv"); resample_p.add_argument("--output", required=True); resample_p.add_argument("--minutes", type=int, required=True)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -305,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_trading_performance_gate(args)
     if args.command == "trading" and args.trading_command == "replay-breakout":
         return _run_trading_breakout(args)
+    if args.command == "trading" and args.trading_command == "resample-ohlcv":
+        return _run_trading_resample_ohlcv(args)
 
     parser.print_help()
     return 1
