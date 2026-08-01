@@ -155,6 +155,13 @@ def _run_trading_performance_gate(args: argparse.Namespace) -> int:
         sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Causal performance gate bundle written to: {bundle_dir}\n"); return 0
 
+def _run_trading_breakout(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.breakout_replay import BreakoutReplayConfig, BreakoutReplayError, create_breakout_replay
+        bundle=create_breakout_replay(args.csv,args.output_dir,BreakoutReplayConfig(args.lookback_bars,args.round_trip_cost_points))
+    except (BreakoutReplayError,ValueError) as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Causal breakout replay bundle written to: {bundle}\n"); return 0
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -229,6 +236,8 @@ def _build_parser() -> argparse.ArgumentParser:
     gate_p.add_argument("csv"); gate_p.add_argument("--output-dir", required=True)
     gate_p.add_argument("--fast-ema", type=int, default=19); gate_p.add_argument("--slow-ema", type=int, default=50)
     gate_p.add_argument("--round-trip-cost-points", type=float, default=0.0); gate_p.add_argument("--gate-window-trades", type=int, default=100)
+    breakout_p=trading_sub.add_parser("replay-breakout",help="Replay a causal prior-bar price-channel breakout.")
+    breakout_p.add_argument("csv"); breakout_p.add_argument("--output-dir",required=True); breakout_p.add_argument("--lookback-bars",type=int,default=240); breakout_p.add_argument("--round-trip-cost-points",type=float,default=1.0)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -294,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_trading_diagnose_replay(args)
     if args.command == "trading" and args.trading_command == "replay-performance-gate":
         return _run_trading_performance_gate(args)
+    if args.command == "trading" and args.trading_command == "replay-breakout":
+        return _run_trading_breakout(args)
 
     parser.print_help()
     return 1
