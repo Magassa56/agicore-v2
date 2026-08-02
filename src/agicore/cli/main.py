@@ -178,6 +178,13 @@ def _run_trading_study_breakout(args: argparse.Namespace) -> int:
     except MultiTimeframeStudyError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Multi-timeframe breakout study written to: {output}\n"); return 0
 
+def _run_trading_study_breakout_stability(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.multitimeframe_breakout_stability import MultiTimeframeStabilityError, create_multitimeframe_breakout_stability_study
+        output=create_multitimeframe_breakout_stability_study(args.csv,args.output_dir,round_trip_cost_points=args.round_trip_cost_points,window_bars=args.window_bars)
+    except MultiTimeframeStabilityError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Multi-timeframe breakout stability study written to: {output}\n"); return 0
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -258,6 +265,8 @@ def _build_parser() -> argparse.ArgumentParser:
     resample_p.add_argument("csv"); resample_p.add_argument("--output", required=True); resample_p.add_argument("--minutes", type=int, required=True)
     study_p=trading_sub.add_parser("study-breakout-timeframes",help="Study pre-registered breakout timeframes offline.")
     study_p.add_argument("csv",nargs="+"); study_p.add_argument("--output-dir",required=True); study_p.add_argument("--round-trip-cost-points",type=float,default=1.0)
+    stability_p=trading_sub.add_parser("study-breakout-stability",help="Study chronological breakout stability across pre-registered timeframes.")
+    stability_p.add_argument("csv",nargs="+"); stability_p.add_argument("--output-dir",required=True); stability_p.add_argument("--round-trip-cost-points",type=float,default=1.0); stability_p.add_argument("--window-bars",type=int,required=True)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -329,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_trading_resample_ohlcv(args)
     if args.command == "trading" and args.trading_command == "study-breakout-timeframes":
         return _run_trading_study_breakout(args)
+    if args.command == "trading" and args.trading_command == "study-breakout-stability":
+        return _run_trading_study_breakout_stability(args)
 
     parser.print_help()
     return 1
