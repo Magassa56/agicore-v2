@@ -51,13 +51,13 @@ def replay_breakout(bars: tuple[OHLCVBar, ...], config: BreakoutReplayConfig) ->
 def _close(pos, bar, index, reason, cost, price=None):
     side, entry_time, entry_price, entry_index=pos
     return ReplayTrade(side,entry_time,entry_price,bar.timestamp,bar.open if price is None else price,entry_index,index,reason,cost)
-def _metrics(trades):
+def calculate_breakout_metrics(trades):
     net=[t.net_pnl_points for t in trades]; gross=[t.gross_pnl_points for t in trades]; wins=[x for x in net if x>0]; losses=[x for x in net if x<0]; eq=peak=dd=0.0
     for x in net: eq+=x; peak=max(peak,eq); dd=max(dd,peak-eq)
     return {"total_trades":len(trades),"winning_trades":len(wins),"losing_trades":len(losses),"breakeven_trades":sum(x==0 for x in net),"win_rate":len(wins)/len(net) if net else 0.0,"gross_total_pnl_points":sum(gross),"net_total_pnl_points":sum(net),"gross_average_trade_points":sum(gross)/len(gross) if gross else 0.0,"net_average_trade_points":sum(net)/len(net) if net else 0.0,"gross_profit_factor":sum(x for x in gross if x>0)/abs(sum(x for x in gross if x<0)) if any(x<0 for x in gross) else None,"net_profit_factor":sum(wins)/abs(sum(losses)) if losses else None,"net_closed_equity_drawdown_points":dd,"largest_net_gain_points":max(net,default=0.0),"largest_net_loss_points":min(net,default=0.0)}
 def _trade(i,t): return {"trade_index":i,"side":t.side,"entry_timestamp":t.entry_timestamp.isoformat(),"entry_price":t.entry_price,"exit_timestamp":t.exit_timestamp.isoformat(),"exit_price":t.exit_price,"entry_bar_index":t.entry_bar_index,"exit_bar_index":t.exit_bar_index,"exit_reason":t.exit_reason,"gross_pnl_points":t.gross_pnl_points,"cost_points":t.cost_points,"net_pnl_points":t.net_pnl_points}
 def _files(filename, input_hash, result):
-    bars,trades,decisions,cfg=result["bars"],result["trades"],result["decisions"],result["config"]; perf=_metrics(trades); by={s:_metrics(tuple(t for t in trades if t.side==s)) for s in ("LONG","SHORT")}
+    bars,trades,decisions,cfg=result["bars"],result["trades"],result["decisions"],result["config"]; perf=calculate_breakout_metrics(trades); by={s:calculate_breakout_metrics(tuple(t for t in trades if t.side==s)) for s in ("LONG","SHORT")}
     strategy={"name":"CAUSAL_PRICE_CHANNEL_BREAKOUT","lookback_bars":cfg.lookback_bars,"execution":"next_bar_open","position_size":1,"round_trip_cost_points":cfg.round_trip_cost_points,"pyramiding":False,"channel_rule":"prior_completed_bars_only","exit_rule":"opposite_breakout_or_end_of_data"}; sh=hashlib.sha256(json.dumps(strategy,sort_keys=True,separators=(",",":")).encode()).hexdigest()
     stats={"long_breakout_count":sum(d["signal"]=="LONG" for d in decisions),"short_breakout_count":sum(d["signal"]=="SHORT" for d in decisions),"long_entry_count":sum(t.side=="LONG" for t in trades),"short_entry_count":sum(t.side=="SHORT" for t in trades),"reversal_count":sum(d["action"].startswith("REVERSE") for d in decisions),"ignored_last_bar_signal_count":sum(d["action"]=="IGNORED_NO_NEXT_BAR" for d in decisions),"end_of_data_close_count":sum(t.exit_reason=="END_OF_DATA" for t in trades)}
     summary={"schema_version":"1.0","strategy":strategy,"market_data":{"bar_count":len(bars),"first_timestamp":bars[0].timestamp.isoformat(),"last_timestamp":bars[-1].timestamp.isoformat()},"performance":perf,"by_side":by,"signal_statistics":stats}; manifest={"schema_version":"1.0","run_id":f"breakout-{input_hash[:12]}-{sh[:8]}","input_filename":filename,"input_sha256":input_hash,"strategy_sha256":sh,"agicore_version":_version(),"status":"completed","generated_files":["decisions.json","manifest.json","report.md","summary.json","trades.json"],"warnings":_WARNINGS}
@@ -66,4 +66,4 @@ def _files(filename, input_hash, result):
 def _version():
     try:return version("agicore")
     except PackageNotFoundError:return "unknown"
-__all__=["BreakoutReplayConfig","BreakoutReplayError","create_breakout_replay","replay_breakout"]
+__all__=["BreakoutReplayConfig","BreakoutReplayError","calculate_breakout_metrics","create_breakout_replay","replay_breakout"]
