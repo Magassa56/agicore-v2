@@ -59,8 +59,14 @@ def resample_ohlcv(input_path: str | Path, output_path: str | Path, minutes: int
 
 def _read(path: Path):
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        fields = {name.lower(): name for name in reader.fieldnames or []}
+        sample = handle.read(4096)
+        handle.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t") if sample else csv.excel
+        except csv.Error:
+            dialect = csv.excel
+        reader = csv.DictReader(handle, dialect=dialect)
+        fields = {name.strip().lower(): name for name in reader.fieldnames or []}
         required = ("timestamp", "open", "high", "low", "close", "volume")
         if any(name not in fields for name in required): raise OHLCVResamplerError("OHLCV CSV missing required columns")
         bars=[]
