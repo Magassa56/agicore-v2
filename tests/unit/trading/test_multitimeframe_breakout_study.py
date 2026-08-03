@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 import pytest
 from agicore.trading.multitimeframe_breakout_study import TIMEFRAMES, MultiTimeframeStudyError, create_multitimeframe_breakout_study
 
-def _csv(path, offset=0, count=270, missing_minutes=()):
-    start=datetime(2026,8,1,0,0); rows=["timestamp,open,high,low,close,volume"]
+def _csv(path, offset=0, count=270, missing_minutes=(), delimiter=","):
+    start=datetime(2026,8,1,0,0); rows=[delimiter.join(("timestamp","open","high","low","close","volume"))]
     for i in range(count):
         if i in missing_minutes: continue
         value=100+offset+(i%20)
-        rows.append(f"{(start+timedelta(minutes=i)).isoformat(sep=' ')},{value},{value+1},{value-1},{value},1")
+        rows.append(delimiter.join((f"{(start+timedelta(minutes=i)).isoformat(sep=' ')}",str(value),str(value+1),str(value-1),str(value),"1")))
     path.write_text("\n".join(rows),encoding="utf-8")
 
 def test_study_has_all_pre_registered_timeframes_and_is_deterministic(tmp_path):
@@ -24,6 +24,11 @@ def test_study_rejects_duplicate_basename_and_negative_cost(tmp_path):
     a=tmp_path/"a.csv"; _csv(a)
     with pytest.raises(MultiTimeframeStudyError): create_multitimeframe_breakout_study([a],tmp_path/"x",-1)
     with pytest.raises(MultiTimeframeStudyError): create_multitimeframe_breakout_study([],tmp_path/"y",1)
+
+def test_study_accepts_semicolon_ohlcv_input(tmp_path):
+    source=tmp_path/"semicolon.csv"; _csv(source,delimiter=";")
+    bundle=create_multitimeframe_breakout_study([source],tmp_path/"bundle",1.0)
+    assert json.loads((bundle/"results.json").read_text())
 
 def test_study_reports_resampler_manifest_metrics_and_real_drawdown(tmp_path):
     source=tmp_path/"gapped.csv"
