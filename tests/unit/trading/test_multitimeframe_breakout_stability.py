@@ -24,6 +24,7 @@ def test_chronological_stability_bundle_is_canonical_and_deterministic(tmp_path)
     two = create_multitimeframe_breakout_stability_study([a, b], tmp_path / "two", round_trip_cost_points=1.0, window_bars=300)
     results = json.loads((one / "results.json").read_text())
     summary = json.loads((one / "summary.json").read_text())
+    manifest = json.loads((one / "manifest.json").read_text())
     assert (one / "results.json").read_text() == (two / "results.json").read_text()
     assert [row["timeframe_minutes"] for row in results[:4]] == [1, 5, 15, 30]
     assert all(results[index]["window_index"] <= results[index + 1]["window_index"] or results[index]["input_filename"] != results[index + 1]["input_filename"] for index in range(len(results) - 1))
@@ -31,6 +32,8 @@ def test_chronological_stability_bundle_is_canonical_and_deterministic(tmp_path)
     second = [row for row in results if row["input_filename"] == "a.csv" and row["window_index"] == 1][0]
     assert first["source_end_timestamp"] < second["source_start_timestamp"]
     assert summary["dropped_incomplete_window_bar_count"] == {"a.csv": 50, "b.csv": 50}
+    assert summary["schema_version"] == "1.1"
+    assert manifest["schema_version"] == "1.1"
     text = json.dumps({"summary": summary, "results": results})
     assert not any(word in text.lower() for word in ("best", "winner", "ranking", "recommended", "selected", "score"))
 
@@ -41,7 +44,7 @@ def test_completed_window_metrics_do_not_depend_on_future_bars(tmp_path):
     left = create_multitimeframe_breakout_stability_study([baseline], tmp_path / "left", round_trip_cost_points=0.0, window_bars=300)
     right = create_multitimeframe_breakout_stability_study([changed], tmp_path / "right", round_trip_cost_points=0.0, window_bars=300)
     left_rows = json.loads((left / "results.json").read_text()); right_rows = json.loads((right / "results.json").read_text())
-    fields = ("source_start_timestamp", "source_end_timestamp", "source_bar_count", "timeframe_minutes", "lookback_bars", "output_bar_count", "dropped_incomplete_bucket_count", "boundary_forced_close_count", "total_trades", "net_total_pnl_points", "net_closed_equity_drawdown_points", "win_rate")
+    fields = ("source_start_timestamp", "source_end_timestamp", "source_bar_count", "timeframe_minutes", "lookback_bars", "output_bar_count", "dropped_incomplete_bucket_count", "boundary_forced_close_count", "total_trades", "net_total_pnl_points", "net_closed_equity_drawdown_points", "win_rate", "by_side")
     for timeframe in (1, 5, 15, 30):
         before = next(row for row in left_rows if row["window_index"] == 0 and row["timeframe_minutes"] == timeframe)
         after = next(row for row in right_rows if row["window_index"] == 0 and row["timeframe_minutes"] == timeframe)
@@ -82,8 +85,47 @@ def test_boundary_forced_close_is_counted_and_next_window_starts_flat(tmp_path):
     assert first["boundary_forced_close_count"] == 1
     assert first["gross_total_pnl_points"] - first["net_total_pnl_points"] == 0.5
     assert first["net_total_pnl_points"] == -0.5
+    assert first["by_side"]["LONG"]["total_trades"] == 1
+    assert first["by_side"]["LONG"]["boundary_forced_close_count"] == 1
+    assert first["boundary_forced_close_count"] == first["by_side"]["LONG"]["boundary_forced_close_count"] + first["by_side"]["SHORT"]["boundary_forced_close_count"]
+    assert first["by_side"]["LONG"]["gross_total_pnl_points"] - first["by_side"]["LONG"]["net_total_pnl_points"] == 0.5
+    assert first["by_side"]["LONG"]["net_total_pnl_points"] == first["net_total_pnl_points"]
+    assert first["by_side"]["SHORT"]["total_trades"] == 0
+    assert first["by_side"]["SHORT"]["boundary_forced_close_count"] == 0
     assert second["total_trades"] == 0
     timeframe_rows = [row for row in results if row["timeframe_minutes"] == 1]
     aggregate = summary["by_timeframe"]["1"]
     assert aggregate["total_trades"] == sum(row["total_trades"] for row in timeframe_rows)
     assert aggregate["net_total_pnl_points"] == sum(row["net_total_pnl_points"] for row in timeframe_rows)
+    assert aggregate["by_side"]["LONG"]["total_trades"] == sum(row["by_side"]["LONG"]["total_trades"] for row in timeframe_rows)
+    assert aggregate["by_side"]["LONG"]["net_total_pnl_points"] == sum(row["by_side"]["LONG"]["net_total_pnl_points"] for row in timeframe_rows)
+    assert aggregate["by_side"]["SHORT"]["total_trades"] == sum(row["by_side"]["SHORT"]["total_trades"] for row in timeframe_rows)
+    assert aggregate["by_side"]["SHORT"]["net_total_pnl_points"] == sum(row["by_side"]["SHORT"]["net_total_pnl_points"] for row in timeframe_rows)
+
+
+def test_short_boundary_forced_close_is_attributed_to_short_side(tmp_path):
+    source = tmp_path / "short-boundary.csv"
+    start = datetime(2026, 8, 1); rows = ["timestamp,open,high,low,close,volume"]
+    for index in range(600):
+        value = 100 if index < 240 or index >= 300 else 98
+        rows.append(f"{(start + timedelta(minutes=index)).isoformat(sep=' ')},{value},{value + 1},{value - 1},{value},1")
+    source.write_text("\n".join(rows), encoding="utf-8")
+    bundle = create_multitimeframe_breakout_stability_study([source], tmp_path / "bundle", round_trip_cost_points=0.5, window_bars=300)
+    results = json.loads((bundle / "results.json").read_text())
+    summary = json.loads((bundle / "summary.json").read_text())
+    first = next(row for row in results if row["window_index"] == 0 and row["timeframe_minutes"] == 1)
+    second = next(row for row in results if row["window_index"] == 1 and row["timeframe_minutes"] == 1)
+    assert first["total_trades"] == 1
+    assert first["boundary_forced_close_count"] == 1
+    assert first["by_side"]["LONG"]["total_trades"] == 0
+    assert first["by_side"]["SHORT"]["total_trades"] == 1
+    assert first["by_side"]["SHORT"]["boundary_forced_close_count"] == 1
+    assert first["boundary_forced_close_count"] == first["by_side"]["LONG"]["boundary_forced_close_count"] + first["by_side"]["SHORT"]["boundary_forced_close_count"]
+    assert first["gross_total_pnl_points"] - first["net_total_pnl_points"] == 0.5
+    assert first["by_side"]["SHORT"]["gross_total_pnl_points"] - first["by_side"]["SHORT"]["net_total_pnl_points"] == 0.5
+    assert first["net_total_pnl_points"] == first["by_side"]["SHORT"]["net_total_pnl_points"]
+    assert second["total_trades"] == 0
+    timeframe_rows = [row for row in results if row["timeframe_minutes"] == 1]
+    aggregate = summary["by_timeframe"]["1"]["by_side"]["SHORT"]
+    assert aggregate["total_trades"] == sum(row["by_side"]["SHORT"]["total_trades"] for row in timeframe_rows)
+    assert aggregate["net_total_pnl_points"] == sum(row["by_side"]["SHORT"]["net_total_pnl_points"] for row in timeframe_rows)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 import tempfile
 from importlib.metadata import PackageNotFoundError, version
@@ -62,6 +63,15 @@ def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, rou
                         )
                     trades = replay_breakout(bars, BreakoutReplayConfig(lookback, round_trip_cost_points))["trades"]
                     metrics = calculate_breakout_metrics(trades)
+                    boundary_forced_close_count = sum(trade.exit_reason == "END_OF_DATA" for trade in trades)
+                    by_side = {
+                        side: {
+                            **calculate_breakout_metrics(tuple(trade for trade in trades if trade.side == side)),
+                            "boundary_forced_close_count": sum(trade.side == side and trade.exit_reason == "END_OF_DATA" for trade in trades),
+                        }
+                        for side in ("LONG", "SHORT")
+                    }
+                    _verify_side_reconciliation(metrics, by_side, boundary_forced_close_count)
                     rows.append({
                         "input_filename": source.name,
                         "input_sha256": input_hashes[source],
@@ -75,19 +85,23 @@ def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, rou
                         "output_bar_count": len(bars),
                         "dropped_incomplete_bucket_count": dropped_buckets,
                         "resampler_manifest_sha256": manifest_hash,
-                        "boundary_forced_close_count": sum(trade.exit_reason == "END_OF_DATA" for trade in trades),
+                        "boundary_forced_close_count": boundary_forced_close_count,
+                        "by_side": by_side,
                         **metrics,
                     })
         config = {"timeframes": TIMEFRAMES, "round_trip_cost_points": round_trip_cost_points, "window_bars": window_bars}
         run_hash = hashlib.sha256(deterministic_json({"input_sha256": [input_hashes[path] for path in paths], "configuration": config}).encode("utf-8")).hexdigest()
         summary = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "configuration": config,
             "dropped_incomplete_window_bar_count": dropped_windows,
-            "by_timeframe": {str(timeframe): _aggregate(row for row in rows if row["timeframe_minutes"] == timeframe) for timeframe in TIMEFRAMES},
+            "by_timeframe": {
+                str(timeframe): _timeframe_aggregate(row for row in rows if row["timeframe_minutes"] == timeframe)
+                for timeframe in TIMEFRAMES
+            },
         }
         manifest = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "run_id": f"breakout-stability-{run_hash[:16]}",
             "input_filenames": [path.name for path in paths],
             "input_sha256": [input_hashes[path] for path in paths],
@@ -143,6 +157,32 @@ def _aggregate(rows):
         "total_trades": sum(row["total_trades"] for row in values),
         "net_total_pnl_points": sum(pnl),
     }
+
+
+def _timeframe_aggregate(rows):
+    values = tuple(rows)
+    aggregate = _aggregate(values)
+    aggregate["by_side"] = {
+        side: _aggregate(row["by_side"][side] for row in values)
+        for side in ("LONG", "SHORT")
+    }
+    return aggregate
+
+
+def _verify_side_reconciliation(metrics, by_side, global_boundary_forced_close_count) -> None:
+    if metrics["total_trades"] != by_side["LONG"]["total_trades"] + by_side["SHORT"]["total_trades"]:
+        raise MultiTimeframeStabilityError("Directional trade counts do not reconcile")
+    if not math.isclose(
+        metrics["net_total_pnl_points"],
+        by_side["LONG"]["net_total_pnl_points"] + by_side["SHORT"]["net_total_pnl_points"],
+        rel_tol=1e-12,
+        abs_tol=1e-9,
+    ):
+        raise MultiTimeframeStabilityError("Directional net PnL does not reconcile")
+    if global_boundary_forced_close_count != (
+        by_side["LONG"]["boundary_forced_close_count"] + by_side["SHORT"]["boundary_forced_close_count"]
+    ):
+        raise MultiTimeframeStabilityError("Directional boundary forced-close counts do not reconcile")
 
 
 def _report(paths, summary, cost, window_bars) -> str:
