@@ -2,6 +2,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 import pytest
+from agicore.cli.main import main
+from agicore.trading.breakout_replay import calculate_breakout_metrics
 from agicore.trading.multitimeframe_breakout_study import TIMEFRAMES, MultiTimeframeStudyError, create_multitimeframe_breakout_study
 
 def _csv(path, offset=0, count=270, missing_minutes=(), delimiter=","):
@@ -93,8 +95,38 @@ def test_mixed_sides_reconcile_rows_and_timeframe_aggregate(tmp_path):
     assert aggregate["gross_total_pnl_points"]==aggregate["by_side"]["LONG"]["gross_total_pnl_points"]+aggregate["by_side"]["SHORT"]["gross_total_pnl_points"]
     assert aggregate["net_total_pnl_points"]==aggregate["by_side"]["LONG"]["net_total_pnl_points"]+aggregate["by_side"]["SHORT"]["net_total_pnl_points"]
     assert aggregate["boundary_forced_close_count"]==aggregate["by_side"]["LONG"]["boundary_forced_close_count"]+aggregate["by_side"]["SHORT"]["boundary_forced_close_count"]
-    assert summary["schema_version"]==manifest["schema_version"]=="1.1"
+    assert summary["schema_version"]==manifest["schema_version"]=="1.2"
     expected_policy={"input_order":"canonical input_filename ascending","path_dependent_metrics_are_descriptive":True,"not_a_rollover_adjusted_continuous_equity_curve":True}
     assert summary["multi_source_aggregation"]==manifest["multi_source_aggregation"]==expected_policy
     assert any("rollover-adjusted continuous equity curve" in warning for warning in manifest["warnings"])
     assert "best" not in json.dumps({"summary":summary,"results":results}).lower()
+
+def test_study_publishes_side_policy_and_keeps_the_blocked_side_neutral(tmp_path):
+    source=tmp_path/"long.csv"; _breakout_csv(source,"LONG")
+    both=create_multitimeframe_breakout_study([source],tmp_path/"both",0.5)
+    long_only=create_multitimeframe_breakout_study([source],tmp_path/"long-only",0.5,"LONG_ONLY")
+    both_manifest=json.loads((both/"manifest.json").read_text()); manifest=json.loads((long_only/"manifest.json").read_text())
+    both_row=next(item for item in json.loads((both/"results.json").read_text()) if item["timeframe_minutes"]==1)
+    summary=json.loads((long_only/"summary.json").read_text()); row=next(item for item in json.loads((long_only/"results.json").read_text()) if item["timeframe_minutes"]==1)
+    expected_empty_side={**calculate_breakout_metrics(()),"boundary_forced_close_count":0}
+    assert summary["configuration"]["side_policy"]==manifest["configuration"]["side_policy"]==row["side_policy"]=="LONG_ONLY"
+    assert both_manifest["run_id"]!=manifest["run_id"]
+    assert both_row["run_id"]!=row["run_id"]
+    assert row["by_side"]["SHORT"]==expected_empty_side
+    assert summary["by_timeframe"]["1"]["by_side"]["SHORT"]==expected_empty_side
+    assert row["total_trades"]==row["by_side"]["LONG"]["total_trades"]+row["by_side"]["SHORT"]["total_trades"]
+    assert row["net_total_pnl_points"]==row["by_side"]["LONG"]["net_total_pnl_points"]+row["by_side"]["SHORT"]["net_total_pnl_points"]
+
+def test_study_cli_accepts_side_policy_and_rejects_invalid_value(tmp_path,capsys):
+    source=tmp_path/"source.csv"; _breakout_csv(source,"SHORT")
+    assert main(["trading","study-breakout-timeframes",str(source),"--output-dir",str(tmp_path/"bundle"),"--side-policy","SHORT_ONLY"])==0
+    with pytest.raises(SystemExit) as error:
+        main(["trading","study-breakout-timeframes",str(source),"--output-dir",str(tmp_path/"bad"),"--side-policy","INVALID"])
+    assert error.value.code==2
+    assert "invalid choice" in capsys.readouterr().err
+
+def test_study_rejects_invalid_side_policy_without_creating_bundle(tmp_path):
+    source=tmp_path/"source.csv"; _breakout_csv(source,"LONG")
+    with pytest.raises(MultiTimeframeStudyError,match="side_policy"):
+        create_multitimeframe_breakout_study([source],tmp_path/"bundle",1.0,"INVALID")
+    assert not (tmp_path/"bundle").exists()
