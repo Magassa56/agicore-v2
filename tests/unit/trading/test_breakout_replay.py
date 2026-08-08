@@ -3,7 +3,8 @@ import json
 from datetime import datetime, timedelta
 import pytest
 from agicore.cli.main import main
-from agicore.trading.breakout_replay import BreakoutReplayConfig,BreakoutReplayError,calculate_breakout_metrics,create_breakout_replay
+from agicore.trading.breakout_replay import BreakoutReplayConfig,BreakoutReplayError,calculate_breakout_metrics,create_breakout_replay,replay_breakout
+from agicore.trading.market_replay import load_ohlcv_csv
 from agicore.trading.market_replay import ReplayTrade
 def _csv(path):
     vals=[10,10,10,12,13,9,8,14,15]
@@ -25,3 +26,52 @@ def test_public_breakout_metrics_calculates_closed_equity_drawdown():
     metrics=calculate_breakout_metrics(trades)
     assert metrics["net_total_pnl_points"]==0
     assert metrics["net_closed_equity_drawdown_points"]==15
+
+def test_long_only_closes_on_short_signal_without_opening_short_and_preserves_causal_prefix(tmp_path):
+    path=tmp_path/"bars.csv"; _csv(path); bars=tuple(load_ohlcv_csv(path))
+    result=replay_breakout(bars,BreakoutReplayConfig(2,0.5,side_policy="LONG_ONLY"))
+    trades,decisions=result["trades"],result["decisions"]
+    assert [trade.side for trade in trades]==["LONG","LONG"]
+    assert trades[0].exit_reason=="SIGNAL_REVERSAL" and trades[0].gross_pnl_points-trades[0].net_pnl_points==0.5
+    assert trades[-1].exit_reason=="END_OF_DATA" and trades[-1].cost_points==0.5
+    assert any(d["action"]=="EXIT_LONG_SIDE_POLICY" and d["policy_block_reason"]=="SHORT_BLOCKED_BY_LONG_ONLY" for d in decisions)
+    assert all(d["action"]!="ENTER_SHORT" and d["action"]!="REVERSE_TO_SHORT" for d in decisions)
+    extended=bars+(bars[-1].__class__(bars[-1].timestamp+timedelta(minutes=1),16,17,15,16,1),)
+    later=replay_breakout(extended,BreakoutReplayConfig(2,0.5,side_policy="LONG_ONLY"))
+    assert [d for d in decisions if d["decision_bar_index"]<len(bars)-1]==[d for d in later["decisions"] if d["decision_bar_index"]<len(bars)-1]
+
+def test_short_only_blocks_long_signal_and_finishes_short_at_end_of_data(tmp_path):
+    path=tmp_path/"short.csv"
+    values=[10,10,10,12,13,8,7,11,12,6,5]
+    rows=["timestamp,open,high,low,close,volume"]+[f"2026-08-01 00:{i:02d}:00,{v},{v+1},{v-1},{v},1" for i,v in enumerate(values)]
+    path.write_text("\n".join(rows),encoding="utf-8")
+    result=replay_breakout(tuple(load_ohlcv_csv(path)),BreakoutReplayConfig(2,0.5,side_policy="SHORT_ONLY"))
+    trades,decisions=result["trades"],result["decisions"]
+    assert [trade.side for trade in trades]==["SHORT","SHORT"]
+    assert trades[-1].exit_reason=="END_OF_DATA" and all(trade.cost_points==0.5 for trade in trades)
+    assert any(d["action"]=="BLOCKED_BY_SIDE_POLICY" and d["policy_block_reason"]=="LONG_BLOCKED_BY_SHORT_ONLY" for d in decisions)
+    assert any(d["action"]=="EXIT_SHORT_SIDE_POLICY" for d in decisions)
+    assert all(d["action"]!="ENTER_LONG" and d["action"]!="REVERSE_TO_LONG" for d in decisions)
+
+def test_default_side_policy_is_both_and_invalid_policy_is_rejected(tmp_path):
+    path=tmp_path/"bars.csv"; _csv(path); bars=tuple(load_ohlcv_csv(path))
+    assert BreakoutReplayConfig(2,0.5).side_policy=="BOTH"
+    default=replay_breakout(bars,BreakoutReplayConfig(2,0.5)); explicit=replay_breakout(bars,BreakoutReplayConfig(2,0.5,side_policy="BOTH"))
+    assert default["trades"]==explicit["trades"] and default["decisions"]==explicit["decisions"]
+    with pytest.raises(ValueError,match="side_policy"):
+        BreakoutReplayConfig(2,0.5,side_policy="INVALID")
+
+def test_breakout_artifacts_publish_side_policy_and_change_run_id(tmp_path):
+    path=tmp_path/"bars.csv"; _csv(path)
+    both=create_breakout_replay(path,tmp_path/"both",BreakoutReplayConfig(2,0.5))
+    long_only=create_breakout_replay(path,tmp_path/"long-only",BreakoutReplayConfig(2,0.5,side_policy="LONG_ONLY"))
+    expected_files={"decisions.json","manifest.json","report.md","summary.json","trades.json"}
+    artifacts=[]
+    for bundle,policy in ((both,"BOTH"),(long_only,"LONG_ONLY")):
+        summary=json.loads((bundle/"summary.json").read_text()); manifest=json.loads((bundle/"manifest.json").read_text())
+        assert summary["schema_version"]==manifest["schema_version"]=="1.1"
+        assert summary["strategy"]["side_policy"]==manifest["strategy"]["side_policy"]==policy
+        assert f"- Side policy: {policy}" in (bundle/"report.md").read_text()
+        assert set(manifest["generated_files"])==expected_files and all((bundle/name).is_file() for name in expected_files)
+        artifacts.append(manifest)
+    assert artifacts[0]["run_id"]!=artifacts[1]["run_id"]

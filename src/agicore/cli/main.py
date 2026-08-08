@@ -174,7 +174,7 @@ def _run_trading_resample_ohlcv(args: argparse.Namespace) -> int:
 def _run_trading_study_breakout(args: argparse.Namespace) -> int:
     try:
         from agicore.trading.multitimeframe_breakout_study import MultiTimeframeStudyError, create_multitimeframe_breakout_study
-        output=create_multitimeframe_breakout_study(args.csv,args.output_dir,args.round_trip_cost_points)
+        output=create_multitimeframe_breakout_study(args.csv,args.output_dir,args.round_trip_cost_points,args.side_policy)
     except MultiTimeframeStudyError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Multi-timeframe breakout study written to: {output}\n"); return 0
 
@@ -264,7 +264,7 @@ def _build_parser() -> argparse.ArgumentParser:
     resample_p = trading_sub.add_parser("resample-ohlcv", help="Resample explicit one-minute OHLCV into complete buckets.")
     resample_p.add_argument("csv"); resample_p.add_argument("--output", required=True); resample_p.add_argument("--minutes", type=int, required=True)
     study_p=trading_sub.add_parser("study-breakout-timeframes",help="Study pre-registered breakout timeframes offline.")
-    study_p.add_argument("csv",nargs="+"); study_p.add_argument("--output-dir",required=True); study_p.add_argument("--round-trip-cost-points",type=float,default=1.0)
+    study_p.add_argument("csv",nargs="+"); study_p.add_argument("--output-dir",required=True); study_p.add_argument("--round-trip-cost-points",type=float,default=1.0); study_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
     stability_p=trading_sub.add_parser("study-breakout-stability",help="Study chronological breakout stability across pre-registered timeframes.")
     stability_p.add_argument("csv",nargs="+"); stability_p.add_argument("--output-dir",required=True); stability_p.add_argument("--round-trip-cost-points",type=float,default=1.0); stability_p.add_argument("--window-bars",type=int,required=True)
     output_group.add_argument(
