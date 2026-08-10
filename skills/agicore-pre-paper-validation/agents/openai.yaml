@@ -1,0 +1,4 @@
+interface:
+  display_name: "AGIcore Pre-Paper Validation"
+  short_description: "Validate trading before supervised paper runs"
+  default_prompt: "Use $agicore-pre-paper-validation to assess this AGIcore change before supervised paper trading."
