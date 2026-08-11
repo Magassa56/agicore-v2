@@ -40,6 +40,27 @@ def test_long_only_closes_on_short_signal_without_opening_short_and_preserves_ca
     later=replay_breakout(extended,BreakoutReplayConfig(2,0.5,side_policy="LONG_ONLY"))
     assert [d for d in decisions if d["decision_bar_index"]<len(bars)-1]==[d for d in later["decisions"] if d["decision_bar_index"]<len(bars)-1]
 
+@pytest.mark.parametrize("side_policy",("BOTH","LONG_ONLY","SHORT_ONLY"))
+def test_future_extension_preserves_determined_breakout_history_for_all_side_policies(tmp_path,side_policy):
+    path=tmp_path/"bars.csv"; _csv(path); prefix=tuple(load_ohlcv_csv(path)); boundary=len(prefix)-1
+    future=tuple(prefix[-1].__class__(prefix[-1].timestamp+timedelta(minutes=index),value,value+1,value-1,value,1) for index,value in enumerate((16,7,6,20),1))
+    config=BreakoutReplayConfig(2,0.5,side_policy=side_policy)
+    baseline,later=replay_breakout(prefix,config),replay_breakout(prefix+future,config)
+    baseline_decisions=[d for d in baseline["decisions"] if d["decision_bar_index"]<boundary]
+    later_decisions=[d for d in later["decisions"] if d["decision_bar_index"]<boundary]
+    baseline_trades=[t for t in baseline["trades"] if t.exit_bar_index<=boundary and not (t.exit_reason=="END_OF_DATA" and t.exit_bar_index==boundary)]
+    later_trades=[t for t in later["trades"] if t.exit_bar_index<=boundary and not (t.exit_reason=="END_OF_DATA" and t.exit_bar_index==boundary)]
+    assert baseline_decisions and later_decisions and baseline_trades and later_trades
+    assert baseline_decisions==later_decisions and baseline_trades==later_trades
+    comparable_executions=[d for d in baseline_decisions+later_decisions if d["execution_bar_index"] is not None]
+    assert comparable_executions and all(d["execution_bar_index"]==d["decision_bar_index"]+1 for d in comparable_executions)
+    actions={d["action"] for d in baseline_decisions}
+    if side_policy=="BOTH": assert any(action.startswith(("ENTER_","REVERSE_TO_")) for action in actions)
+    if side_policy=="LONG_ONLY": assert "ENTER_LONG" in actions and "EXIT_LONG_SIDE_POLICY" in actions
+    if side_policy=="SHORT_ONLY": assert "ENTER_SHORT" in actions and "EXIT_SHORT_SIDE_POLICY" in actions
+    forbidden={"LONG_ONLY":("ENTER_SHORT","REVERSE_TO_SHORT"),"SHORT_ONLY":("ENTER_LONG","REVERSE_TO_LONG")}.get(side_policy,())
+    assert all(d["action"] not in forbidden for d in later["decisions"])
+
 def test_short_only_blocks_long_signal_and_finishes_short_at_end_of_data(tmp_path):
     path=tmp_path/"short.csv"
     values=[10,10,10,12,13,8,7,11,12,6,5]
