@@ -185,6 +185,13 @@ def _run_trading_study_breakout_stability(args: argparse.Namespace) -> int:
     except MultiTimeframeStabilityError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Multi-timeframe breakout stability study written to: {output}\n"); return 0
 
+def _run_trading_study_breakout_temporal_oos(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.temporal_breakout_oos import TemporalBreakoutOOSError, create_temporal_breakout_oos_study
+        output=create_temporal_breakout_oos_study(args.csv,args.output_dir,lookback_bars=args.lookback_bars,round_trip_cost_points=args.round_trip_cost_points,side_policy=args.side_policy,train_ratio=args.train_ratio,validation_ratio=args.validation_ratio,oos_ratio=args.oos_ratio)
+    except TemporalBreakoutOOSError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Temporal breakout train/validation/OOS study written to: {output}\n"); return 0
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -267,6 +274,8 @@ def _build_parser() -> argparse.ArgumentParser:
     study_p.add_argument("csv",nargs="+"); study_p.add_argument("--output-dir",required=True); study_p.add_argument("--round-trip-cost-points",type=float,default=1.0); study_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
     stability_p=trading_sub.add_parser("study-breakout-stability",help="Study chronological breakout stability across pre-registered timeframes.")
     stability_p.add_argument("csv",nargs="+"); stability_p.add_argument("--output-dir",required=True); stability_p.add_argument("--round-trip-cost-points",type=float,default=1.0); stability_p.add_argument("--window-bars",type=int,required=True)
+    temporal_p=trading_sub.add_parser("study-breakout-temporal-oos",help="Replay breakout in strict train, validation, and OOS segments.")
+    temporal_p.add_argument("csv"); temporal_p.add_argument("--output-dir",required=True); temporal_p.add_argument("--lookback-bars",type=int,default=240); temporal_p.add_argument("--round-trip-cost-points",type=float,default=1.0); temporal_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH"); temporal_p.add_argument("--train-ratio",type=float,default=0.6); temporal_p.add_argument("--validation-ratio",type=float,default=0.2); temporal_p.add_argument("--oos-ratio",type=float,default=0.2)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",
@@ -340,6 +349,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_trading_study_breakout(args)
     if args.command == "trading" and args.trading_command == "study-breakout-stability":
         return _run_trading_study_breakout_stability(args)
+    if args.command == "trading" and args.trading_command == "study-breakout-temporal-oos":
+        return _run_trading_study_breakout_temporal_oos(args)
 
     parser.print_help()
     return 1
