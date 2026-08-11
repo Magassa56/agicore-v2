@@ -185,6 +185,13 @@ def _run_trading_study_breakout_stability(args: argparse.Namespace) -> int:
     except MultiTimeframeStabilityError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Multi-timeframe breakout stability study written to: {output}\n"); return 0
 
+def _run_trading_study_breakout_walk_forward(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.walk_forward_breakout import WalkForwardBreakoutError, create_walk_forward_breakout_study
+        output=create_walk_forward_breakout_study(args.csv,args.output_dir,initial_train_bars=args.initial_train_bars,validation_bars=args.validation_bars,oos_bars=args.oos_bars,lookback_bars=args.lookback_bars,round_trip_cost_points=args.round_trip_cost_points,side_policy=args.side_policy)
+    except WalkForwardBreakoutError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Breakout walk-forward study written to: {output}\n"); return 0
+
 def _run_trading_study_breakout_temporal_oos(args: argparse.Namespace) -> int:
     try:
         from agicore.trading.temporal_breakout_oos import TemporalBreakoutOOSError, create_temporal_breakout_oos_study
@@ -274,6 +281,8 @@ def _build_parser() -> argparse.ArgumentParser:
     study_p.add_argument("csv",nargs="+"); study_p.add_argument("--output-dir",required=True); study_p.add_argument("--round-trip-cost-points",type=float,default=1.0); study_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
     stability_p=trading_sub.add_parser("study-breakout-stability",help="Study chronological breakout stability across pre-registered timeframes.")
     stability_p.add_argument("csv",nargs="+"); stability_p.add_argument("--output-dir",required=True); stability_p.add_argument("--round-trip-cost-points",type=float,default=1.0); stability_p.add_argument("--window-bars",type=int,required=True)
+    walk_p=trading_sub.add_parser("study-breakout-walk-forward",help="Evaluate a fixed breakout in explicit expanding walk-forward folds.")
+    walk_p.add_argument("csv"); walk_p.add_argument("--output-dir",required=True); walk_p.add_argument("--initial-train-bars",type=int,required=True); walk_p.add_argument("--validation-bars",type=int,required=True); walk_p.add_argument("--oos-bars",type=int,required=True); walk_p.add_argument("--lookback-bars",type=int,default=240); walk_p.add_argument("--round-trip-cost-points",type=float,default=1.0); walk_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
     temporal_p=trading_sub.add_parser("study-breakout-temporal-oos",help="Replay breakout in strict train, validation, and OOS segments.")
     temporal_p.add_argument("csv"); temporal_p.add_argument("--output-dir",required=True); temporal_p.add_argument("--lookback-bars",type=int,default=240); temporal_p.add_argument("--round-trip-cost-points",type=float,default=1.0); temporal_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH"); temporal_p.add_argument("--train-ratio",type=float,default=0.6); temporal_p.add_argument("--validation-ratio",type=float,default=0.2); temporal_p.add_argument("--oos-ratio",type=float,default=0.2)
     output_group.add_argument(
@@ -349,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_trading_study_breakout(args)
     if args.command == "trading" and args.trading_command == "study-breakout-stability":
         return _run_trading_study_breakout_stability(args)
+    if args.command == "trading" and args.trading_command == "study-breakout-walk-forward":
+        return _run_trading_study_breakout_walk_forward(args)
     if args.command == "trading" and args.trading_command == "study-breakout-temporal-oos":
         return _run_trading_study_breakout_temporal_oos(args)
 
