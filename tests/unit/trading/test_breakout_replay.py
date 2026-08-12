@@ -90,7 +90,7 @@ def test_breakout_artifacts_publish_side_policy_and_change_run_id(tmp_path):
     artifacts=[]
     for bundle,policy in ((both,"BOTH"),(long_only,"LONG_ONLY")):
         summary=json.loads((bundle/"summary.json").read_text()); manifest=json.loads((bundle/"manifest.json").read_text())
-        assert summary["schema_version"]==manifest["schema_version"]=="1.1"
+        assert summary["schema_version"]==manifest["schema_version"]=="1.2"
         assert summary["strategy"]["side_policy"]==manifest["strategy"]["side_policy"]==policy
         assert f"- Side policy: {policy}" in (bundle/"report.md").read_text()
         assert set(manifest["generated_files"])==expected_files and all((bundle/name).is_file() for name in expected_files)
