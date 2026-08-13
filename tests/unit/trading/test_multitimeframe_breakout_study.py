@@ -95,7 +95,9 @@ def test_mixed_sides_reconcile_rows_and_timeframe_aggregate(tmp_path):
     assert aggregate["gross_total_pnl_points"]==aggregate["by_side"]["LONG"]["gross_total_pnl_points"]+aggregate["by_side"]["SHORT"]["gross_total_pnl_points"]
     assert aggregate["net_total_pnl_points"]==aggregate["by_side"]["LONG"]["net_total_pnl_points"]+aggregate["by_side"]["SHORT"]["net_total_pnl_points"]
     assert aggregate["boundary_forced_close_count"]==aggregate["by_side"]["LONG"]["boundary_forced_close_count"]+aggregate["by_side"]["SHORT"]["boundary_forced_close_count"]
-    assert summary["schema_version"]==manifest["schema_version"]=="1.2"
+    assert summary["schema_version"]==manifest["schema_version"]=="1.3"
+    assert row["cost_mode"] == "legacy_all_in" and row["effective_round_trip_cost_points"] == 0.5
+    assert row["trades"] and all(trade["gross_pnl_points"]-trade["cost_points"]==trade["net_pnl_points"] for trade in row["trades"])
     expected_policy={"input_order":"canonical input_filename ascending","path_dependent_metrics_are_descriptive":True,"not_a_rollover_adjusted_continuous_equity_curve":True}
     assert summary["multi_source_aggregation"]==manifest["multi_source_aggregation"]==expected_policy
     assert any("rollover-adjusted continuous equity curve" in warning for warning in manifest["warnings"])
