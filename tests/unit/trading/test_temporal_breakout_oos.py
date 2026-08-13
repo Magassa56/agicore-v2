@@ -28,7 +28,8 @@ def test_temporal_oos_bundle_is_chronological_deterministic_and_boundary_flat(tm
     assert rows[0]["end_timestamp"]<rows[1]["start_timestamp"]<rows[2]["start_timestamp"]
     assert summary["temporal_contract"]=={"ordered":["train","validation","oos"],"disjoint":True,"each_starts_flat":True,"warmup_crosses_boundaries":False,"oos_used_for_selection":False,"segment_boundary_index_basis":"source_global","trade_and_decision_index_basis":"segment_local"}
     assert all(row["source_sha256"]==manifest["input_sha256"] for row in rows)
-    assert summary["configuration"]=={"lookback_bars":2,"round_trip_cost_points":0.5,"side_policy":"LONG_ONLY","ratios":{"train":0.6,"validation":0.2,"oos":0.2},"execution":"next_bar_open","selection":"none"}
+    assert summary["configuration"]=={"lookback_bars":2,"round_trip_cost_points":0.5,"effective_round_trip_cost_points":0.5,"cost_mode":"legacy_all_in","side_policy":"LONG_ONLY","ratios":{"train":0.6,"validation":0.2,"oos":0.2},"execution":"next_bar_open","fixed_configuration":True,"oos_used_for_selection":False}
+    assert all(row["trades"] and all(trade["gross_pnl_points"]-trade["cost_points"]==trade["net_pnl_points"] for trade in row["trades"]) for row in rows)
     assert set(manifest["generated_files"])=={"manifest.json","results.json","summary.json"} and all((one/name).is_file() for name in manifest["generated_files"])
     assert not any(word in json.dumps({"summary":summary,"manifest":manifest}).lower() for word in ("winner","best","ranking","selected","recommended"))
 

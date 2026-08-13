@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .breakout_replay import BreakoutReplayConfig, BreakoutReplayError, calculate_breakout_metrics, replay_breakout
+from .breakout_execution_costs import BreakoutExecutionCostModel
 from .local_bundle import LocalBundleError, deterministic_json, publish_local_bundle, sha256_file
 from .market_replay import OHLCVBar, load_ohlcv_csv
 from .multitimeframe_breakout_study import TIMEFRAMES
@@ -20,7 +21,7 @@ class MultiTimeframeStabilityError(ValueError):
     """Raised for an invalid chronological breakout stability study."""
 
 
-def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, round_trip_cost_points=1.0, window_bars: int) -> Path:
+def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, round_trip_cost_points=1.0, window_bars: int, execution_cost_model: BreakoutExecutionCostModel | None = None) -> Path:
     """Evaluate independent, complete source-bar windows in canonical order."""
     if window_bars <= 0:
         raise MultiTimeframeStabilityError("window_bars must be strictly positive")
@@ -61,7 +62,8 @@ def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, rou
                             f"Window {window_index} timeframe {timeframe} has insufficient bars: "
                             f"requires at least {lookback + 1}, got {len(bars)}"
                         )
-                    trades = replay_breakout(bars, BreakoutReplayConfig(lookback, round_trip_cost_points))["trades"]
+                    replay_config = BreakoutReplayConfig(lookback, round_trip_cost_points, execution_cost_model=execution_cost_model)
+                    trades = replay_breakout(bars, replay_config)["trades"]
                     metrics = calculate_breakout_metrics(trades)
                     boundary_forced_close_count = sum(trade.exit_reason == "END_OF_DATA" for trade in trades)
                     by_side = {
@@ -86,13 +88,18 @@ def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, rou
                         "dropped_incomplete_bucket_count": dropped_buckets,
                         "resampler_manifest_sha256": manifest_hash,
                         "boundary_forced_close_count": boundary_forced_close_count,
+                        "cost_mode": "detailed" if execution_cost_model else "legacy_all_in",
+                        "effective_round_trip_cost_points": replay_config.effective_round_trip_cost_points,
+                        "cost_breakdown": replay_config.execution_cost_model.serialize() if replay_config.execution_cost_model else {"cost_mode":"legacy_all_in","legacy_round_trip_cost_points":replay_config.round_trip_cost_points,"total_round_trip_cost_points":replay_config.round_trip_cost_points},
+                        "trades": [_trade(trade, replay_config) for trade in trades],
                         "by_side": by_side,
                         **metrics,
                     })
-        config = {"timeframes": TIMEFRAMES, "round_trip_cost_points": round_trip_cost_points, "window_bars": window_bars}
+        top_config = BreakoutReplayConfig(round_trip_cost_points=round_trip_cost_points, execution_cost_model=execution_cost_model)
+        config = {"timeframes": TIMEFRAMES, "window_bars": window_bars, **_cost_config(top_config)}
         run_hash = hashlib.sha256(deterministic_json({"input_sha256": [input_hashes[path] for path in paths], "configuration": config}).encode("utf-8")).hexdigest()
         summary = {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "configuration": config,
             "dropped_incomplete_window_bar_count": dropped_windows,
             "by_timeframe": {
@@ -101,11 +108,12 @@ def create_multitimeframe_breakout_stability_study(csv_paths, output_dir, *, rou
             },
         }
         manifest = {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "run_id": f"breakout-stability-{run_hash[:16]}",
             "input_filenames": [path.name for path in paths],
             "input_sha256": [input_hashes[path] for path in paths],
             "configuration_sha256": hashlib.sha256(deterministic_json(config).encode("utf-8")).hexdigest(),
+            "configuration": config,
             "agicore_version": _version(),
             "status": "completed",
             "generated_files": ["manifest.json", "report.md", "results.json", "summary.json"],
@@ -186,7 +194,8 @@ def _verify_side_reconciliation(metrics, by_side, global_boundary_forced_close_c
 
 
 def _report(paths, summary, cost, window_bars) -> str:
-    lines = ["# Multi-Timeframe Chronological Breakout Stability Study", "", "- Offline, descriptive historical study; no timeframe is selected automatically.", f"- Inputs: {', '.join(path.name for path in paths)}", f"- Source window bars: {window_bars}", f"- Round-trip cost points: {cost:.2f}", "- Windows are complete, disjoint, chronological, and start FLAT.", "- No prior-window warm-up is used; open positions close with END_OF_DATA at each boundary.", ""]
+    config=summary["configuration"]
+    lines = ["# Multi-Timeframe Chronological Breakout Stability Study", "", "- Offline, descriptive historical study; no timeframe is selected automatically.", f"- Inputs: {', '.join(path.name for path in paths)}", f"- Source window bars: {window_bars}", *_cost_report_lines(config), "- Windows are complete, disjoint, chronological, and start FLAT.", "- No prior-window warm-up is used; open positions close with END_OF_DATA at each boundary.", ""]
     for timeframe, aggregate in summary["by_timeframe"].items():
         lines.append(f"- {timeframe}m: windows={aggregate['evaluated_window_count']}, positive={aggregate['positive_window_count']}, negative={aggregate['negative_window_count']}, flat={aggregate['flat_window_count']}, worst_net_pnl={aggregate['worst_window_net_pnl_points']}, max_drawdown={aggregate['maximum_window_drawdown_points']}")
     return "\n".join(lines) + "\n"
@@ -197,6 +206,16 @@ def _version() -> str:
         return version("agicore")
     except PackageNotFoundError:
         return "unknown"
+
+def _cost_config(config):
+    row={"round_trip_cost_points":config.round_trip_cost_points,"effective_round_trip_cost_points":config.effective_round_trip_cost_points,"cost_mode":"detailed" if config.execution_cost_model else "legacy_all_in"}
+    if config.execution_cost_model: row["execution_cost_model"]=config.execution_cost_model.serialize()
+    return row
+def _trade(trade,config): return {"side":trade.side,"entry_timestamp":trade.entry_timestamp.isoformat(),"entry_price":trade.entry_price,"exit_timestamp":trade.exit_timestamp.isoformat(),"exit_price":trade.exit_price,"entry_bar_index":trade.entry_bar_index,"exit_bar_index":trade.exit_bar_index,"exit_reason":trade.exit_reason,"gross_pnl_points":trade.gross_pnl_points,"cost_points":trade.cost_points,"net_pnl_points":trade.net_pnl_points,"cost_breakdown":config.execution_cost_model.serialize() if config.execution_cost_model else {"cost_mode":"legacy_all_in","legacy_round_trip_cost_points":config.round_trip_cost_points,"total_round_trip_cost_points":config.round_trip_cost_points}}
+def _cost_report_lines(config):
+    detail=config.get("execution_cost_model")
+    if not detail: return ["- Cost mode: legacy_all_in",f"- Legacy round-trip cost points: {config['round_trip_cost_points']}",f"- Total round-trip cost points: {config['effective_round_trip_cost_points']}"]
+    return [f"- Cost mode: {config['cost_mode']}",*[f"- {name}: {detail[name]}" for name in ("scenario_name","instrument","currency","point_value_currency_per_point","commission_currency_per_side","commission_round_trip_currency","commission_round_trip_points","round_trip_spread_points","entry_slippage_points","exit_slippage_points","total_round_trip_cost_points")]]
 
 
 __all__ = ["MultiTimeframeStabilityError", "create_multitimeframe_breakout_stability_study"]

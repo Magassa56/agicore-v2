@@ -174,30 +174,39 @@ def _run_trading_resample_ohlcv(args: argparse.Namespace) -> int:
 def _run_trading_study_breakout(args: argparse.Namespace) -> int:
     try:
         from agicore.trading.multitimeframe_breakout_study import MultiTimeframeStudyError, create_multitimeframe_breakout_study
-        output=create_multitimeframe_breakout_study(args.csv,args.output_dir,args.round_trip_cost_points,args.side_policy)
-    except MultiTimeframeStudyError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+        output=create_multitimeframe_breakout_study(args.csv,args.output_dir,args.round_trip_cost_points,args.side_policy,_breakout_cost_model(args))
+    except (MultiTimeframeStudyError,ValueError) as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Multi-timeframe breakout study written to: {output}\n"); return 0
 
 def _run_trading_study_breakout_stability(args: argparse.Namespace) -> int:
     try:
         from agicore.trading.multitimeframe_breakout_stability import MultiTimeframeStabilityError, create_multitimeframe_breakout_stability_study
-        output=create_multitimeframe_breakout_stability_study(args.csv,args.output_dir,round_trip_cost_points=args.round_trip_cost_points,window_bars=args.window_bars)
-    except MultiTimeframeStabilityError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+        output=create_multitimeframe_breakout_stability_study(args.csv,args.output_dir,round_trip_cost_points=args.round_trip_cost_points,window_bars=args.window_bars,execution_cost_model=_breakout_cost_model(args))
+    except (MultiTimeframeStabilityError,ValueError) as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Multi-timeframe breakout stability study written to: {output}\n"); return 0
 
 def _run_trading_study_breakout_walk_forward(args: argparse.Namespace) -> int:
     try:
         from agicore.trading.walk_forward_breakout import WalkForwardBreakoutError, create_walk_forward_breakout_study
-        output=create_walk_forward_breakout_study(args.csv,args.output_dir,initial_train_bars=args.initial_train_bars,validation_bars=args.validation_bars,oos_bars=args.oos_bars,lookback_bars=args.lookback_bars,round_trip_cost_points=args.round_trip_cost_points,side_policy=args.side_policy)
-    except WalkForwardBreakoutError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+        output=create_walk_forward_breakout_study(args.csv,args.output_dir,initial_train_bars=args.initial_train_bars,validation_bars=args.validation_bars,oos_bars=args.oos_bars,lookback_bars=args.lookback_bars,round_trip_cost_points=args.round_trip_cost_points,side_policy=args.side_policy,execution_cost_model=_breakout_cost_model(args))
+    except (WalkForwardBreakoutError,ValueError) as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Breakout walk-forward study written to: {output}\n"); return 0
 
 def _run_trading_study_breakout_temporal_oos(args: argparse.Namespace) -> int:
     try:
         from agicore.trading.temporal_breakout_oos import TemporalBreakoutOOSError, create_temporal_breakout_oos_study
-        output=create_temporal_breakout_oos_study(args.csv,args.output_dir,lookback_bars=args.lookback_bars,round_trip_cost_points=args.round_trip_cost_points,side_policy=args.side_policy,train_ratio=args.train_ratio,validation_ratio=args.validation_ratio,oos_ratio=args.oos_ratio)
-    except TemporalBreakoutOOSError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+        output=create_temporal_breakout_oos_study(args.csv,args.output_dir,lookback_bars=args.lookback_bars,round_trip_cost_points=args.round_trip_cost_points,side_policy=args.side_policy,train_ratio=args.train_ratio,validation_ratio=args.validation_ratio,oos_ratio=args.oos_ratio,execution_cost_model=_breakout_cost_model(args))
+    except (TemporalBreakoutOOSError,ValueError) as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Temporal breakout train/validation/OOS study written to: {output}\n"); return 0
+
+def _breakout_cost_model(args: argparse.Namespace):
+    names=("cost_scenario","cost_instrument","cost_currency","point_value","commission_per_side","spread_points","entry_slippage_points","exit_slippage_points")
+    supplied=[name for name in names if getattr(args,name,None) is not None]
+    if not supplied: return None
+    missing=[name for name in names if getattr(args,name,None) is None]
+    if missing: raise ValueError("Detailed execution cost requires all options: "+", ".join("--"+name.replace("_","-") for name in missing))
+    from agicore.trading.breakout_execution_costs import BreakoutExecutionCostModel
+    return BreakoutExecutionCostModel(args.cost_scenario,args.cost_instrument,args.cost_currency,args.point_value,args.commission_per_side,args.spread_points,args.entry_slippage_points,args.exit_slippage_points)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -285,6 +294,9 @@ def _build_parser() -> argparse.ArgumentParser:
     walk_p.add_argument("csv"); walk_p.add_argument("--output-dir",required=True); walk_p.add_argument("--initial-train-bars",type=int,required=True); walk_p.add_argument("--validation-bars",type=int,required=True); walk_p.add_argument("--oos-bars",type=int,required=True); walk_p.add_argument("--lookback-bars",type=int,default=240); walk_p.add_argument("--round-trip-cost-points",type=float,default=1.0); walk_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
     temporal_p=trading_sub.add_parser("study-breakout-temporal-oos",help="Replay breakout in strict train, validation, and OOS segments.")
     temporal_p.add_argument("csv"); temporal_p.add_argument("--output-dir",required=True); temporal_p.add_argument("--lookback-bars",type=int,default=240); temporal_p.add_argument("--round-trip-cost-points",type=float,default=1.0); temporal_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH"); temporal_p.add_argument("--train-ratio",type=float,default=0.6); temporal_p.add_argument("--validation-ratio",type=float,default=0.2); temporal_p.add_argument("--oos-ratio",type=float,default=0.2)
+    for cost_parser in (study_p,stability_p,walk_p,temporal_p):
+        cost_parser.add_argument("--cost-scenario"); cost_parser.add_argument("--cost-instrument"); cost_parser.add_argument("--cost-currency")
+        cost_parser.add_argument("--point-value",type=float); cost_parser.add_argument("--commission-per-side",type=float); cost_parser.add_argument("--spread-points",type=float); cost_parser.add_argument("--entry-slippage-points",type=float); cost_parser.add_argument("--exit-slippage-points",type=float)
     output_group.add_argument(
         "--output-dir",
         help="Directory in which to create the complete local analysis bundle.",

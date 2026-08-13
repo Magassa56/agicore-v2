@@ -32,8 +32,8 @@ def test_chronological_stability_bundle_is_canonical_and_deterministic(tmp_path)
     second = [row for row in results if row["input_filename"] == "a.csv" and row["window_index"] == 1][0]
     assert first["source_end_timestamp"] < second["source_start_timestamp"]
     assert summary["dropped_incomplete_window_bar_count"] == {"a.csv": 50, "b.csv": 50}
-    assert summary["schema_version"] == "1.1"
-    assert manifest["schema_version"] == "1.1"
+    assert summary["schema_version"] == "1.2"
+    assert manifest["schema_version"] == "1.2"
     text = json.dumps({"summary": summary, "results": results})
     assert not any(word in text.lower() for word in ("best", "winner", "ranking", "recommended", "selected", "score"))
 
