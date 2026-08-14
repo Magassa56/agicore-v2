@@ -199,6 +199,13 @@ def _run_trading_study_breakout_temporal_oos(args: argparse.Namespace) -> int:
     except (TemporalBreakoutOOSError,ValueError) as exc: sys.stderr.write(f"error: {exc}\n"); return 2
     sys.stdout.write(f"Temporal breakout train/validation/OOS study written to: {output}\n"); return 0
 
+def _run_trading_study_breakout_cost_scenarios(args: argparse.Namespace) -> int:
+    try:
+        from agicore.trading.walk_forward_cost_scenarios import WalkForwardCostScenarioError, create_walk_forward_cost_scenario_study
+        output=create_walk_forward_cost_scenario_study(args.csv,args.output_dir,args.scenarios_json,reference_scenario=args.reference_scenario,initial_train_bars=args.initial_train_bars,validation_bars=args.validation_bars,oos_bars=args.oos_bars,lookback_bars=args.lookback_bars,side_policy=args.side_policy)
+    except WalkForwardCostScenarioError as exc: sys.stderr.write(f"error: {exc}\n"); return 2
+    sys.stdout.write(f"Breakout cost-scenario study written to: {output}\n"); return 0
+
 def _breakout_cost_model(args: argparse.Namespace):
     names=("cost_scenario","cost_instrument","cost_currency","point_value","commission_per_side","spread_points","entry_slippage_points","exit_slippage_points")
     supplied=[name for name in names if getattr(args,name,None) is not None]
@@ -292,6 +299,8 @@ def _build_parser() -> argparse.ArgumentParser:
     stability_p.add_argument("csv",nargs="+"); stability_p.add_argument("--output-dir",required=True); stability_p.add_argument("--round-trip-cost-points",type=float,default=1.0); stability_p.add_argument("--window-bars",type=int,required=True)
     walk_p=trading_sub.add_parser("study-breakout-walk-forward",help="Evaluate a fixed breakout in explicit expanding walk-forward folds.")
     walk_p.add_argument("csv"); walk_p.add_argument("--output-dir",required=True); walk_p.add_argument("--initial-train-bars",type=int,required=True); walk_p.add_argument("--validation-bars",type=int,required=True); walk_p.add_argument("--oos-bars",type=int,required=True); walk_p.add_argument("--lookback-bars",type=int,default=240); walk_p.add_argument("--round-trip-cost-points",type=float,default=1.0); walk_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
+    scenarios_p=trading_sub.add_parser("study-breakout-cost-scenarios",help="Compare explicit detailed cost scenarios for fixed breakout walk-forward.")
+    scenarios_p.add_argument("csv"); scenarios_p.add_argument("--scenarios-json",required=True); scenarios_p.add_argument("--reference-scenario",required=True); scenarios_p.add_argument("--output-dir",required=True); scenarios_p.add_argument("--initial-train-bars",type=int,required=True); scenarios_p.add_argument("--validation-bars",type=int,required=True); scenarios_p.add_argument("--oos-bars",type=int,required=True); scenarios_p.add_argument("--lookback-bars",type=int,default=240); scenarios_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH")
     temporal_p=trading_sub.add_parser("study-breakout-temporal-oos",help="Replay breakout in strict train, validation, and OOS segments.")
     temporal_p.add_argument("csv"); temporal_p.add_argument("--output-dir",required=True); temporal_p.add_argument("--lookback-bars",type=int,default=240); temporal_p.add_argument("--round-trip-cost-points",type=float,default=1.0); temporal_p.add_argument("--side-policy",choices=("BOTH","LONG_ONLY","SHORT_ONLY"),default="BOTH"); temporal_p.add_argument("--train-ratio",type=float,default=0.6); temporal_p.add_argument("--validation-ratio",type=float,default=0.2); temporal_p.add_argument("--oos-ratio",type=float,default=0.2)
     for cost_parser in (study_p,stability_p,walk_p,temporal_p):
@@ -372,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_trading_study_breakout_stability(args)
     if args.command == "trading" and args.trading_command == "study-breakout-walk-forward":
         return _run_trading_study_breakout_walk_forward(args)
+    if args.command == "trading" and args.trading_command == "study-breakout-cost-scenarios":
+        return _run_trading_study_breakout_cost_scenarios(args)
     if args.command == "trading" and args.trading_command == "study-breakout-temporal-oos":
         return _run_trading_study_breakout_temporal_oos(args)
 
