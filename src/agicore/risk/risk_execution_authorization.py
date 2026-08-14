@@ -20,6 +20,7 @@ from .risk_manager import RiskManager
 
 
 AUTHORIZATION_SCHEMA_VERSION = "risk-execution-authorization/1.0"
+CONSUMPTION_SCHEMA_VERSION = "risk-execution-consumption/1.0"
 
 
 class RiskAuthorizationError(ValueError):
@@ -246,6 +247,101 @@ class RiskAuthorizationDecision:
             return False
 
 
+@dataclass(frozen=True)
+class RiskAuthorizationConsumption:
+    """Deterministic evidence that an issued authorization was consumed once."""
+
+    schema_version: str
+    consumption_id: str
+    authorization_id: str
+    decision_hash: str
+    provider_id: str
+    intent_id: str
+    intent_hash: str
+    context_state_version: int
+    context_state_hash: str
+    risk_limits_hash: str
+    consumption_hash: str
+
+    @classmethod
+    def _from_decision(cls, decision: RiskAuthorizationDecision) -> "RiskAuthorizationConsumption":
+        if not isinstance(decision, RiskAuthorizationDecision) or not decision.is_intact():
+            raise RiskAuthorizationError("INVALID_AUTHORIZATION", "cannot consume an invalid decision")
+        if not decision.allowed:
+            raise RiskAuthorizationError("RISK_AUTHORIZATION_BLOCKED", "cannot consume a blocked decision")
+        fields = {
+            "schema_version": CONSUMPTION_SCHEMA_VERSION,
+            "authorization_id": decision.authorization_id,
+            "decision_hash": decision.decision_hash,
+            "provider_id": decision.provider_id,
+            "intent_id": decision.intent_id,
+            "intent_hash": decision.intent_hash,
+            "context_state_version": decision.context_state_version,
+            "context_state_hash": decision.context_state_hash,
+            "risk_limits_hash": decision.risk_limits_hash,
+        }
+        consumption_hash = _sha256(fields)
+        return cls(
+            consumption_id=f"risk-consumption-{consumption_hash}",
+            consumption_hash=consumption_hash,
+            **fields,
+        )
+
+    def fields_without_identity(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "authorization_id": self.authorization_id,
+            "decision_hash": self.decision_hash,
+            "provider_id": self.provider_id,
+            "intent_id": self.intent_id,
+            "intent_hash": self.intent_hash,
+            "context_state_version": self.context_state_version,
+            "context_state_hash": self.context_state_hash,
+            "risk_limits_hash": self.risk_limits_hash,
+        }
+
+    def canonical(self) -> Mapping[str, object]:
+        return MappingProxyType({
+            **self.fields_without_identity(),
+            "consumption_id": self.consumption_id,
+            "consumption_hash": self.consumption_hash,
+        })
+
+    def is_intact(self) -> bool:
+        try:
+            if self.schema_version != CONSUMPTION_SCHEMA_VERSION:
+                return False
+            identifiers = (
+                self.authorization_id,
+                self.provider_id,
+                self.intent_id,
+                self.consumption_id,
+            )
+            if not all(isinstance(value, str) and value.strip() for value in identifiers):
+                return False
+            hashes = (
+                self.decision_hash,
+                self.intent_hash,
+                self.context_state_hash,
+                self.risk_limits_hash,
+                self.consumption_hash,
+            )
+            if not all(_is_sha256_hex(value) for value in hashes):
+                return False
+            if isinstance(self.context_state_version, bool) or not isinstance(self.context_state_version, int):
+                return False
+            if self.context_state_version < 0:
+                return False
+            if self.authorization_id != f"risk-auth-{self.decision_hash}":
+                return False
+            return (
+                self.consumption_hash == _sha256(self.fields_without_identity())
+                and self.consumption_id == f"risk-consumption-{self.consumption_hash}"
+            )
+        except Exception:
+            return False
+
+
 class RiskAuthorizationBoundary:
     """Read-only boundary between an intent, exact context, and RiskManager."""
 
@@ -254,6 +350,18 @@ class RiskAuthorizationBoundary:
         self._context_provider = context_provider
         self._registry_lock = threading.RLock()
         self._issued_decisions: dict[str, RiskAuthorizationDecision] = {}
+        self._consumption_state: Mapping[str, RiskAuthorizationConsumption] = MappingProxyType({})
+
+    @property
+    def consumptions(self) -> tuple[RiskAuthorizationConsumption, ...]:
+        """Return a canonical, immutable audit view of successful consumptions."""
+        with self._registry_lock:
+            return tuple(
+                sorted(
+                    self._consumption_state.values(),
+                    key=lambda item: (item.intent_id, item.decision_hash),
+                )
+            )
 
     def authorize(
         self,
@@ -315,45 +423,103 @@ class RiskAuthorizationBoundary:
                 guard_codes=("RISK_MANAGER_EXCEPTION",),
             ))
 
-    def verify_for_execution(self, decision: object, intent: object) -> None:
+    def verify_for_execution(
+        self,
+        decision: object,
+        intent: object,
+    ) -> RiskAuthorizationConsumption:
         if not isinstance(decision, RiskAuthorizationDecision) or not decision.is_intact():
             raise RiskAuthorizationError("INVALID_AUTHORIZATION", "authorization decision integrity check failed")
         with self._registry_lock:
             issued = self._issued_decisions.get(decision.decision_hash)
-        if issued is None or issued != decision:
-            raise RiskAuthorizationError("UNISSUED_AUTHORIZATION", "decision was not issued by this boundary")
-        if not decision.allowed:
-            raise RiskAuthorizationError("RISK_AUTHORIZATION_BLOCKED", "authorization decision is blocked")
-        intent_canonical = _intent_canonical(intent)  # type: ignore[arg-type]
-        if decision.intent_id != intent_canonical["intent_id"] or decision.intent_hash != _sha256(intent_canonical):
-            raise RiskAuthorizationError("AUTHORIZATION_INTENT_MISMATCH", "authorization decision does not match intent")
-        try:
-            context = self._context_provider.snapshot()
-        except Exception as exc:
-            raise RiskAuthorizationError("CONTEXT_PROVIDER_ERROR", "context provider snapshot failed") from exc
-        if not isinstance(context, RiskExecutionContext):
-            raise RiskAuthorizationError("CONTEXT_PROVIDER_ERROR", "context provider returned an invalid snapshot")
-        if decision.provider_id != context.provider_id:
-            raise RiskAuthorizationError("AUTHORIZATION_PROVIDER_MISMATCH", "authorization provider does not match current provider")
-        if (
-            decision.context_state_version != context.state_version
-            or decision.context_state_hash != context.state_hash
-        ):
-            raise RiskAuthorizationError("STALE_RISK_CONTEXT", "authorization context is no longer current")
-        if decision.risk_limits_hash != _sha256(_limits_canonical(context.risk_limits)):
-            raise RiskAuthorizationError("AUTHORIZATION_LIMITS_MISMATCH", "authorization limits are no longer current")
-        try:
-            manager_limits = _limits_canonical(self._risk_manager.limits)
-        except Exception as exc:
-            raise RiskAuthorizationError("RISK_LIMITS_MISMATCH", "risk manager limits are invalid") from exc
-        if manager_limits != _limits_canonical(context.risk_limits):
-            raise RiskAuthorizationError("RISK_LIMITS_MISMATCH", "risk manager limits differ from current context")
-        try:
-            self._context_provider.assert_current(context.state_version, context.state_hash)
-        except RiskContextError as exc:
-            raise RiskAuthorizationError("STALE_RISK_CONTEXT", "authorization context changed during verification") from exc
-        except Exception as exc:
-            raise RiskAuthorizationError("CONTEXT_PROVIDER_ERROR", "context provider confirmation failed") from exc
+            if issued is None or issued != decision:
+                raise RiskAuthorizationError("UNISSUED_AUTHORIZATION", "decision was not issued by this boundary")
+            if not decision.allowed:
+                raise RiskAuthorizationError("RISK_AUTHORIZATION_BLOCKED", "authorization decision is blocked")
+            intent_canonical = _intent_canonical(intent)  # type: ignore[arg-type]
+            if decision.intent_id != intent_canonical["intent_id"] or decision.intent_hash != _sha256(intent_canonical):
+                raise RiskAuthorizationError("AUTHORIZATION_INTENT_MISMATCH", "authorization decision does not match intent")
+            if decision.decision_hash in self._consumption_state:
+                raise RiskAuthorizationError(
+                    "AUTHORIZATION_ALREADY_CONSUMED",
+                    "authorization decision was already consumed",
+                )
+            if any(record.intent_id == decision.intent_id for record in self._consumption_state.values()):
+                raise RiskAuthorizationError("INTENT_ALREADY_CONSUMED", "intent_id was already consumed")
+            try:
+                context = self._context_provider.snapshot()
+            except Exception as exc:
+                raise RiskAuthorizationError("CONTEXT_PROVIDER_ERROR", "context provider snapshot failed") from exc
+            if not isinstance(context, RiskExecutionContext):
+                raise RiskAuthorizationError("CONTEXT_PROVIDER_ERROR", "context provider returned an invalid snapshot")
+            if decision.provider_id != context.provider_id:
+                raise RiskAuthorizationError(
+                    "AUTHORIZATION_PROVIDER_MISMATCH",
+                    "authorization provider does not match current provider",
+                )
+            if (
+                decision.context_state_version != context.state_version
+                or decision.context_state_hash != context.state_hash
+            ):
+                raise RiskAuthorizationError("STALE_RISK_CONTEXT", "authorization context is no longer current")
+            if decision.risk_limits_hash != _sha256(_limits_canonical(context.risk_limits)):
+                raise RiskAuthorizationError(
+                    "AUTHORIZATION_LIMITS_MISMATCH",
+                    "authorization limits are no longer current",
+                )
+            try:
+                manager_limits = _limits_canonical(self._risk_manager.limits)
+            except Exception as exc:
+                raise RiskAuthorizationError("RISK_LIMITS_MISMATCH", "risk manager limits are invalid") from exc
+            if manager_limits != _limits_canonical(context.risk_limits):
+                raise RiskAuthorizationError(
+                    "RISK_LIMITS_MISMATCH",
+                    "risk manager limits differ from current context",
+                )
+            try:
+                self._context_provider.assert_current(context.state_version, context.state_hash)
+            except RiskContextError as exc:
+                raise RiskAuthorizationError(
+                    "STALE_RISK_CONTEXT",
+                    "authorization context changed during verification",
+                ) from exc
+            except Exception as exc:
+                raise RiskAuthorizationError("CONTEXT_PROVIDER_ERROR", "context provider confirmation failed") from exc
+            consumption = RiskAuthorizationConsumption._from_decision(decision)
+            next_state = dict(self._consumption_state)
+            next_state[decision.decision_hash] = consumption
+            immutable_next_state = MappingProxyType(next_state)
+            try:
+                self._publish_consumption_state(immutable_next_state)
+            except Exception as exc:
+                raise RiskAuthorizationError(
+                    "CONSUMPTION_PUBLICATION_ERROR",
+                    "authorization consumption could not be published atomically",
+                ) from exc
+            return consumption
+
+    def verify_consumption_evidence(
+        self,
+        record: object,
+    ) -> RiskAuthorizationConsumption:
+        """Verify structural integrity and local issuance of consumption evidence."""
+        if not isinstance(record, RiskAuthorizationConsumption) or not record.is_intact():
+            raise RiskAuthorizationError("INVALID_CONSUMPTION", "consumption evidence integrity check failed")
+        with self._registry_lock:
+            issued = self._consumption_state.get(record.decision_hash)
+            if issued is None or issued != record:
+                raise RiskAuthorizationError(
+                    "UNISSUED_CONSUMPTION",
+                    "consumption evidence was not issued by this boundary",
+                )
+            return issued
+
+    def _publish_consumption_state(
+        self,
+        next_state: Mapping[str, RiskAuthorizationConsumption],
+    ) -> None:
+        """Publish a fully constructed immutable state with one assignment."""
+        self._consumption_state = next_state
 
     def _preflight_codes(
         self,
@@ -421,6 +587,7 @@ def _safe_limits_hash(context: RiskExecutionContext) -> str:
 
 
 __all__ = [
-    "AUTHORIZATION_SCHEMA_VERSION", "RiskAuthorizationBoundary", "RiskAuthorizationDecision",
-    "RiskAuthorizationError", "RiskAuthorizationViolation",
+    "AUTHORIZATION_SCHEMA_VERSION", "CONSUMPTION_SCHEMA_VERSION", "RiskAuthorizationBoundary",
+    "RiskAuthorizationConsumption", "RiskAuthorizationDecision", "RiskAuthorizationError",
+    "RiskAuthorizationViolation",
 ]
