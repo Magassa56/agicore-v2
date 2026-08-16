@@ -11,12 +11,19 @@ import hashlib
 import json
 import math
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Mapping
 
-from agicore.risk.exposure_models import ExecutionIntent, ExposureSnapshot, IntentSide, RiskLimits
+from agicore.risk.exposure_models import (
+    ExecutionIntent,
+    ExposureSnapshot,
+    IntentSide,
+    RiskLimits,
+    SymbolExposure,
+)
 from agicore.risk.risk_execution_authorization import (
     RiskAuthorizationBoundary,
     RiskAuthorizationConsumption,
@@ -31,17 +38,24 @@ from agicore.risk.risk_execution_context import (
 )
 
 from .broker_models import OrderSide, OrderStatus, OrderType
+from .price_provider import L5PriceObservation, L5PriceProvider, L5PriceProviderError
 
 
-TRANSACTION_SCHEMA_VERSION = "l5-execution-transaction/1.0"
-PLAN_SCHEMA_VERSION = "l5-execution-plan/1.0"
-ELIGIBILITY_SCHEMA_VERSION = "l5-limit-eligibility/1.0"
+TRANSACTION_SCHEMA_VERSION = "l5-execution-transaction/1.1"
+PLAN_SCHEMA_VERSION = "l5-execution-plan/1.1"
+ELIGIBILITY_SCHEMA_VERSION = "l5-limit-eligibility/1.1"
 GENESIS_TRANSACTION_HASH = hashlib.sha256(
-    b'{"schema_version":"l5-execution-transaction/1.0","type":"GENESIS"}'
+    b'{"schema_version":"l5-execution-transaction/1.1","type":"GENESIS"}'
 ).hexdigest()
 OPERATION_KINDS = frozenset({"MARKET", "LIMIT_PLACEMENT", "LIMIT_FILL"})
 TRANSACTION_EVENT_TYPES = frozenset(
-    {"AGGREGATE_INITIALIZED", "MARKET_COMMITTED", "LIMIT_PLACED", "LIMIT_FILLED"}
+    {
+        "AGGREGATE_INITIALIZED",
+        "MARKET_COMMITTED",
+        "LIMIT_PLACED",
+        "LIMIT_FILLED",
+        "LIMIT_CANCELLED",
+    }
 )
 
 
@@ -142,6 +156,53 @@ def _intent_payload(intent: ExecutionIntent) -> dict[str, object]:
     }
 
 
+def _price_observation_from_payload(payload: object) -> L5PriceObservation:
+    if not isinstance(payload, Mapping):
+        raise L5ExecutionTransactionError(
+            "INVALID_PRICE_OBSERVATION",
+            "price observation payload is missing",
+        )
+    try:
+        observation = L5PriceObservation(
+            schema_version=payload["schema_version"],
+            provider_id=payload["provider_id"],
+            symbol=payload["symbol"],
+            price=payload["price"],
+            price_version=payload["price_version"],
+            observed_at=_parse_explicit_time(payload["observed_at"], "price observed_at"),
+            observation_hash=payload["observation_hash"],
+        )
+    except (KeyError, TypeError, ValueError, L5PriceProviderError) as exc:
+        raise L5ExecutionTransactionError(
+            "INVALID_PRICE_OBSERVATION",
+            "price observation payload is invalid",
+        ) from exc
+    if not observation.is_intact():
+        raise L5ExecutionTransactionError(
+            "INVALID_PRICE_OBSERVATION",
+            "price observation hash is invalid",
+        )
+    return observation
+
+
+def _require_price_observation(
+    observation: object,
+    *,
+    intent: ExecutionIntent,
+) -> L5PriceObservation:
+    if not isinstance(observation, L5PriceObservation) or not observation.is_intact():
+        raise L5ExecutionTransactionError(
+            "INVALID_PRICE_OBSERVATION",
+            "an intact authoritative price observation is required",
+        )
+    if observation.symbol != intent.symbol or observation.price != float(intent.estimated_price):
+        raise L5ExecutionTransactionError(
+            "AUTHORIZED_PRICE_MISMATCH",
+            "intent price differs from the authoritative observation",
+        )
+    return observation
+
+
 def _risk_event_payload(event: RiskExecutionJournalEvent) -> dict[str, object]:
     return {**event.fields_without_hash(), "event_hash": event.event_hash}
 
@@ -226,6 +287,7 @@ class L5TransactionOrder:
     submitted_at: datetime
     filled_at: datetime | None = None
     filled_price: float | None = None
+    cancelled_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in ("order_id", "placement_intent_id", "symbol"):
@@ -243,8 +305,16 @@ class L5TransactionOrder:
         if self.status == OrderStatus.FILLED:
             object.__setattr__(self, "filled_at", _explicit_time(self.filled_at, "filled_at"))
             object.__setattr__(self, "filled_price", _number(self.filled_price, "filled_price", positive=True))
+            if self.cancelled_at is not None:
+                raise L5ExecutionTransactionError("INVALID_TRANSACTION_DATA", "filled order cannot be cancelled")
+        elif self.status == OrderStatus.CANCELLED:
+            object.__setattr__(self, "cancelled_at", _explicit_time(self.cancelled_at, "cancelled_at"))
+            if self.filled_at is not None or self.filled_price is not None:
+                raise L5ExecutionTransactionError("INVALID_TRANSACTION_DATA", "cancelled order cannot publish fill fields")
         elif self.filled_at is not None or self.filled_price is not None:
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_DATA", "non-filled order cannot publish fill fields")
+        elif self.cancelled_at is not None:
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_DATA", "non-cancelled order cannot publish cancelled_at")
 
     def canonical(self) -> dict[str, object]:
         return {
@@ -259,6 +329,7 @@ class L5TransactionOrder:
             "submitted_at": self.submitted_at.isoformat(),
             "filled_at": self.filled_at.isoformat() if self.filled_at else None,
             "filled_price": self.filled_price,
+            "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else None,
         }
 
 
@@ -531,6 +602,11 @@ def _state_from_payload(
                 status=OrderStatus(value["status"]), submitted_at=datetime.fromisoformat(value["submitted_at"]),
                 filled_at=datetime.fromisoformat(value["filled_at"]) if value["filled_at"] else None,
                 filled_price=value["filled_price"],
+                cancelled_at=(
+                    datetime.fromisoformat(value["cancelled_at"])
+                    if value.get("cancelled_at")
+                    else None
+                ),
             ) for key, value in data["orders"].items()
         }
         positions = {key: L5TransactionPosition(**value) for key, value in data["positions"].items()}
@@ -568,6 +644,7 @@ class L5LimitFillEligibility:
     order_id: str
     aggregate_state_version: int
     aggregate_state_hash: str
+    price_observation_hash: str
     market_price: float
     observed_at: datetime
     eligible: bool
@@ -584,7 +661,11 @@ class L5LimitFillEligibility:
             or self.aggregate_state_version < 0
         ):
             raise L5ExecutionTransactionError("INVALID_LIMIT_ELIGIBILITY", "state version is invalid")
-        if not _is_hash(self.aggregate_state_hash) or not _is_hash(self.eligibility_hash):
+        if (
+            not _is_hash(self.aggregate_state_hash)
+            or not _is_hash(self.price_observation_hash)
+            or not _is_hash(self.eligibility_hash)
+        ):
             raise L5ExecutionTransactionError("INVALID_LIMIT_ELIGIBILITY", "eligibility hash is invalid")
         object.__setattr__(self, "market_price", _number(self.market_price, "market_price", positive=True))
         object.__setattr__(self, "observed_at", _explicit_time(self.observed_at, "observed_at"))
@@ -598,11 +679,20 @@ class L5LimitFillEligibility:
         eligibility_id: str,
         order: L5TransactionOrder,
         state: L5ExecutionAggregateState,
-        market_price: float,
-        observed_at: datetime,
+        price_observation: L5PriceObservation,
     ) -> "L5LimitFillEligibility":
-        price = _number(market_price, "market_price", positive=True)
-        observed = _explicit_time(observed_at, "observed_at")
+        if not isinstance(price_observation, L5PriceObservation) or not price_observation.is_intact():
+            raise L5ExecutionTransactionError(
+                "INVALID_PRICE_OBSERVATION",
+                "LIMIT eligibility requires an intact price observation",
+            )
+        if price_observation.symbol != order.symbol:
+            raise L5ExecutionTransactionError(
+                "INVALID_PRICE_OBSERVATION",
+                "price observation symbol differs from LIMIT order",
+            )
+        price = price_observation.price
+        observed = price_observation.observed_at
         if order.order_type != OrderType.LIMIT or order.status != OrderStatus.PENDING or order.limit_price is None:
             raise L5ExecutionTransactionError("INVALID_LIMIT_ORDER", "order is not a pending LIMIT")
         eligible = price <= order.limit_price if order.side == OrderSide.BUY else price >= order.limit_price
@@ -612,6 +702,7 @@ class L5LimitFillEligibility:
             "order_id": order.order_id,
             "aggregate_state_version": state.state_version,
             "aggregate_state_hash": state.state_hash,
+            "price_observation_hash": price_observation.observation_hash,
             "market_price": price,
             "observed_at": observed.isoformat(),
             "eligible": eligible,
@@ -625,6 +716,7 @@ class L5LimitFillEligibility:
             "order_id": self.order_id,
             "aggregate_state_version": self.aggregate_state_version,
             "aggregate_state_hash": self.aggregate_state_hash,
+            "price_observation_hash": self.price_observation_hash,
             "market_price": self.market_price,
             "observed_at": self.observed_at.isoformat(),
             "eligible": self.eligible,
@@ -652,6 +744,7 @@ def _eligibility_from_payload(payload: object) -> L5LimitFillEligibility:
             order_id=payload["order_id"],
             aggregate_state_version=payload["aggregate_state_version"],
             aggregate_state_hash=payload["aggregate_state_hash"],
+            price_observation_hash=payload["price_observation_hash"],
             market_price=payload["market_price"],
             observed_at=_parse_explicit_time(payload["observed_at"], "eligibility observed_at"),
             eligible=payload["eligible"],
@@ -670,13 +763,13 @@ def _require_authoritative_limit_eligibility(
     state: L5ExecutionAggregateState,
     order: L5TransactionOrder,
     eligibility: L5LimitFillEligibility,
+    price_observation: L5PriceObservation,
 ) -> L5LimitFillEligibility:
     expected = L5LimitFillEligibility._create(
         eligibility_id=eligibility.eligibility_id,
         order=order,
         state=state,
-        market_price=eligibility.market_price,
-        observed_at=eligibility.observed_at,
+        price_observation=price_observation,
     )
     if eligibility != expected:
         raise L5ExecutionTransactionError(
@@ -704,6 +797,7 @@ class L5ExecutionTransactionPlan:
     fill_price: float | None
     filled_at: datetime | None
     limit_price: float | None
+    price_observation: L5PriceObservation | None
     eligibility: L5LimitFillEligibility | None
     transition: FillTransition | None
     consumption: RiskAuthorizationConsumption
@@ -747,6 +841,7 @@ class L5ExecutionTransactionPlan:
                 or self.fill_price is None
                 or self.filled_at is None
                 or self.transition is None
+                or self.price_observation is None
                 or self.limit_price is not None
                 or self.eligibility is not None
             ):
@@ -758,6 +853,7 @@ class L5ExecutionTransactionPlan:
                 or self.fill_id is not None
                 or self.fill_price is not None
                 or self.filled_at is not None
+                or self.price_observation is not None
                 or self.eligibility is not None
                 or self.transition is not None
             ):
@@ -768,6 +864,7 @@ class L5ExecutionTransactionPlan:
                 or self.filled_at is None
                 or self.eligibility is None
                 or self.transition is None
+                or self.price_observation is None
                 or self.submitted_at is not None
                 or self.fill_price is not None
                 or self.limit_price is not None
@@ -783,6 +880,14 @@ class L5ExecutionTransactionPlan:
             object.__setattr__(self, "fill_price", _number(self.fill_price, "fill_price", positive=True))
         if self.limit_price is not None:
             object.__setattr__(self, "limit_price", _number(self.limit_price, "limit_price", positive=True))
+        if self.price_observation is not None and (
+            not isinstance(self.price_observation, L5PriceObservation)
+            or not self.price_observation.is_intact()
+        ):
+            raise L5ExecutionTransactionError(
+                "INVALID_TRANSACTION_PLAN",
+                "price observation is invalid",
+            )
         if self.eligibility is not None and (
             not isinstance(self.eligibility, L5LimitFillEligibility)
             or not self.eligibility.is_intact()
@@ -808,6 +913,7 @@ class L5ExecutionTransactionPlan:
         fill_price: float | None = None,
         filled_at: datetime | None = None,
         limit_price: float | None = None,
+        price_observation: L5PriceObservation | None = None,
         eligibility: L5LimitFillEligibility | None = None,
         transition: FillTransition | None = None,
     ) -> "L5ExecutionTransactionPlan":
@@ -829,6 +935,9 @@ class L5ExecutionTransactionPlan:
             "fill_price": fill_price,
             "filled_at": filled_at.isoformat() if filled_at is not None else None,
             "limit_price": limit_price,
+            "price_observation": (
+                price_observation.canonical() if price_observation is not None else None
+            ),
             "eligibility": eligibility.fields_without_hash() | {"eligibility_hash": eligibility.eligibility_hash}
             if eligibility is not None
             else None,
@@ -846,6 +955,7 @@ class L5ExecutionTransactionPlan:
             fill_price=fill_price,
             filled_at=filled_at,
             limit_price=limit_price,
+            price_observation=price_observation,
             eligibility=eligibility,
             transition=transition,
             **{
@@ -861,6 +971,7 @@ class L5ExecutionTransactionPlan:
                     "fill_price",
                     "filled_at",
                     "limit_price",
+                    "price_observation",
                     "eligibility",
                     "transition",
                 }
@@ -885,6 +996,9 @@ class L5ExecutionTransactionPlan:
             "fill_price": self.fill_price,
             "filled_at": self.filled_at.isoformat() if self.filled_at else None,
             "limit_price": self.limit_price,
+            "price_observation": (
+                self.price_observation.canonical() if self.price_observation else None
+            ),
             "eligibility": (
                 self.eligibility.fields_without_hash() | {"eligibility_hash": self.eligibility.eligibility_hash}
                 if self.eligibility
@@ -905,6 +1019,10 @@ class L5ExecutionTransactionPlan:
                 and _is_hash(self.intent_hash)
                 and _is_hash(self.plan_hash)
                 and self.operation_kind in OPERATION_KINDS
+                and (
+                    self.price_observation is None
+                    or self.price_observation.is_intact()
+                )
                 and (self.eligibility is None or self.eligibility.is_intact())
                 and (self.transition is None or isinstance(self.transition, FillTransition))
                 and self.intent_hash == _sha256(_intent_payload(self.intent))
@@ -944,8 +1062,14 @@ class L5ExecutionTransactionStore:
         *,
         initial_context: RiskExecutionContext,
         initial_risk_journal: tuple[RiskExecutionJournalEvent, ...],
+        price_provider: L5PriceProvider,
         initial_positions: Mapping[str, L5TransactionPosition] | None = None,
     ) -> None:
+        if not isinstance(price_provider, L5PriceProvider):
+            raise L5ExecutionTransactionError(
+                "INVALID_PRICE_PROVIDER",
+                "price_provider must implement L5PriceProvider",
+            )
         positions = dict(initial_positions or {})
         base = L5ExecutionAggregateState(
             state_version=0, orders={}, positions=positions, fills={}, reports={},
@@ -959,6 +1083,7 @@ class L5ExecutionTransactionStore:
         self._state = replace(base, execution_journal=(genesis,))
         self._lock = threading.RLock()
         self._context_provider = AggregateRiskContextProvider(self)
+        self._price_provider = price_provider
 
     @property
     def state(self) -> L5ExecutionAggregateState:
@@ -968,6 +1093,10 @@ class L5ExecutionTransactionStore:
     @property
     def context_provider(self) -> AggregateRiskContextProvider:
         return self._context_provider
+
+    @property
+    def price_provider(self) -> L5PriceProvider:
+        return self._price_provider
 
     def prepare_market(
         self,
@@ -983,6 +1112,7 @@ class L5ExecutionTransactionStore:
         fill_price: float,
         filled_at: datetime,
         transition: FillTransition,
+        price_observation: L5PriceObservation | None = None,
     ) -> L5ExecutionTransactionPlan:
         self._validate_consumption_provenance(boundary, consumption)
         with self._lock:
@@ -1001,6 +1131,11 @@ class L5ExecutionTransactionStore:
                 fill_price=fill_price,
                 filled_at=filled_at,
                 transition=transition,
+                price_observation=(
+                    price_observation
+                    if price_observation is not None
+                    else self._price_provider.snapshot(intent.symbol)
+                ),
             )
 
     def prepare_limit_placement(
@@ -1036,30 +1171,192 @@ class L5ExecutionTransactionStore:
         *,
         order_id: str,
         eligibility_id: str,
-        market_price: float,
-        observed_at: datetime,
+        price_observation: L5PriceObservation | None = None,
+        market_price: float | None = None,
+        observed_at: datetime | None = None,
     ) -> L5LimitFillEligibility:
         with self._lock:
             order = self._state.orders.get(order_id)
             if order is None:
                 raise L5ExecutionTransactionError("ORDER_NOT_FOUND", "pending order does not exist")
+            observation = (
+                price_observation
+                if price_observation is not None
+                else self._price_provider.snapshot(order.symbol)
+            )
+            if market_price is not None and observation.price != float(market_price):
+                raise L5ExecutionTransactionError(
+                    "AUTHORIZED_PRICE_MISMATCH",
+                    "caller market_price differs from authoritative observation",
+                )
+            if observed_at is not None and observation.observed_at != observed_at:
+                raise L5ExecutionTransactionError(
+                    "STALE_PRICE_OBSERVATION",
+                    "caller observed_at differs from authoritative observation",
+                )
             return L5LimitFillEligibility._create(
                 eligibility_id=eligibility_id, order=order, state=self._state,
-                market_price=market_price, observed_at=observed_at,
+                price_observation=observation,
             )
+
+    def derive_fill_transition(
+        self,
+        *,
+        intent: ExecutionIntent,
+        fill_id: str,
+        fill_price: float,
+        filled_at: datetime,
+    ) -> FillTransition:
+        """Derive accounting/risk state from the authoritative aggregate.
+
+        Callers provide identities and the already-authorized execution price;
+        they cannot provide post-fill positions or PnL.  A later CAS in
+        :meth:`commit` rejects the plan if this source state changed.
+        """
+        _intent_payload(intent)
+        price = _number(fill_price, "fill_price", positive=True)
+        filled = _explicit_time(filled_at, "filled_at")
+        with self._lock:
+            current = self._state
+            fill = L5TransactionFill(
+                fill_id=fill_id,
+                order_id="derived-transition-order",
+                intent_id=intent.intent_id,
+                symbol=intent.symbol,
+                side=_order_side(intent.side),
+                quantity=intent.quantity,
+                price=price,
+                filled_at=filled,
+            )
+            positions = dict(current.positions)
+            positions[fill.symbol] = _next_position(positions.get(fill.symbol), fill)
+            snapshot_positions: dict[str, SymbolExposure] = {}
+            for symbol, position in positions.items():
+                if position.quantity <= 0:
+                    continue
+                previous = current.risk_context.exposure_snapshot.positions.get(symbol)
+                mark_price = price if symbol == fill.symbol else (
+                    previous.mark_price if previous is not None else position.avg_entry_price
+                )
+                snapshot_positions[symbol] = SymbolExposure(
+                    symbol=symbol,
+                    quantity=position.quantity,
+                    avg_entry_price=position.avg_entry_price,
+                    mark_price=mark_price,
+                )
+            realized_total = sum(position.realized_pnl for position in positions.values())
+            realized_delta = (
+                realized_total
+                - current.risk_context.exposure_snapshot.realized_pnl_total
+            )
+            daily_pnl = current.risk_context.daily_realized_pnl + realized_delta
+            initial_equity = current.risk_context.exposure_snapshot.initial_equity
+            current_equity = initial_equity + realized_total
+            peak_equity = max(current.risk_context.peak_equity, current_equity)
+            snapshot = ExposureSnapshot(
+                positions=snapshot_positions,
+                realized_pnl_total=realized_total,
+                daily_pnl=daily_pnl,
+                initial_equity=initial_equity,
+                peak_equity=peak_equity,
+            )
+            return FillTransition(
+                intent_id=intent.intent_id,
+                fill_id=fill_id,
+                signed_positions={
+                    symbol: position.quantity
+                    for symbol, position in positions.items()
+                },
+                exposure_snapshot=snapshot,
+                daily_realized_pnl=daily_pnl,
+                current_equity=current_equity,
+                expected_peak_equity=peak_equity,
+                payload={
+                    "source": "l5-execution-transaction-store",
+                    "aggregate_state_version": current.state_version,
+                    "aggregate_state_hash": current.state_hash,
+                },
+            )
+
+    def cancel_limit(
+        self,
+        *,
+        operation_id: str,
+        order_id: str,
+        report_id: str,
+        cancelled_at: datetime,
+    ) -> L5ExecutionAggregateState:
+        """Atomically cancel one pending LIMIT in the aggregate authority."""
+        cancelled = _explicit_time(cancelled_at, "cancelled_at")
+        with self._lock:
+            current = self._state
+            self._require_new_ids(current, operation_id, None, None, report_id)
+            order = current.orders.get(_identifier(order_id, "order_id"))
+            if order is None:
+                raise L5ExecutionTransactionError("ORDER_NOT_FOUND", "pending order does not exist")
+            if order.order_type != OrderType.LIMIT or order.status != OrderStatus.PENDING:
+                raise L5ExecutionTransactionError("INVALID_LIMIT_ORDER", "order is not a pending LIMIT")
+            if cancelled < order.submitted_at:
+                raise L5ExecutionTransactionError(
+                    "INVALID_TRANSACTION_CHRONOLOGY",
+                    "cancellation precedes LIMIT placement",
+                )
+            cancelled_order = replace(
+                order,
+                status=OrderStatus.CANCELLED,
+                cancelled_at=cancelled,
+            )
+            report = L5TransactionReport(
+                report_id=report_id,
+                order_id=order.order_id,
+                status=OrderStatus.CANCELLED,
+                occurred_at=cancelled,
+                message="limit order cancelled",
+            )
+            next_state = self._build_state(
+                current=current,
+                operation_id=operation_id,
+                event_type="LIMIT_CANCELLED",
+                orders={**current.orders, order.order_id: cancelled_order},
+                positions=current.positions,
+                fills=current.fills,
+                reports={**current.reports, report.report_id: report},
+                risk_context=current.risk_context,
+                risk_journal=current.risk_journal,
+                consumption=None,
+                operation_inputs={
+                    "order_id": order.order_id,
+                    "report_id": report.report_id,
+                    "cancelled_at": cancelled.isoformat(),
+                },
+            )
+            _validate_transaction_delta(current, next_state, next_state.execution_journal[-1])
+            _validate_execution_transaction_chain(
+                next_state.execution_journal,
+                expected_final_hash=next_state.execution_journal[-1].event_hash,
+            )
+            try:
+                self._publish_state(next_state)
+            except Exception as exc:
+                raise L5ExecutionTransactionError(
+                    "TRANSACTION_PUBLICATION_FAILED",
+                    "aggregate publication failed",
+                ) from exc
+            return self._state
 
     def prepare_limit_fill(
         self,
         *,
         boundary: RiskAuthorizationBoundary,
         intent: ExecutionIntent,
-        consumption: RiskAuthorizationConsumption,
+        consumption: RiskAuthorizationConsumption | None,
         eligibility: L5LimitFillEligibility,
         operation_id: str,
         fill_id: str,
         report_id: str,
         filled_at: datetime,
         transition: FillTransition,
+        price_observation: L5PriceObservation | None = None,
     ) -> L5ExecutionTransactionPlan:
         self._validate_consumption_provenance(boundary, consumption)
         with self._lock:
@@ -1076,6 +1373,11 @@ class L5ExecutionTransactionStore:
                 report_id=report_id,
                 filled_at=filled_at,
                 transition=transition,
+                price_observation=(
+                    price_observation
+                    if price_observation is not None
+                    else self._price_provider.snapshot(intent.symbol)
+                ),
             )
 
     def _prepare_market_from_state(
@@ -1092,15 +1394,22 @@ class L5ExecutionTransactionStore:
         fill_price: float,
         filled_at: datetime,
         transition: FillTransition,
+        price_observation: L5PriceObservation,
     ) -> L5ExecutionTransactionPlan:
         _intent_payload(intent)
         submitted = _explicit_time(submitted_at, "submitted_at")
         filled = _explicit_time(filled_at, "filled_at")
         price = _number(fill_price, "fill_price", positive=True)
+        observation = _require_price_observation(price_observation, intent=intent)
         if intent.timestamp > submitted or submitted > filled:
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_CHRONOLOGY", "MARKET chronology is invalid")
         if price != float(intent.estimated_price):
             raise L5ExecutionTransactionError("AUTHORIZED_PRICE_MISMATCH", "fill price differs from authorized price")
+        if price != observation.price or observation.observed_at > intent.timestamp:
+            raise L5ExecutionTransactionError(
+                "AUTHORIZED_PRICE_MISMATCH",
+                "MARKET fill differs from the authoritative observation",
+            )
         self._require_new_ids(current, operation_id, order_id, fill_id, report_id)
         order = L5TransactionOrder(
             order_id=order_id,
@@ -1150,6 +1459,7 @@ class L5ExecutionTransactionStore:
                 "submitted_at": submitted.isoformat(),
                 "fill_price": price,
                 "filled_at": filled.isoformat(),
+                "price_observation": observation.canonical(),
                 "transition": transition.canonical(),
             },
         )
@@ -1166,6 +1476,7 @@ class L5ExecutionTransactionStore:
             fill_id=fill_id,
             fill_price=price,
             filled_at=filled,
+            price_observation=observation,
             transition=transition,
         )
 
@@ -1186,6 +1497,11 @@ class L5ExecutionTransactionStore:
         if intent.timestamp > submitted:
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_CHRONOLOGY", "LIMIT placement chronology is invalid")
         price = _number(limit_price, "limit_price", positive=True)
+        if float(intent.estimated_price) != price:
+            raise L5ExecutionTransactionError(
+                "AUTHORIZED_PRICE_MISMATCH",
+                "LIMIT placement intent price must equal limit_price",
+            )
         self._require_new_ids(current, operation_id, order_id, None, report_id)
         order = L5TransactionOrder(
             order_id=order_id,
@@ -1249,9 +1565,11 @@ class L5ExecutionTransactionStore:
         report_id: str,
         filled_at: datetime,
         transition: FillTransition,
+        price_observation: L5PriceObservation,
     ) -> L5ExecutionTransactionPlan:
         _intent_payload(intent)
         filled = _explicit_time(filled_at, "filled_at")
+        observation = _require_price_observation(price_observation, intent=intent)
         if not isinstance(eligibility, L5LimitFillEligibility) or not eligibility.is_intact():
             raise L5ExecutionTransactionError("INVALID_LIMIT_ELIGIBILITY", "eligibility is invalid")
         if (
@@ -1262,7 +1580,12 @@ class L5ExecutionTransactionStore:
         order = current.orders.get(eligibility.order_id)
         if order is None or order.status != OrderStatus.PENDING or order.order_type != OrderType.LIMIT:
             raise L5ExecutionTransactionError("INVALID_LIMIT_ORDER", "pending LIMIT order is missing")
-        authoritative_eligibility = _require_authoritative_limit_eligibility(current, order, eligibility)
+        authoritative_eligibility = _require_authoritative_limit_eligibility(
+            current,
+            order,
+            eligibility,
+            observation,
+        )
         if not authoritative_eligibility.eligible:
             raise L5ExecutionTransactionError("LIMIT_NOT_ELIGIBLE", "limit price has not been crossed")
         if intent.intent_id == order.placement_intent_id:
@@ -1319,6 +1642,7 @@ class L5ExecutionTransactionStore:
                 "filled_at": filled.isoformat(),
                 "eligibility": eligibility.fields_without_hash()
                 | {"eligibility_hash": eligibility.eligibility_hash},
+                "price_observation": observation.canonical(),
                 "transition": transition.canonical(),
             },
         )
@@ -1333,6 +1657,7 @@ class L5ExecutionTransactionStore:
             next_state=next_state,
             fill_id=fill_id,
             filled_at=filled,
+            price_observation=observation,
             eligibility=eligibility,
             transition=transition,
         )
@@ -1362,18 +1687,44 @@ class L5ExecutionTransactionStore:
             ):
                 raise L5ExecutionTransactionError("STALE_RISK_CONTEXT", "risk context CAS failed")
             self._validate_consumption_identity(plan.consumption, plan.intent, current)
-            expected_plan = self._reconstruct_plan(plan, current)
-            if expected_plan != plan:
-                raise L5ExecutionTransactionError(
-                    "INVALID_TRANSACTION_SEMANTICS",
-                    "plan differs from deterministic reconstruction",
-                )
-            self._validate_next_state(expected_plan, current)
             try:
-                self._publish_state(expected_plan.next_state)
+                guard = (
+                    self._price_provider.locked_current(plan.price_observation)
+                    if plan.price_observation is not None
+                    else nullcontext()
+                )
+                with guard:
+                    return self._commit_plan_locked(plan, current)
+            except L5ExecutionTransactionError:
+                raise
+            except L5PriceProviderError as exc:
+                raise L5ExecutionTransactionError(exc.code, exc.message) from exc
             except Exception as exc:
-                raise L5ExecutionTransactionError("TRANSACTION_PUBLICATION_FAILED", "aggregate publication failed") from exc
-            return self._state
+                raise L5ExecutionTransactionError(
+                    "PRICE_PROVIDER_ERROR",
+                    "authoritative price verification failed",
+                ) from exc
+
+    def _commit_plan_locked(
+        self,
+        plan: L5ExecutionTransactionPlan,
+        current: L5ExecutionAggregateState,
+    ) -> L5ExecutionAggregateState:
+        expected_plan = self._reconstruct_plan(plan, current)
+        if expected_plan != plan:
+            raise L5ExecutionTransactionError(
+                "INVALID_TRANSACTION_SEMANTICS",
+                "plan differs from deterministic reconstruction",
+            )
+        self._validate_next_state(expected_plan, current)
+        try:
+            self._publish_state(expected_plan.next_state)
+        except Exception as exc:
+            raise L5ExecutionTransactionError(
+                "TRANSACTION_PUBLICATION_FAILED",
+                "aggregate publication failed",
+            ) from exc
+        return self._state
 
     def _publish_state(self, next_state: L5ExecutionAggregateState) -> None:
         self._state = next_state
@@ -1443,6 +1794,7 @@ class L5ExecutionTransactionStore:
                 fill_price=plan.fill_price,
                 filled_at=plan.filled_at,
                 transition=plan.transition,
+                price_observation=plan.price_observation,
             )
         if plan.operation_kind == "LIMIT_PLACEMENT":
             return self._prepare_limit_placement_from_state(
@@ -1466,6 +1818,7 @@ class L5ExecutionTransactionStore:
                 report_id=plan.report_id,
                 filled_at=plan.filled_at,
                 transition=plan.transition,
+                price_observation=plan.price_observation,
             )
         raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "operation_kind is not supported")
 
@@ -1548,7 +1901,8 @@ class L5ExecutionTransactionStore:
             execution_journal=current.execution_journal,
         )
         payload = base.components_payload()
-        payload["consumption_hash"] = consumption.consumption_hash
+        if consumption is not None:
+            payload["consumption_hash"] = consumption.consumption_hash
         payload["operation_inputs"] = _thaw_json(_freeze_json(operation_inputs))
         event = L5ExecutionTransactionEvent.create(
             sequence_number=len(current.execution_journal) + 1, event_type=event_type,
@@ -1783,13 +2137,50 @@ def _validate_transaction_delta(
     operation_inputs: Mapping[str, object] | None = None,
 ) -> None:
     inputs = _thaw_json(operation_inputs or event.payload.get("operation_inputs"))
-    if not isinstance(inputs, dict) or not isinstance(inputs.get("intent"), dict):
+    if not isinstance(inputs, dict):
         raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "operation inputs are missing")
-    intent = inputs["intent"]
     if after.state_version != before.state_version + 1:
         raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "aggregate version delta is invalid")
     if after.execution_journal[:-1] != before.execution_journal or after.execution_journal[-1] != event:
         raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "execution journal prefix differs")
+    if event.event_type == "LIMIT_CANCELLED":
+        if set(after.orders) != set(before.orders):
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "cancellation changed order keys")
+        changed_orders = [key for key in before.orders if before.orders[key] != after.orders[key]]
+        if len(changed_orders) != 1:
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "cancellation must change one order")
+        order_id = changed_orders[0]
+        previous_order = before.orders[order_id]
+        order = after.orders[order_id]
+        report_key = _single_added_key(before.reports, after.reports, "reports")
+        report = after.reports[report_key]
+        cancelled_at = _parse_explicit_time(inputs.get("cancelled_at"), "cancelled_at")
+        expected_order = replace(
+            previous_order,
+            status=OrderStatus.CANCELLED,
+            cancelled_at=cancelled_at,
+        )
+        if (
+            previous_order.order_type != OrderType.LIMIT
+            or previous_order.status != OrderStatus.PENDING
+            or order != expected_order
+            or cancelled_at < previous_order.submitted_at
+            or report.order_id != order_id
+            or report.status != OrderStatus.CANCELLED
+            or report.occurred_at != cancelled_at
+            or inputs.get("order_id") != order_id
+            or inputs.get("report_id") != report.report_id
+            or after.fills != before.fills
+            or after.positions != before.positions
+            or after.risk_context != before.risk_context
+            or after.risk_journal != before.risk_journal
+            or "consumption_hash" in event.payload
+        ):
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "LIMIT cancellation delta is invalid")
+        return
+    if not isinstance(inputs.get("intent"), dict):
+        raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "intent input is missing")
+    intent = inputs["intent"]
     if event.event_type == "MARKET_COMMITTED":
         order_key = _single_added_key(before.orders, after.orders, "orders")
         fill_key = _single_added_key(before.fills, after.fills, "fills")
@@ -1797,6 +2188,7 @@ def _validate_transaction_delta(
         order = after.orders[order_key]
         fill = after.fills[fill_key]
         report = after.reports[report_key]
+        observation = _price_observation_from_payload(inputs.get("price_observation"))
         if order.order_type != OrderType.MARKET or order.order_id != fill.order_id:
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "MARKET order delta is invalid")
         if order.placement_intent_id != fill.intent_id:
@@ -1813,10 +2205,14 @@ def _validate_transaction_delta(
             or intent.get("symbol") != fill.symbol
             or intent.get("side") != fill.side.value
             or intent.get("quantity") != fill.quantity
+            or observation.symbol != fill.symbol
+            or observation.price != fill.price
+            or observation.observation_hash
+            != inputs["price_observation"].get("observation_hash")
         ):
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "MARKET operation inputs differ")
         intent_time = _parse_explicit_time(intent.get("timestamp"), "intent timestamp")
-        if not intent_time <= order.submitted_at <= fill.filled_at:
+        if not observation.observed_at <= intent_time <= order.submitted_at <= fill.filled_at:
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "MARKET chronology differs")
         _validate_fill_delta(before, after, order, fill, report)
         risk_transition = _thaw_json(after.risk_journal[-2].payload).get("transition")
@@ -1846,6 +2242,8 @@ def _validate_transaction_delta(
             or intent.get("symbol") != order.symbol
             or intent.get("side") != order.side.value
             or intent.get("quantity") != order.quantity
+            or intent.get("estimated_price") != order.limit_price
+            or "price_observation" in inputs
         ):
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "LIMIT placement delta is invalid")
         if _parse_explicit_time(intent.get("timestamp"), "intent timestamp") > order.submitted_at:
@@ -1882,10 +2280,12 @@ def _validate_transaction_delta(
         if not isinstance(eligibility, dict):
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "LIMIT eligibility input is missing")
         supplied_eligibility = _eligibility_from_payload(eligibility)
+        observation = _price_observation_from_payload(inputs.get("price_observation"))
         authoritative_eligibility = _require_authoritative_limit_eligibility(
             before,
             previous_order,
             supplied_eligibility,
+            observation,
         )
         if not authoritative_eligibility.eligible:
             raise L5ExecutionTransactionError(
@@ -1904,6 +2304,8 @@ def _validate_transaction_delta(
             or intent.get("symbol") != fill.symbol
             or intent.get("side") != fill.side.value
             or intent.get("quantity") != fill.quantity
+            or observation.symbol != fill.symbol
+            or observation.price != fill.price
         ):
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "LIMIT fill inputs differ")
         observed_at = authoritative_eligibility.observed_at
@@ -1946,14 +2348,21 @@ def _validate_execution_transaction_chain(
             if event.operation_id in seen_operations:
                 raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "operation_id is duplicated")
             seen_operations.add(event.operation_id)
-            consumption_hash = event.payload.get("consumption_hash")
-            if not _is_hash(consumption_hash):
-                raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "consumption_hash is invalid")
             if not isinstance(event.payload.get("operation_inputs"), Mapping):
                 raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "operation inputs are missing")
-            if consumption_hash in seen_consumptions:
-                raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "consumption_hash is duplicated")
-            seen_consumptions.add(consumption_hash)
+            consumption_hash = event.payload.get("consumption_hash")
+            if event.event_type == "LIMIT_CANCELLED":
+                if consumption_hash is not None:
+                    raise L5ExecutionTransactionError(
+                        "INVALID_TRANSACTION_JOURNAL",
+                        "LIMIT cancellation cannot publish a risk consumption",
+                    )
+            else:
+                if not _is_hash(consumption_hash):
+                    raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "consumption_hash is invalid")
+                if consumption_hash in seen_consumptions:
+                    raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "consumption_hash is duplicated")
+                seen_consumptions.add(consumption_hash)
         previous = event.event_hash
     if expected_final_hash is not None:
         if not _is_hash(expected_final_hash) or previous != expected_final_hash:

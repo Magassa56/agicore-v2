@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pytest
 
 from agicore.l5_action.broker_models import OrderStatus
+from agicore.l5_action.broker_mock import MockBroker
 from agicore.l5_action.execution_transaction import (
     AggregateRiskContextProvider,
     L5ExecutionAggregateState,
@@ -104,9 +105,12 @@ def _context(*, limits: RiskLimits | None = None) -> RiskExecutionContext:
 def _setup(*, limits: RiskLimits | None = None) -> tuple[L5ExecutionTransactionStore, RiskAuthorizationBoundary]:
     context = _context(limits=limits)
     seed = InMemoryRiskContextProvider(context)
+    price_provider = MockBroker(provider_id="transaction-test-price")
+    price_provider.set_market_price("ES", 100.0, observed_at=NOW)
     store = L5ExecutionTransactionStore(
         initial_context=context,
         initial_risk_journal=seed.journal,
+        price_provider=price_provider,
     )
     boundary = RiskAuthorizationBoundary(RiskManager(context.risk_limits), store.context_provider)
     return store, boundary
@@ -216,8 +220,11 @@ def _market_plan(
     boundary: RiskAuthorizationBoundary,
     *,
     suffix: str = "one",
+    timestamp: datetime = NOW,
+    submitted_at: datetime = NOW,
+    filled_at: datetime = LATER,
 ):
-    intent = _intent(f"intent-{suffix}")
+    intent = _intent(f"intent-{suffix}", timestamp=timestamp)
     decision, consumption = _authorize_and_consume(store, boundary, intent)
     plan = store.prepare_market(
         boundary=boundary,
@@ -227,9 +234,9 @@ def _market_plan(
         order_id=f"order-{suffix}",
         fill_id=f"fill-{suffix}",
         report_id=f"report-{suffix}",
-        submitted_at=NOW,
+        submitted_at=submitted_at,
         fill_price=100.0,
-        filled_at=LATER,
+        filled_at=filled_at,
         transition=_transition(intent.intent_id, f"fill-{suffix}"),
     )
     return intent, decision, consumption, plan
@@ -242,7 +249,7 @@ def _place_limit(
     suffix: str = "limit",
     limit_price: float = 101.0,
 ):
-    intent = _intent(f"intent-place-{suffix}")
+    intent = _intent(f"intent-place-{suffix}", price=limit_price)
     _, consumption = _authorize_and_consume(store, boundary, intent)
     plan = store.prepare_limit_placement(
         boundary=boundary,
@@ -260,6 +267,7 @@ def _place_limit(
 def _complete_limit_cycle():
     store, boundary = _setup()
     _place_limit(store, boundary)
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     eligibility = store.evaluate_limit_eligibility(
         order_id="order-limit",
         eligibility_id="eligibility-limit",
@@ -473,7 +481,7 @@ def test_same_consumption_cannot_commit_two_limit_placements() -> None:
         operation_id="operation-limit-first",
         order_id="order-limit-first",
         report_id="report-limit-first",
-        limit_price=99.0,
+        limit_price=100.0,
         submitted_at=NOW,
     )
     second = store.prepare_limit_placement(
@@ -483,7 +491,7 @@ def test_same_consumption_cannot_commit_two_limit_placements() -> None:
         operation_id="operation-limit-second",
         order_id="order-limit-second",
         report_id="report-limit-second",
-        limit_price=98.0,
+        limit_price=100.0,
         submitted_at=NOW,
     )
     committed = store.commit(first, boundary=boundary)
@@ -509,7 +517,7 @@ def test_limit_consumption_cannot_be_reused_for_market() -> None:
         operation_id="operation-placement",
         order_id="order-placement",
         report_id="report-placement",
-        limit_price=99.0,
+        limit_price=100.0,
         submitted_at=NOW,
     )
     placed = store.commit(placement, boundary=boundary)
@@ -547,7 +555,7 @@ def test_concurrent_distinct_plans_with_same_consumption_have_one_winner() -> No
             operation_id=f"operation-{index}",
             order_id=f"order-{index}",
             report_id=f"report-{index}",
-            limit_price=99.0,
+            limit_price=100.0,
             submitted_at=NOW,
         )
         for index in range(8)
@@ -615,6 +623,7 @@ def test_fully_rehashed_semantically_forged_plan_is_rejected() -> None:
         fill_id=plan.fill_id,
         fill_price=plan.fill_price,
         filled_at=plan.filled_at,
+        price_observation=plan.price_observation,
         transition=plan.transition,
     )
     assert forged_plan.is_intact()
@@ -646,6 +655,7 @@ def test_limit_placement_is_pending_without_fill_or_context_mutation() -> None:
 def test_limit_trigger_without_fresh_authorization_produces_no_fill() -> None:
     store, boundary = _setup()
     placement_intent, placement_consumption, placed = _place_limit(store, boundary)
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     eligibility = store.evaluate_limit_eligibility(
         order_id="order-limit",
         eligibility_id="eligibility-limit",
@@ -675,6 +685,7 @@ def test_limit_trigger_without_fresh_authorization_produces_no_fill() -> None:
 def test_limit_with_fresh_authorization_commits_fill_and_context_together() -> None:
     store, boundary = _setup()
     _, _, placed = _place_limit(store, boundary)
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     eligibility = store.evaluate_limit_eligibility(
         order_id="order-limit",
         eligibility_id="eligibility-limit",
@@ -710,6 +721,7 @@ def test_limit_with_fresh_authorization_commits_fill_and_context_together() -> N
 def test_stale_limit_fill_authorization_produces_zero_target_fill() -> None:
     store, boundary = _setup()
     _place_limit(store, boundary)
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     eligibility = store.evaluate_limit_eligibility(
         order_id="order-limit",
         eligibility_id="eligibility-limit",
@@ -719,7 +731,14 @@ def test_stale_limit_fill_authorization_produces_zero_target_fill() -> None:
     fill_intent = _intent("intent-fill-limit", timestamp=LATER)
     _, stale_consumption = _authorize_and_consume(store, boundary, fill_intent)
 
-    _, _, _, advance_plan = _market_plan(store, boundary, suffix="advance")
+    _, _, _, advance_plan = _market_plan(
+        store,
+        boundary,
+        suffix="advance",
+        timestamp=LATER,
+        submitted_at=LATER,
+        filled_at=FILLED_AT,
+    )
     store.commit(advance_plan, boundary=boundary)
     before_failed_fill = store.state
 
@@ -779,6 +798,7 @@ def test_market_fill_price_must_equal_authorized_price_even_when_exposure_would_
 def test_limit_fill_price_must_equal_fresh_intent_authorized_price() -> None:
     store, boundary = _setup()
     _place_limit(store, boundary)
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     eligibility = store.evaluate_limit_eligibility(
         order_id="order-limit",
         eligibility_id="eligibility-price",
@@ -811,6 +831,7 @@ def test_limit_fill_price_must_equal_fresh_intent_authorized_price() -> None:
 def test_rehashed_false_limit_eligibility_is_rejected_before_prepare() -> None:
     store, boundary = _setup()
     _place_limit(store, boundary, limit_price=99.0)
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     authoritative = store.evaluate_limit_eligibility(
         order_id="order-limit",
         eligibility_id="eligibility-forged",
@@ -921,6 +942,8 @@ def test_realized_sell_loss_cannot_be_hidden_from_daily_pnl() -> None:
     assert fraudulent_transition.exposure_snapshot.realized_pnl_total == -10.0
     assert fraudulent_transition.daily_realized_pnl == 0.0
     assert fraudulent_transition.exposure_snapshot.daily_pnl == 0.0
+
+    store.price_provider.set_market_price("ES", 90.0, observed_at=FILLED_AT)
 
     with pytest.raises(L5ExecutionTransactionError) as exc_info:
         store.prepare_market(
@@ -1042,6 +1065,7 @@ def test_limit_rejects_inverted_placement_and_fill_chronology() -> None:
     assert store.state is before
 
     _place_limit(store, boundary, suffix="chronology")
+    store.price_provider.set_market_price("ES", 100.0, observed_at=LATER)
     eligibility = store.evaluate_limit_eligibility(
         order_id="order-chronology",
         eligibility_id="eligibility-chronology",
@@ -1242,6 +1266,7 @@ def test_replay_rejects_rehashed_economically_false_limit_eligibility() -> None:
         order_id=eligibility["order_id"],
         aggregate_state_version=eligibility["aggregate_state_version"],
         aggregate_state_hash=eligibility["aggregate_state_hash"],
+        price_observation_hash=eligibility["price_observation_hash"],
         market_price=eligibility["market_price"],
         observed_at=datetime.fromisoformat(eligibility["observed_at"]),
         eligible=eligibility["eligible"],
@@ -1286,6 +1311,7 @@ def test_replay_rejects_rehashed_daily_pnl_unrelated_to_realized_delta() -> None
         realized_pnl=-10.0,
         daily_realized_pnl=-10.0,
     )
+    store.price_provider.set_market_price("ES", 90.0, observed_at=FILLED_AT)
     sell_plan = store.prepare_market(
         boundary=boundary,
         intent=sell_intent,

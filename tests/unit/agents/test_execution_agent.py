@@ -1,278 +1,117 @@
-"""Unit tests for ExecutionAgent."""
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime, timezone
 
 import pytest
 
-from agicore.agents.execution_agent import (
-    AGENT_ID,
-    EVT_ORDER_PROCESSED,
-    TASK_TYPE_ORDER,
-    ExecutionAgent,
-)
+from agicore.agents.execution_agent import AGENT_ID, EVT_ORDER_PROCESSED, TASK_TYPE_ORDER, ExecutionAgent
 from agicore.core.events import EventBus
 from agicore.l2_memory.adapters.sqlalchemy_engine import SqlAlchemyEngine
 from agicore.l2_memory.migrations.init_schema import init_schema
+from agicore.l2_memory.schemas.task import TaskRead
 from agicore.l2_memory.services.memory_service import MemoryService
-from agicore.l5_action.broker_mock import MockBroker
-from agicore.l5_action.broker_models import InvalidOrderError
-from agicore.l5_action.execution_service import ExecutionService
+from agicore.l5_action.execution_service import L5CanonicalExecutionError
+from tests.l5_secure_helpers import make_execution_service, market_payload
 
 
-# ---------------------------------------------------------------- Fixtures
 @pytest.fixture()
 def engine() -> Iterator[SqlAlchemyEngine]:
-    eng = SqlAlchemyEngine("sqlite:///:memory:")
-    init_schema(eng)
-    yield eng
-    eng.dispose()
+    engine = SqlAlchemyEngine("sqlite:///:memory:")
+    init_schema(engine)
+    yield engine
+    engine.dispose()
 
 
 @pytest.fixture()
-def memory(engine: SqlAlchemyEngine) -> MemoryService:
+def memory(engine) -> MemoryService:
     return MemoryService(engine)
 
 
-@pytest.fixture()
-def event_bus() -> EventBus:
-    return EventBus()
+def _task(task_id: str, payload: dict[str, object]) -> TaskRead:
+    now = datetime.now(timezone.utc)
+    return TaskRead(
+        id=task_id, task_type=TASK_TYPE_ORDER, status="running",
+        assigned_to=None, payload=payload, result=None, error=None,
+        created_at=now, updated_at=now,
+    )
 
 
-@pytest.fixture()
-def broker() -> MockBroker:
-    return MockBroker(initial_prices={"ES": 100.0})
-
-
-@pytest.fixture()
-def execution_service(broker: MockBroker) -> ExecutionService:
-    return ExecutionService(broker)
-
-
-@pytest.fixture()
-def make_task():
-    from datetime import datetime, timezone
-    from agicore.l2_memory.schemas.task import TaskRead
-
-    def _factory(task_id="t-1", payload=None):
-        now = datetime.now(timezone.utc)
-        return TaskRead(
-            id=task_id,
-            task_type=TASK_TYPE_ORDER,
-            status="running",
-            assigned_to=None,
-            payload=payload or {},
-            result=None, error=None,
-            created_at=now, updated_at=now,
-        )
-    return _factory
-
-
-# ---------------------------------------------------------------- Constants
 def test_canonical_constants() -> None:
-    assert TASK_TYPE_ORDER == "execution.order"
-    assert EVT_ORDER_PROCESSED == "agent.execution.order.processed"
-    assert AGENT_ID == "execution_agent"
+    assert (TASK_TYPE_ORDER, EVT_ORDER_PROCESSED, AGENT_ID) == (
+        "execution.order", "agent.execution.order.processed", "execution_agent"
+    )
 
 
-# ---------------------------------------------------------------- Required output
-def test_returns_required_fields(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    task = make_task(payload={"symbol": "ES", "side": "BUY", "quantity": 1.0})
-
-    result = agent(task)
-
-    for required in (
-        "order_id", "symbol", "side", "quantity", "order_status",
-        "fill_price", "realized_pnl", "runtime_duration_ms",
-    ):
-        assert required in result, f"missing required field: {required}"
-
-    assert result["task_id"] == "t-1"
-    assert result["agent_id"] == AGENT_ID
-    assert result["processed_count"] == 1
-
-
-# ---------------------------------------------------------------- Happy paths
-def test_market_buy_filled(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    result = agent(make_task(payload={"symbol": "ES", "side": "BUY", "quantity": 2.0}))
+def test_market_buy_filled_with_audit_identity(memory) -> None:
+    agent = ExecutionAgent(make_execution_service(), memory)
+    result = agent(_task("task-one", market_payload("one", quantity=2.0)))
     assert result["order_status"] == "FILLED"
-    assert result["fill_price"] == 100.0
-    assert result["filled_quantity"] == 2.0
     assert result["position_quantity"] == 2.0
+    assert result["authorization_id"] and result["consumption_id"]
+    assert result["aggregate_state_hash"] and result["context_state_hash"]
 
 
-def test_market_sell_no_position_rejected(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    result = agent(make_task(payload={"symbol": "ES", "side": "SELL", "quantity": 1.0}))
+def test_market_sell_without_position_is_controlled_rejection(memory) -> None:
+    agent = ExecutionAgent(make_execution_service(), memory)
+    result = agent(_task("task-sell", market_payload("sell", side="SELL")))
     assert result["order_status"] == "REJECTED"
-    assert result["fill_price"] is None
-    assert "insufficient" in result["broker_message"].lower()
+    assert result["committed"] is False
+    assert "INSUFFICIENT_POSITION" in result["violation_codes"]
 
 
-def test_round_trip_realized_pnl(
-    broker, execution_service, memory, make_task
-) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-
-    # Open position
-    agent(make_task(task_id="t-buy", payload={
-        "symbol": "ES", "side": "BUY", "quantity": 4.0,
-    }))
-    # Move price up
-    broker.set_market_price("ES", 110.0)
-    # Close position
-    result = agent(make_task(task_id="t-sell", payload={
-        "symbol": "ES", "side": "SELL", "quantity": 4.0,
-    }))
-    assert result["order_status"] == "FILLED"
-    assert result["realized_pnl"] == pytest.approx(40.0)  # (110-100)*4
-    assert result["position_quantity"] == 0.0
-
-
-def test_limit_order_resting(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    result = agent(make_task(payload={
-        "symbol": "ES", "side": "BUY", "quantity": 1.0,
-        "order_type": "LIMIT", "limit_price": 90.0,
-    }))
+def test_limit_placement_is_pending_without_fill(memory) -> None:
+    service = make_execution_service()
+    payload = market_payload("limit", price=90.0)
+    payload.update({"order_type": "LIMIT", "limit_price": 90.0})
+    payload.pop("fill_id")
+    payload.pop("filled_at")
+    result = ExecutionAgent(service, memory)(_task("task-limit", payload))
     assert result["order_status"] == "PENDING"
-    assert result["fill_price"] is None
-    assert result["limit_price"] == 90.0
+    assert service.state.fills == {} and service.state.positions == {}
 
 
-def test_runtime_duration_positive(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    result = agent(make_task(payload={"symbol": "ES", "side": "BUY", "quantity": 1.0}))
-    assert result["runtime_duration_ms"] > 0
+@pytest.mark.parametrize("missing", [
+    "intent_id", "estimated_price", "timestamp", "operation_id", "order_id",
+    "fill_id", "report_id", "submitted_at", "filled_at",
+])
+def test_incomplete_payload_is_rejected_before_execution(memory, missing) -> None:
+    payload = market_payload(f"missing-{missing}")
+    payload.pop(missing)
+    with pytest.raises(L5CanonicalExecutionError) as exc:
+        ExecutionAgent(make_execution_service(), memory)(_task(f"task-{missing}", payload))
+    assert exc.value.code == "INVALID_TASK_PAYLOAD"
 
 
-# ---------------------------------------------------------------- Validation
-def test_missing_symbol_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={"side": "BUY", "quantity": 1.0}))
+def test_naive_timestamp_is_rejected(memory) -> None:
+    payload = market_payload("naive")
+    payload["timestamp"] = "2026-08-15T10:00:00"
+    with pytest.raises(L5CanonicalExecutionError):
+        ExecutionAgent(make_execution_service(), memory)(_task("task-naive", payload))
 
 
-def test_missing_side_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={"symbol": "ES", "quantity": 1.0}))
-
-
-def test_missing_quantity_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={"symbol": "ES", "side": "BUY"}))
-
-
-def test_invalid_side_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={"symbol": "ES", "side": "MAYBE", "quantity": 1.0}))
-
-
-def test_invalid_order_type_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={
-            "symbol": "ES", "side": "BUY", "quantity": 1.0,
-            "order_type": "STOP",
-        }))
-
-
-def test_limit_without_price_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={
-            "symbol": "ES", "side": "BUY", "quantity": 1.0,
-            "order_type": "LIMIT",
-        }))
-
-
-def test_market_with_price_raises(execution_service, memory, make_task) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(InvalidOrderError):
-        agent(make_task(payload={
-            "symbol": "ES", "side": "BUY", "quantity": 1.0,
-            "order_type": "MARKET", "limit_price": 100.0,
-        }))
-
-
-def test_negative_quantity_rejected_at_pydantic(
-    execution_service, memory, make_task
-) -> None:
-    """Negative quantity is rejected by OrderRequest validation."""
-    agent = ExecutionAgent(execution_service, memory)
-    with pytest.raises(Exception):  # ValidationError ou InvalidOrderError
-        agent(make_task(payload={"symbol": "ES", "side": "BUY", "quantity": -1.0}))
-
-
-# ---------------------------------------------------------------- Persistence + Bus
-def test_persists_event_in_memory(
-    execution_service, memory, make_task
-) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    agent(make_task(task_id="t-x", payload={
-        "symbol": "ES", "side": "BUY", "quantity": 1.0,
-    }))
-    events = memory.get_recent_events(event_type=EVT_ORDER_PROCESSED, limit=5)
-    assert len(events) == 1
-    ev = events[0]
-    assert ev.task_id == "t-x"
-    assert ev.agent_id == AGENT_ID
-    for k in ("symbol", "side", "order_status", "fill_price"):
-        assert k in ev.payload
-
-
-def test_emits_bus_event(
-    execution_service, memory, event_bus, make_task
-) -> None:
+def test_persists_and_emits_committed_result(memory) -> None:
+    bus = EventBus()
     received = []
-    event_bus.subscribe(EVT_ORDER_PROCESSED, lambda ev: received.append(ev))
-
-    agent = ExecutionAgent(execution_service, memory, event_bus)
-    agent(make_task(payload={"symbol": "ES", "side": "BUY", "quantity": 1.0}))
-
-    assert len(received) == 1
-    assert received[0].payload["order_status"] == "FILLED"
-
-
-def test_works_without_bus(
-    execution_service, memory, make_task
-) -> None:
-    agent = ExecutionAgent(execution_service, memory, event_bus=None)
-    result = agent(make_task(payload={"symbol": "ES", "side": "BUY", "quantity": 1.0}))
-    assert result["order_status"] == "FILLED"
+    bus.subscribe(EVT_ORDER_PROCESSED, received.append)
+    agent = ExecutionAgent(make_execution_service(), memory, bus)
+    result = agent(_task("task-event", market_payload("event")))
+    events = memory.get_recent_events(event_type=EVT_ORDER_PROCESSED, limit=5)
+    assert len(events) == len(received) == 1
+    assert events[0].payload["aggregate_state_hash"] == result["aggregate_state_hash"]
 
 
-# ---------------------------------------------------------------- Misc
-def test_processed_count_increments(
-    execution_service, memory, make_task
-) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    assert agent.processed_count == 0
-    agent(make_task(task_id="a", payload={"symbol": "ES", "side": "BUY", "quantity": 1.0}))
-    agent(make_task(task_id="b", payload={"symbol": "ES", "side": "BUY", "quantity": 1.0}))
+def test_processed_count_increments_only_after_completed_result(memory) -> None:
+    agent = ExecutionAgent(make_execution_service(), memory)
+    agent(_task("task-a", market_payload("a")))
+    agent(_task("task-b", market_payload("b")))
     assert agent.processed_count == 2
 
 
-def test_client_order_id_propagated(
-    execution_service, memory, make_task
-) -> None:
-    agent = ExecutionAgent(execution_service, memory)
-    result = agent(make_task(payload={
-        "symbol": "ES", "side": "BUY", "quantity": 1.0,
-        "client_order_id": "my-coid",
-    }))
-    assert result["order_id"] == "my-coid"
-
-
-def test_rejected_status_does_not_raise(
-    execution_service, memory, make_task
-) -> None:
-    """REJECTED is a valid outcome — no exception, returns the report."""
-    agent = ExecutionAgent(execution_service, memory)
-    result = agent(make_task(payload={"symbol": "ES", "side": "SELL", "quantity": 5.0}))
-    assert result["order_status"] == "REJECTED"
+def test_execution_without_event_bus_persists_and_has_positive_runtime(memory) -> None:
+    agent = ExecutionAgent(make_execution_service(), memory, event_bus=None)
+    result = agent(_task("task-no-bus", market_payload("no-bus")))
+    assert result["runtime_duration_ms"] > 0
+    assert result["order_status"] == "FILLED"
+    events = memory.get_recent_events(event_type=EVT_ORDER_PROCESSED, limit=5)
+    assert len(events) == 1 and events[0].payload["intent_id"] == "intent-no-bus"

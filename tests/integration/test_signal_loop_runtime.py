@@ -28,8 +28,7 @@ from agicore.l3_intelligence.signal_loop_orchestrator import (
     SignalLoopOrchestrator,
 )
 from agicore.l4_planning.runtime import RuntimeEngine
-from agicore.l5_action.broker_mock import MockBroker
-from agicore.l5_action.execution_service import ExecutionService
+from tests.l5_secure_helpers import make_execution_service
 from agicore.replay.event_store import EventStore, ReplayEventType
 from agicore.replay.replay_engine import ReplayEngine
 from agicore.replay.runtime_event_bridge import RuntimeEventBridge
@@ -60,10 +59,18 @@ def _build_full_pipeline(
         retry_policy=RetryPolicy(max_attempts=1, initial_delay=0, jitter=False),
         poll_interval=0.0,
     )
-    broker = MockBroker(initial_prices={"ES": price_sequence[0]})
+    broker = make_execution_service()
+    def update_authoritative_price(event: Event) -> None:
+        observed_at = datetime.fromisoformat(str(event.payload["timestamp"]))
+        broker.price_provider.set_market_price(
+            str(event.payload["symbol"]),
+            float(event.payload["price"]),
+            observed_at=observed_at,
+        )
+    rt.event_bus.subscribe(EVT_MARKET_TICK, update_authoritative_price)
     rt.register_handler(
         TASK_TYPE_ORDER,
-        ExecutionAgent(ExecutionService(broker), rt.memory, rt.event_bus),
+        ExecutionAgent(broker, rt.memory, rt.event_bus),
     )
 
     strategy = EMACrossoverStrategy(fast_period=fast, slow_period=slow)
@@ -72,6 +79,10 @@ def _build_full_pipeline(
         symbol="ES", order_quantity=qty,
     )
     orch.attach()
+    # Execute each proposal while the authoritative observation that created
+    # it is still current. Delayed TaskQueue execution is intentionally
+    # rejected as stale by the canonical price contract.
+    rt.event_bus.subscribe(EVT_MARKET_TICK, lambda _event: rt.run_once())
 
     feed = MockMarketFeed(
         rt.event_bus, "ES",

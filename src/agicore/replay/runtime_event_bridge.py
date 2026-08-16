@@ -71,6 +71,37 @@ def _default_execution_translator(
         return []
 
     order_status = str(p.get("order_status", "")).upper()
+    committed = p.get("committed") is True
+    if order_status == "REJECTED" and not committed:
+        required_audit = (
+            "intent_id",
+            "authorization_id",
+            "decision_hash",
+            "provider_id",
+            "context_state_version",
+            "context_state_hash",
+            "risk_limits_hash",
+        )
+        if any(not p.get(name) and p.get(name) != 0 for name in required_audit):
+            return []
+        return [(
+            ReplayEventType.RISK_VIOLATION,
+            {
+                "intent_id": p["intent_id"],
+                "authorization_id": p["authorization_id"],
+                "decision_hash": p["decision_hash"],
+                "provider_id": p["provider_id"],
+                "context_state_version": p["context_state_version"],
+                "context_state_hash": p["context_state_hash"],
+                "risk_limits_hash": p["risk_limits_hash"],
+                "violation_codes": list(p.get("violation_codes") or ()),
+                "order_id": order_id,
+                "symbol": symbol,
+                "side": side,
+            },
+        )]
+    if not committed:
+        return []
     quantity = p.get("quantity")
     if quantity is None:
         # Best-effort fallback if the bus emit doesn't carry it
@@ -93,7 +124,7 @@ def _default_execution_translator(
         if p.get("filled_quantity") is not None:
             fill_payload["fill_quantity"] = float(p["filled_quantity"])
         out.append((ReplayEventType.ORDER_FILLED, fill_payload))
-    elif order_status in ("REJECTED", "CANCELLED"):
+    elif order_status == "CANCELLED":
         out.append((
             ReplayEventType.ORDER_CANCELLED,
             {
