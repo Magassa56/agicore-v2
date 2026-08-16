@@ -5,6 +5,8 @@ workflow safely. Fully offline — uses MockBroker.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from agicore.agents.execution_agent import (
@@ -23,8 +25,7 @@ from agicore.core.retry import RetryPolicy
 from agicore.l2_memory.repositories.task_repository import TaskRepository
 from agicore.l2_memory.schemas.task import TaskCreate
 from agicore.l4_planning.runtime import RuntimeEngine
-from agicore.l5_action.broker_mock import MockBroker
-from agicore.l5_action.execution_service import ExecutionService
+from tests.l5_secure_helpers import TEST_TIME, make_execution_service, market_payload
 
 
 def test_execution_agent_full_runtime_pipeline() -> None:
@@ -33,8 +34,7 @@ def test_execution_agent_full_runtime_pipeline() -> None:
         retry_policy=RetryPolicy(max_attempts=1, initial_delay=0, jitter=False),
         poll_interval=0.0,
     )
-    broker = MockBroker(initial_prices={"ES": 100.0})
-    svc = ExecutionService(broker)
+    svc = make_execution_service()
     agent = ExecutionAgent(svc, rt.memory, rt.event_bus)
     rt.register_handler(TASK_TYPE_ORDER, agent)
 
@@ -46,7 +46,7 @@ def test_execution_agent_full_runtime_pipeline() -> None:
         rt.submit(TaskCreate(
             id="ord-buy-1",
             task_type=TASK_TYPE_ORDER,
-            payload={"symbol": "ES", "side": "BUY", "quantity": 5.0},
+            payload=market_payload("runtime-buy", side="BUY", quantity=5.0, price=100.0),
         ))
         executed = rt.run_once()
         assert executed == 1
@@ -61,11 +61,13 @@ def test_execution_agent_full_runtime_pipeline() -> None:
         assert t.result["agent_id"] == AGENT_ID
 
         # 2. Move price → submit SELL 5 → realized PnL
-        broker.set_market_price("ES", 115.0)
+        svc.price_provider.set_market_price(
+            "ES", 115.0, observed_at=TEST_TIME
+        )
         rt.submit(TaskCreate(
             id="ord-sell-1",
             task_type=TASK_TYPE_ORDER,
-            payload={"symbol": "ES", "side": "SELL", "quantity": 5.0},
+            payload=market_payload("runtime-sell", side="SELL", quantity=5.0, price=115.0),
         ))
         rt.run_once()
 
@@ -101,8 +103,7 @@ def test_execution_agent_invalid_payload_marks_task_failed() -> None:
         retry_policy=RetryPolicy(max_attempts=1, initial_delay=0, jitter=False),
         poll_interval=0.0,
     )
-    broker = MockBroker(initial_prices={"ES": 100.0})
-    svc = ExecutionService(broker)
+    svc = make_execution_service()
     rt.register_handler(TASK_TYPE_ORDER, ExecutionAgent(svc, rt.memory, rt.event_bus))
 
     seen: list[str] = []
@@ -133,15 +134,14 @@ def test_execution_agent_rejected_order_marks_task_completed() -> None:
         retry_policy=RetryPolicy(max_attempts=1, initial_delay=0, jitter=False),
         poll_interval=0.0,
     )
-    broker = MockBroker(initial_prices={"ES": 100.0})
-    svc = ExecutionService(broker)
+    svc = make_execution_service()
     rt.register_handler(TASK_TYPE_ORDER, ExecutionAgent(svc, rt.memory, rt.event_bus))
 
     try:
         rt.submit(TaskCreate(
             id="ord-rej",
             task_type=TASK_TYPE_ORDER,
-            payload={"symbol": "ES", "side": "SELL", "quantity": 10.0},  # no position
+            payload=market_payload("runtime-rejected", side="SELL", quantity=10.0),
         ))
         rt.run_once()
 
@@ -150,6 +150,6 @@ def test_execution_agent_rejected_order_marks_task_completed() -> None:
         assert t is not None
         assert t.status == "completed"  # not failed — REJECTED is a result
         assert t.result["order_status"] == "REJECTED"
-        assert "insufficient" in t.result["broker_message"].lower()
+        assert "INSUFFICIENT_POSITION" in t.result["violation_codes"]
     finally:
         rt.shutdown()

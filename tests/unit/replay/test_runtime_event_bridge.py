@@ -29,6 +29,7 @@ def _exec_payload(
     fill_price: float | None = 100.0,
     filled_quantity: float | None = None,
     broker_message: str | None = None,
+    committed: bool = True,
 ) -> dict:
     p = {
         "order_id": order_id,
@@ -37,6 +38,7 @@ def _exec_payload(
         "quantity": quantity,
         "order_status": order_status,
         "fill_price": fill_price,
+        "committed": committed,
     }
     if filled_quantity is not None:
         p["filled_quantity"] = filled_quantity
@@ -113,19 +115,29 @@ def test_filled_order_yields_two_replay_events() -> None:
     assert events[1].payload["fill_quantity"] == 3.0
 
 
-def test_rejected_order_yields_created_then_cancelled() -> None:
+def test_rejected_risk_yields_only_auditable_violation() -> None:
     bus, store = _bus_and_store()
     bridge = RuntimeEventBridge(bus, store)
     bridge.attach()
-    bus.emit(RUNTIME_EXECUTION_EVENT, **_exec_payload(
-        order_status="REJECTED", fill_price=None,
-        broker_message="insufficient position",
-    ))
+    payload = _exec_payload(
+        order_status="REJECTED", fill_price=None, committed=False,
+        broker_message="risk authorization rejected",
+    )
+    payload.update({
+        "intent_id": "intent-rejected",
+        "authorization_id": "risk-auth-rejected",
+        "decision_hash": "a" * 64,
+        "provider_id": "provider-risk",
+        "context_state_version": 3,
+        "context_state_hash": "b" * 64,
+        "risk_limits_hash": "c" * 64,
+        "violation_codes": ["INSUFFICIENT_POSITION"],
+    })
+    bus.emit(RUNTIME_EXECUTION_EVENT, **payload)
     events = store.get_all()
-    assert [e.event_type for e in events] == [
-        ReplayEventType.ORDER_CREATED, ReplayEventType.ORDER_CANCELLED,
-    ]
-    assert "insufficient" in events[1].payload["reason"]
+    assert [event.event_type for event in events] == [ReplayEventType.RISK_VIOLATION]
+    assert events[0].payload["intent_id"] == "intent-rejected"
+    assert events[0].payload["violation_codes"] == ["INSUFFICIENT_POSITION"]
 
 
 def test_pending_order_yields_only_order_created() -> None:
@@ -155,7 +167,7 @@ def test_quantity_falls_back_to_filled_quantity() -> None:
     bridge.attach()
     p = {"order_id": "o", "symbol": "ES", "side": "BUY",
          "order_status": "FILLED", "fill_price": 100.0,
-         "filled_quantity": 5.0}
+         "filled_quantity": 5.0, "committed": True}
     bus.emit(RUNTIME_EXECUTION_EVENT, **p)
     events = store.get_all()
     assert events[0].payload["quantity"] == 5.0

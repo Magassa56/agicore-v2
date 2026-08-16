@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import timedelta
 
 import pytest
 
@@ -25,8 +26,7 @@ from agicore.l1_perception.market_models import EVT_MARKET_TICK
 from agicore.l1_perception.mock_market_feed import MockMarketFeed
 from agicore.l2_memory.schemas.task import TaskCreate
 from agicore.l4_planning.runtime import RuntimeEngine
-from agicore.l5_action.broker_mock import MockBroker
-from agicore.l5_action.execution_service import ExecutionService
+from tests.l5_secure_helpers import TEST_TIME, make_execution_service, market_payload
 from agicore.replay.event_store import EventStore, ReplayEventType
 from agicore.replay.replay_engine import ReplayEngine
 from agicore.replay.runtime_event_bridge import RuntimeEventBridge
@@ -61,10 +61,10 @@ def test_feed_does_not_disturb_execution_pipeline() -> None:
         retry_policy=RetryPolicy(max_attempts=1, initial_delay=0, jitter=False),
         poll_interval=0.0,
     )
-    broker = MockBroker(initial_prices={"ES": 100.0})
+    broker = make_execution_service()
     rt.register_handler(
         TASK_TYPE_ORDER,
-        ExecutionAgent(ExecutionService(broker), rt.memory, rt.event_bus),
+        ExecutionAgent(broker, rt.memory, rt.event_bus),
     )
 
     feed = MockMarketFeed(
@@ -75,8 +75,7 @@ def test_feed_does_not_disturb_execution_pipeline() -> None:
         feed.start()
 
         rt.submit(TaskCreate(id="ord-1", task_type=TASK_TYPE_ORDER,
-                             payload={"symbol": "ES", "side": "BUY",
-                                      "quantity": 1.0}))
+                             payload=market_payload("feed-buy", side="BUY", quantity=1.0, price=100.0)))
         time.sleep(0.05)
         rt.run_once()
         feed.stop()
@@ -144,10 +143,10 @@ def test_replay_combined_market_ticks_and_orders() -> None:
         retry_policy=RetryPolicy(max_attempts=1, initial_delay=0, jitter=False),
         poll_interval=0.0,
     )
-    broker = MockBroker(initial_prices={"ES": 100.0})
+    broker = make_execution_service()
     rt.register_handler(
         TASK_TYPE_ORDER,
-        ExecutionAgent(ExecutionService(broker), rt.memory, rt.event_bus),
+        ExecutionAgent(broker, rt.memory, rt.event_bus),
     )
 
     store = EventStore()
@@ -173,13 +172,13 @@ def test_replay_combined_market_ticks_and_orders() -> None:
 
         # BUY then SELL pendant que le feed tourne
         rt.submit(TaskCreate(id="b1", task_type=TASK_TYPE_ORDER,
-                             payload={"symbol": "ES", "side": "BUY",
-                                      "quantity": 2.0}))
+                             payload=market_payload("combined-buy", side="BUY", quantity=2.0, price=100.0)))
         rt.run_once()
-        broker.set_market_price("ES", 110.0)
+        broker.price_provider.set_market_price(
+            "ES", 110.0, observed_at=TEST_TIME
+        )
         rt.submit(TaskCreate(id="s1", task_type=TASK_TYPE_ORDER,
-                             payload={"symbol": "ES", "side": "SELL",
-                                      "quantity": 2.0}))
+                             payload=market_payload("combined-sell", side="SELL", quantity=2.0, price=110.0)))
         rt.run_once()
 
         feed.stop()

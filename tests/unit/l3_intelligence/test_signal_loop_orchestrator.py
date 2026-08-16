@@ -262,7 +262,11 @@ class TestSubmittedPayload:
         assert dto.payload["symbol"] == "ES"
         assert dto.payload["side"] == "BUY"
         assert dto.payload["quantity"] == 3.0
-        assert dto.payload["client_order_id"].startswith("sig-")
+        assert dto.payload["intent_id"].startswith("sig-intent-")
+        assert dto.payload["order_id"].startswith("order-")
+        assert dto.payload["operation_id"].startswith("operation-")
+        assert dto.payload["estimated_price"] == 100.0
+        assert dto.payload["timestamp"] == dto.payload["submitted_at"]
 
 
 # ---------------------------------------------------------------- Robustness
