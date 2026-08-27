@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Index, Integer, String
+from sqlalchemy import JSON, CheckConstraint, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -28,12 +28,20 @@ class Event(Base):
     agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    effect_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False, index=True
     )
 
     __table_args__ = (
         Index("ix_events_type_created", "event_type", "created_at"),
+        Index("ux_events_effect_id", "effect_id", unique=True),
+        CheckConstraint(
+            "(effect_id IS NULL AND payload_hash IS NULL) OR "
+            "(effect_id IS NOT NULL AND payload_hash IS NOT NULL)",
+            name="ck_events_effect_identity_pair",
+        ),
     )
 
     def __repr__(self) -> str:  # pragma: no cover

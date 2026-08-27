@@ -5,6 +5,7 @@ Toutes les opérations sont structlog-ready : aucun print, niveau approprié.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -15,11 +16,15 @@ from ..repositories.event_repository import EventRepository
 from ..repositories.state_repository import StateRepository
 from ..repositories.task_repository import TaskRepository
 from ..schemas.agent_state import AgentStateRead, AgentStateUpsert
-from ..schemas.event import EventCreate, EventRead
+from ..schemas.event import (
+    EventCreate,
+    EventRead,
+    IdempotentEventApplyResult,
+    prepare_idempotent_event,
+)
 from ..schemas.execution_context import ExecutionContextCreate, ExecutionContextRead
 
 logger = structlog.get_logger(__name__)
-
 
 class MemoryService:
     """Façade L2. Toujours instanciée avec un SqlAlchemyEngine.
@@ -51,6 +56,30 @@ class MemoryService:
         with self._engine.session() as s:
             repo = EventRepository(s)
             return repo.create(dto)
+
+    def create_event_idempotent(
+        self,
+        *,
+        effect_id: str,
+        occurred_at: datetime,
+        event_type: str,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        payload: Mapping[str, object],
+    ) -> IdempotentEventApplyResult:
+        """Apply one canonical event exactly once in the local SQL authority."""
+        dto = prepare_idempotent_event(
+            effect_id=effect_id,
+            occurred_at=occurred_at,
+            event_type=event_type,
+            task_id=task_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            payload=payload,
+        )
+        with self._engine.session() as session:
+            return EventRepository(session).create_idempotent(dto)
 
     def get_recent_events(
         self,
@@ -129,7 +158,6 @@ class MemoryService:
     # ------------------------------------------------------------------ Tasks (mince)
     def task_repository(self) -> TaskRepository:
         """Renvoie un TaskRepository scoped sur une session — usage avancé."""
-        s = self._engine.engine  # type: ignore[unused-ignore]  # dummy ref
         # NOTE: pour rester cohérent avec le pattern session-scoped,
         # les opérations Task passent par le repository directement avec une session
         # ouverte par l'appelant. Cette méthode est volontairement minimaliste pour

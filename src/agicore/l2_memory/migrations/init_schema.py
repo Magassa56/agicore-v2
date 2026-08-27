@@ -18,6 +18,9 @@ def init_schema(engine: SqlAlchemyEngine) -> list[str]:
     from ..models import agent_state, event, execution_context, task  # noqa: F401
 
     engine.create_all(Base.metadata)
+    from .add_idempotent_memory_effect import add_idempotent_memory_effect
+
+    add_idempotent_memory_effect(engine)
     tables = list(Base.metadata.tables.keys())
     logger.info("ltm.migration.init_schema.completed", tables=tables)
     return tables
