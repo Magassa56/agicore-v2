@@ -1,54 +1,40 @@
 # AGIcore Project Status
 
-Dernière mise à jour : 2026-08-22
+Dernière mise à jour : 2026-08-28
 
-## P1 — AGIcore Trading
+## Vocabulaire autoritaire
 
-**Statut : EN COURS — priorité absolue**
+| Statut | Signification |
+|---|---|
+| `MERGED` | Présent dans la branche principale GitHub après fusion explicite |
+| `REMOTE_PR` | Présent dans une PR GitHub mais non fusionné |
+| `LOCAL_COMMIT_ONLY` | Commit local non publié sur GitHub |
+| `UNCOMMITTED_REVIEW` | Diff local non commité en attente de revue humaine |
+| `BLOCKED` | Dépendance architecturale, autorisation ou contrat requis avant poursuite |
 
-État récent vérifié sur GitHub :
+Un commit local ou un diff de revue n'est jamais décrit comme intégré, publié ou disponible sur `main`.
 
-- PR #224 : modèle détaillé des coûts d'exécution.
-- PR #225 : propagation du modèle de coûts aux études breakout.
-- PR #226 : comparaison déterministe de scénarios de coûts.
-- PR #227 : contrat de contexte d'exécution risk-gated et journal/replay.
-- PR #228 : contrat déterministe d'autorisation de risque.
-- PR #229 : consommation unique des autorisations de risque.
-- PR #230 : transaction agrégée L5 déterministe.
-- PR #231 : chemin canonique L5 soumis au contrôle de risque obligatoire.
+## État vérifié des travaux
 
-La PR #231 rapporte 5 564 tests réussis sur la suite complète. Elle ne démontre pas la rentabilité et n'autorise ni paper trading supervisé ni trading réel.
+| Travail | Statut | État exact |
+|---|---|---|
+| PR #232 — Command Center V2 | `REMOTE_PR` | Documentation architecturale portée par une PR ouverte et non fusionnée ; le HEAD courant visible sur GitHub est autoritaire |
+| SINK-A — autorité mémoire idempotente | `LOCAL_COMMIT_ONLY` | Commit local `f420d83d259c2cadf33307b1029554a84b3ff0a3`, non publié |
+| SINK-B1 V2 — autorité durable EventBus | `UNCOMMITTED_REVIEW` | Rapport PASS local ; diff encore soumis à revue humaine, sans commit |
+| Gate 6.3C V2 | `UNCOMMITTED_REVIEW` | Travail local conservé, non commité et non intégré |
+| SINK-B2 | `BLOCKED` | Non démarré ; aucune autorisation d'implémentation dans cette phase |
 
-### Prochain objectif
+Les éléments `LOCAL_COMMIT_ONLY` et `UNCOMMITTED_REVIEW` ne font pas partie de la branche principale GitHub.
 
-Identifier et fermer les gates pré-paper restantes : persistance durable, reprise après crash, idempotence inter-processus et migration contrôlée des familles d'exécution encore hors chemin canonique.
+## Priorité active
 
-## P2 — BusinessPilot
+**AGIcore Trading V1** reste la priorité produit. Après la gouvernance documentaire, la suite recommandée est une reprise contrôlée de Trading V1, phase par phase, avec revue et autorisation séparées.
 
-**Statut : À DÉMARRER**
+AGIcore continue comme moteur métier spécialisé et persistant. Il n'est ni arrêté, ni remplacé, ni transformé en orchestrateur universel.
 
-V1 cible :
-- `businesspilot.pages.dev` ;
-- offre Starter 30 € ;
-- Automation 9,99 € ;
-- Business Pro 19,90 € ;
-- capture lead + Google Sheets ;
-- automatisations simples avant extension réseaux sociaux.
+## Frontières d'activation
 
-## P3 — AGIcore Biotech / Agritech
-
-**Statut : À DÉMARRER**
-
-Architecture retenue :
-
-SARRA-Py → cultures maïs/mil/sorgho → météo/sol → WeedSim → HerbicideSim → AGIcore Scenario Optimizer.
-
-DSSAT sert de moteur secondaire de validation. APSIM reste prévu plus tard pour des simulations complexes et multi-années.
-
-### Premier jalon
-
-Installer SARRA-Py et reproduire une simulation de référence avant d'ajouter WeedSim ou HerbicideSim.
-
-## Backlog protégé
-
-AGIcore Engineering, bibliothèque CAO, infrastructure IA locale, atelier 3D/CNC et robotique restent conservés mais non actifs tant qu'un jalon prioritaire n'est pas franchi.
+- La réorientation documentaire n'active aucune capacité paper ou live.
+- SINK-A, SINK-B1 V2 et Gate 6.3C V2 doivent suivre leurs propres revues et décisions d'intégration.
+- Aucun résultat local ne vaut présence dans GitHub `main`.
+- Toute connexion externe, authentification broker, paper trading durable ou live trading exige sa Gate et une décision humaine explicite.

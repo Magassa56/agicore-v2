@@ -1,47 +1,37 @@
-# AGIcore Portfolio Roadmap
+# AGIcore Trading V1 — Roadmap
 
-Dernière mise à jour : 2026-08-22
+Dernière mise à jour : 2026-08-28
 
-## Maintenant — 90 jours
+## Priorité produit
 
-| Priorité | Projet | Objectif | Prochain jalon | Échéance cible |
-|---|---|---|---|---|
-| P1 | AGIcore Trading | Atteindre une boucle paper/offline mesurable, gouvernée et auditée | Fermer les gates pré-paper restantes après la sécurisation L5 | 2026-09-30 |
-| P2 | BusinessPilot | Mettre en ligne une V1 vendable | Landing + offre + workflow Google Sheets simple | 2026-09-20 |
-| P3 | AGIcore Biotech / Agritech | Valider le moteur agricole de base | SARRA-Py reproductible sur maïs, mil et sorgho | 2026-10-15 |
+La priorité active est **AGIcore Trading V1**. La roadmap décrit un ordre de preuves et d'autorisations, pas une promesse calendaire.
 
-## Ensuite
+1. **Stabilité déterministe et persistante** — Fermer les autorités transactionnelles, l'idempotence durable, le replay causal et la reprise après crash.
+2. **Exécution offline** — Prouver les chemins canoniques sans réseau, broker, compte ou données réelles.
+3. **Paper trading durable** — Activer uniquement après fermeture et revue des Gates pré-paper, avec état persistant et reprise vérifiable.
+4. **Observation et apprentissage contrôlés** — Mesurer le Paper Loop et encadrer toute évolution de politique par des preuves rejouables.
+5. **Validation quantitative et risque** — Évaluer robustesse, coûts, limites, scénarios adverses et absence de dérive des contrôles de risque.
+6. **Live trading futur** — Reste hors périmètre jusqu'à une phase explicitement autorisée, une Gate dédiée et une décision humaine.
 
-### AGIcore Engineering
-- bibliothèque légale CATIA / STEP / DXF / BOM ;
-- CAO paramétrique ;
-- simulation ;
-- optimisation évolutive type AlphaEvolve.
+Aucune date de passage en live n'est annoncée.
 
-### Biotech V2
-- WeedSim ;
-- HerbicideSim ;
-- météo et sols Mali/Sahel ;
-- comparaison virtuelle de scénarios ;
-- calibration par essais terrain.
+## Capacités AGIcore à consolider
 
-### BusinessPilot V2
-- automatisations Google Sheets / Business Profile ;
-- gestion réseaux sociaux ;
-- reporting clients.
+- mémoire événementielle persistante ;
+- World Model ;
+- Risk Engine et Trading Engine ;
+- exécution déterministe ;
+- replay et audit ;
+- évaluations de politiques ;
+- Paper Loop et apprentissage contrôlé.
 
-## Plus tard
+## Ordre de reprise après cette gouvernance documentaire
 
-- APSIM multi-années ;
-- station IA NVIDIA ;
-- atelier impression 3D / CNC ;
-- robotique avancée ;
-- infrastructure cloud lourde.
+1. revue humaine de la documentation Command Center ;
+2. traitement séparé des travaux locaux selon leur statut et leur revue ;
+3. poursuite contrôlée des Gates Trading V1 ;
+4. aucune activation paper ou live par simple mise à jour documentaire.
 
-## Règles d'exécution
+## Backlog protégé
 
-1. Maximum trois projets actifs à la fois.
-2. Allocation indicative : P1 60 %, P2 25 %, P3 15 %.
-3. Toute nouvelle grosse idée entre d'abord au backlog.
-4. Chaque tâche doit viser un livrable vérifiable en 1 à 3 jours.
-5. Aucun nouveau chantier majeur avant franchissement du prochain jalon actif.
+BusinessPilot, Biotech/Agritech, Engineering, CAO, infrastructure IA locale, atelier 3D/CNC et robotique restent conservés mais ne détournent pas la priorité Trading V1 sans nouvelle décision humaine.

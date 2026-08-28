@@ -1,28 +1,45 @@
 # AGIcore Command Center
 
-Ce dossier est la source de pilotage lisible par ChatGPT, Codex et l'AGIcore Manager.
+Ce dossier documente la gouvernance des travaux AGIcore. Il ne constitue ni une autorité transactionnelle ni un orchestrateur runtime.
 
-## Principe
+## Architecture autoritaire
 
-- `ROADMAP.md` : priorités portefeuille et jalons.
-- `PROJECT_STATUS.md` : état factuel des projets et preuves récentes.
-- `CODEX_WORKFLOW.md` : contrat de passage Roadmap → ticket → code → tests → PR → revue.
-- `AGENTS.md` à la racine reste l'autorité de gouvernance Codex pour le dépôt.
+| Composant | Responsabilité |
+|---|---|
+| ChatGPT Work | Orchestration générale, coordination des travaux, suivi des décisions et interaction humaine |
+| Codex | Ingénierie logicielle, analyse du dépôt, implémentation, tests et production des diffs de revue |
+| GitHub | Source de vérité du code, versioning, branches, PR, revues, CI et décisions d'intégration |
+| AGIcore | Moteur spécialisé persistant : trading, risque, mémoire événementielle, World Model, replay et déterminisme |
+| Humain | Autorisation finale des changements sensibles, commits, publications et passages vers paper/live |
 
-## Source de vérité
+ChatGPT Work coordonne les activités générales, mais ne remplace jamais les autorités transactionnelles, les journaux persistants, le Risk Engine ou les contrôles fail-closed d'AGIcore.
 
-Pour le code et l'état technique, GitHub prévaut sur toute copie Excel locale. Le classeur `AGIcore_Master_Roadmap.xlsx` reste une vue humaine de gestion. Les changements techniques validés doivent être reflétés ici après fusion.
+## Positionnement produit
 
-## Règle portefeuille
+La priorité est **AGIcore Trading V1**. AGIcore conserve les capacités métier qui justifient son existence : mémoire événementielle persistante, World Model, Risk Engine, Trading Engine, exécution déterministe, replay, audit, évaluation de politiques, Paper Loop et apprentissage contrôlé.
 
-Maximum trois projets actifs :
+AGIcore n'est plus présenté comme l'orchestrateur universel des outils et services. Cette spécialisation :
 
-1. P1 — AGIcore Trading
-2. P2 — BusinessPilot
-3. P3 — AGIcore Biotech / Agritech
+- réduit la complexité d'orchestration interne ;
+- évite de dupliquer les capacités générales de ChatGPT Work ;
+- concentre AGIcore sur ses avantages métier ;
+- améliore persistance, auditabilité et déterminisme ;
+- accélère Trading V1 sans intégrer prématurément les travaux en revue.
 
-Les autres idées restent en backlog jusqu'au franchissement d'un jalon actif.
+## Documents
 
-## Sécurité
+- `ROADMAP.md` : ordre des jalons Trading V1 ;
+- `PROJECT_STATUS.md` : statuts Git et état factuel des travaux ;
+- `CODEX_WORKFLOW.md` : passage gouverné de l'objectif humain à l'intégration GitHub ;
+- `AGENTS.md` à la racine : autorité de gouvernance Codex du dépôt.
 
-Aucune automatisation ne doit autoriser seule : trading réel, dépenses, suppression irréversible, déploiement critique, utilisation réelle d'herbicides ou fusion sur `main`. Ces décisions restent humaines.
+## Frontière de sécurité
+
+Cette réorientation est exclusivement documentaire :
+
+- aucune modification du live trading ;
+- aucune connexion automatique à NinjaTrader, Alpaca, IBKR ou un autre broker ;
+- aucun ordre réel et aucun accès à un compte réel ;
+- aucun accès, déplacement, affichage ou changement d'authentification ou de secret ;
+- séparation maintenue entre paper trading et live trading ;
+- toute activation externe exige une décision humaine et une Gate dédiée.

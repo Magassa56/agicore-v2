@@ -1,70 +1,56 @@
-# Codex Workflow — Command Center
+# Workflow gouverné — ChatGPT Work, Codex, GitHub et AGIcore
 
 Ce workflow complète `AGENTS.md`. En cas de conflit, `AGENTS.md` prévaut.
 
-## Boucle standard
+## Responsabilités
 
-1. Lire `ROADMAP.md` et `PROJECT_STATUS.md`.
-2. Sélectionner uniquement le prochain jalon autorisé.
-3. Transformer le jalon en une tâche bornée avec critères d'acceptation mesurables.
-4. Créer/utiliser une branche dédiée.
-5. Modifier le minimum de fichiers nécessaires.
-6. Exécuter tests ciblés puis tests élargis selon le risque.
-7. Produire preuves : commandes, résultats, diff, état Git.
-8. Ouvrir une PR courte ; ne jamais fusionner sans décision humaine.
-9. Après fusion validée, mettre à jour `PROJECT_STATUS.md` et si nécessaire `ROADMAP.md`.
+| Acteur | Responsabilité opérationnelle |
+|---|---|
+| Humain | Fixe l'objectif, les limites et les autorisations sensibles ; décide des commits, publications et activations paper/live |
+| ChatGPT Work | Coordonne le plan général, les dépendances, les décisions et la supervision humaine |
+| Codex | Inspecte le dépôt, implémente dans le périmètre, exécute les validations et produit les diffs |
+| GitHub | Conserve le code et l'historique, porte branches, PR, revues, CI et intégrations |
+| AGIcore | Exécute seulement les capacités métier déterministes, persistantes, intégrées et autorisées |
 
-## Conditions de démarrage d'une tâche
+ChatGPT Work ne remplace ni les transactions locales d'AGIcore, ni ses autorités persistantes, ni ses contrôles de risque.
 
-Une tâche est prête seulement si elle contient :
+## Cycle d'intégration
 
-- objectif unique ;
-- périmètre explicite ;
-- fichiers ou modules probables ;
-- critères d'acceptation ;
-- tests attendus ;
-- risques/sécurité ;
-- éléments explicitement hors périmètre.
+1. L'humain fixe l'objectif et les limites.
+2. ChatGPT Work coordonne et maintient le plan.
+3. Codex inspecte, implémente et valide.
+4. Codex produit un diff de revue vérifiable.
+5. Une revue humaine évalue le diff et les preuves.
+6. Le commit local est autorisé séparément.
+7. Le changement est publié dans une PR dédiée.
+8. La CI et la revue GitHub vérifient le changement publié.
+9. La fusion est explicitement autorisée.
+10. AGIcore exécute uniquement les capacités intégrées et autorisées.
 
-## Politique de priorité
+Chaque étape conserve son statut propre. Un diff, un commit local, une PR et une fusion ne sont jamais interchangeables.
 
-- P1 Trading peut générer du travail technique actif.
-- P2 BusinessPilot et P3 Biotech ne doivent pas modifier le cœur trading dans ce dépôt sans une décision d'architecture explicite.
-- Les projets backlog ne génèrent pas de nouvelles grosses features automatiquement.
+## Conditions de démarrage d'une tâche Codex
 
-## Automatisation autorisée sans validation finale
+Une tâche est prête seulement si elle définit :
 
-Codex peut :
+- un objectif unique et un périmètre explicite ;
+- les fichiers ou modules probables ;
+- des critères d'acceptation et tests mesurables ;
+- les risques, frontières de sécurité et éléments hors périmètre ;
+- l'autorité humaine nécessaire pour toute action externe ou irréversible.
 
-- analyser le dépôt ;
-- proposer un ticket ;
-- coder sur une branche ;
-- écrire/renforcer des tests ;
-- lancer la CI/tests ;
-- préparer une PR ;
-- documenter les résultats.
+## Autorisations et arrêts
 
-Codex doit STOP avant :
+Codex peut, dans le périmètre autorisé : analyser, modifier, tester et produire un diff. Il doit s'arrêter avant toute action qui requiert une autorisation distincte, notamment :
 
-- fusion sur `main` ;
-- déploiement production ;
-- accès broker/compte réel ;
-- ordre réel ;
-- dépenses ;
-- suppression irréversible ;
-- modification de secrets ;
-- action agricole réelle ou recommandation opérationnelle non validée d'herbicide.
+- stage ou commit non autorisé ;
+- push, création ou modification de PR non autorisés ;
+- fusion sur `main` ou déploiement ;
+- modification d'authentification ou de secrets ;
+- accès broker, compte réel ou ordre réel ;
+- activation paper/live sans Gate dédiée ;
+- dépense ou suppression irréversible.
 
 ## Critère de fermeture
 
-Une tâche n'est `DONE` que si :
-
-- les critères d'acceptation sont satisfaits ;
-- les tests exigés passent ;
-- aucun fichier hors périmètre n'est modifié ;
-- les risques résiduels sont documentés ;
-- la PR est prête à être revue humainement.
-
-## Synchronisation ChatGPT ↔ Codex
-
-ChatGPT agit comme gestionnaire de portefeuille : relit Roadmap, PR, CI et statut, puis formule le prochain travail borné. Codex agit comme ingénieur d'exécution : implémente, teste et prépare la PR. GitHub constitue l'état partagé permanent entre les deux.
+Une tâche n'est terminée que lorsque ses critères sont prouvés, les validations exigées passent, le périmètre Git est exact et les risques résiduels sont documentés. La disponibilité sur `main` exige en plus publication, CI, revue et fusion explicite.
