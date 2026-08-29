@@ -18,7 +18,7 @@ Un commit local ou un diff de revue n'est jamais décrit comme intégré, publi�
 
 | Travail | Statut | État exact |
 |---|---|---|
-| PR #232 — Command Center V2 | `REMOTE_PR` | Documentation architecturale portée par une PR ouverte et non fusionnée ; le HEAD courant visible sur GitHub est autoritaire |
+| PR #232 — Command Center V2 | `MERGED` | Fusionnée sur `main` ; GitHub et l’historique de la PR sont autoritaires |
 | SINK-A — autorité mémoire idempotente | `LOCAL_COMMIT_ONLY` | Commit local `f420d83d259c2cadf33307b1029554a84b3ff0a3`, non publié |
 | SINK-B1 V2 — autorité durable EventBus | `UNCOMMITTED_REVIEW` | Rapport PASS local ; diff encore soumis à revue humaine, sans commit |
 | Gate 6.3C V2 | `UNCOMMITTED_REVIEW` | Travail local conservé, non commité et non intégré |
