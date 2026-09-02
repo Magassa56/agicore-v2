@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Barrier
 
 import pytest
 from sqlalchemy import text
@@ -22,20 +24,24 @@ from agicore.l2_memory.services.memory_service import MemoryService
 NOW = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
 
 
-def _system() -> tuple[
-    SqlAlchemyEngine,
-    EventDeliveryService,
-    IdempotentMemoryDeliveryHandler,
-]:
-    engine = SqlAlchemyEngine("sqlite:///:memory:", delivery_authority=True)
-    init_schema(engine, include_event_delivery=True)
-    delivery = EventDeliveryService(
+def _service(engine: SqlAlchemyEngine) -> EventDeliveryService:
+    return EventDeliveryService(
         engine,
         authority_id="event-delivery",
         authority_version="v1",
         runtime_profile_id=IdempotentMemoryDeliveryHandler.RUNTIME_PROFILE_ID,
         manifest_version="v1",
     )
+
+
+def _system(url: str = "sqlite:///:memory:") -> tuple[
+    SqlAlchemyEngine,
+    EventDeliveryService,
+    IdempotentMemoryDeliveryHandler,
+]:
+    engine = SqlAlchemyEngine(url, delivery_authority=True)
+    init_schema(engine, include_event_delivery=True)
+    delivery = _service(engine)
     delivery.register_manifest(
         event_type="offline.audit.requested",
         entries=(
@@ -92,6 +98,78 @@ def test_one_delivery_is_applied_completed_and_replayable() -> None:
         assert replayed.emissions[0].status == "COMPLETED"
     finally:
         engine.dispose()
+
+
+def test_restart_recovers_effect_without_duplicate_and_replays(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = f"sqlite:///{(tmp_path / 'sink-b2-restart.sqlite3').as_posix()}"
+    first_engine, first_delivery, first_handler = _system(url)
+    try:
+        monkeypatch.setattr(
+            first_delivery,
+            "record_synthetic_handler_result",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("simulated crash")),
+        )
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            first_handler.run_one(worker_identity="worker-before", observed_at=NOW)
+        assert _memory_count(first_engine) == 1
+    finally:
+        first_engine.dispose()
+
+    second_engine = SqlAlchemyEngine(url, delivery_authority=True)
+    second_delivery = _service(second_engine)
+    second_handler = IdempotentMemoryDeliveryHandler(
+        second_delivery, MemoryService(second_engine)
+    )
+    try:
+        recovered = second_handler.run_one(
+            worker_identity="worker-after",
+            observed_at=NOW,
+            recover_stale_claim=True,
+        )
+        assert recovered.status == "COMPLETED"
+        assert _memory_count(second_engine) == 1
+        replayed = second_delivery.replay()
+        assert replayed.deliveries[0].result_status is ApplyStatus.APPLIED_CONFIRMED
+        assert replayed.deliveries[0].status == "COMPLETED"
+        assert replayed.emissions[0].status == "COMPLETED"
+    finally:
+        second_engine.dispose()
+
+
+def test_two_workers_create_only_one_memory_effect(tmp_path) -> None:
+    url = f"sqlite:///{(tmp_path / 'sink-b2-concurrent.sqlite3').as_posix()}"
+    bootstrap, _, _ = _system(url)
+    bootstrap.dispose()
+    barrier = Barrier(2)
+
+    def work(worker_identity: str) -> str:
+        engine = SqlAlchemyEngine(url, delivery_authority=True)
+        handler = IdempotentMemoryDeliveryHandler(
+            _service(engine), MemoryService(engine)
+        )
+        try:
+            barrier.wait(timeout=10)
+            return handler.run_one(
+                worker_identity=worker_identity, observed_at=NOW
+            ).status
+        finally:
+            engine.dispose()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = tuple(pool.map(work, ("memory-worker-a", "memory-worker-b")))
+
+    verifier = SqlAlchemyEngine(url, delivery_authority=True)
+    try:
+        assert statuses.count("COMPLETED") == 1
+        assert set(statuses).issubset({"COMPLETED", "IDLE", "UNAVAILABLE"})
+        assert _memory_count(verifier) == 1
+        replayed = _service(verifier).replay()
+        assert replayed.deliveries[0].status == "COMPLETED"
+        assert replayed.emissions[0].status == "COMPLETED"
+    finally:
+        verifier.dispose()
 
 
 def test_retry_after_memory_effect_before_b1_result_has_stable_proof(
