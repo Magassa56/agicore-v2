@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -25,8 +25,7 @@ from agicore.risk.exposure_models import ExecutionIntent, IntentSide, RiskLimits
 from agicore.risk.risk_execution_context import InMemoryRiskContextProvider, RiskExecutionContext
 from agicore.risk.risk_manager import RiskManager
 
-
-NOW = datetime(2026, 8, 15, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 15, 9, 0, tzinfo=UTC)
 
 
 class CountingRiskManager(RiskManager):
@@ -269,7 +268,7 @@ def test_consumption_remains_spent_after_publication_failure(monkeypatch) -> Non
     assert manager.calls == 1 and store.state is before
 
 
-def test_concurrent_duplicate_intent_has_exactly_one_committed_winner() -> None:
+def test_concurrent_duplicate_intent_returns_one_authoritative_outcome_twice() -> None:
     service, store, manager = _service()
     request = _market("intent-concurrent")
 
@@ -281,13 +280,14 @@ def test_concurrent_duplicate_intent_has_exactly_one_committed_winner() -> None:
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(lambda _: run(), range(2)))
-    assert sum(not isinstance(item, str) and item.committed for item in outcomes) == 1
-    assert sum(item == "INTENT_ALREADY_CONSUMED" or item == "DUPLICATE_INTENT" for item in outcomes) == 1
+    assert all(not isinstance(item, str) and item.committed for item in outcomes)
+    assert {item.outcome_hash for item in outcomes} == {outcomes[0].outcome_hash}
+    assert sum(item.redelivered for item in outcomes) == 1
     assert manager.calls == 1
     assert len(store.state.orders) == len(store.state.fills) == 1
 
 
-def test_concurrent_limit_fills_have_exactly_one_committed_winner() -> None:
+def test_concurrent_limit_fills_return_one_authoritative_outcome_twice() -> None:
     service, store, manager = _service()
     service.execute(CanonicalL5ExecutionRequest(
         intent=_intent("intent-limit-concurrent-place", price=99.0),
@@ -329,8 +329,9 @@ def test_concurrent_limit_fills_have_exactly_one_committed_winner() -> None:
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(lambda _: run(), range(2)))
 
-    assert sum(not isinstance(item, str) and item.committed for item in outcomes) == 1
-    assert sum(item in {"INTENT_ALREADY_CONSUMED", "DUPLICATE_INTENT"} for item in outcomes) == 1
+    assert all(not isinstance(item, str) and item.committed for item in outcomes)
+    assert {item.outcome_hash for item in outcomes} == {outcomes[0].outcome_hash}
+    assert sum(item.redelivered for item in outcomes) == 1
     assert manager.calls == 2  # one placement evaluation and one fill evaluation
     assert len(service.consumptions) == 2
     assert len(store.state.orders) == len(store.state.fills) == 1

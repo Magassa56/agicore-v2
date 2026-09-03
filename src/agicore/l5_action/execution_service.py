@@ -7,21 +7,29 @@ allowed decision once, and publishes only through
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
-import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 
 from agicore.risk.exposure_models import ExecutionIntent, IntentSide
-from agicore.risk.risk_execution_authorization import (
-    RiskAuthorizationBoundary,
-    RiskAuthorizationDecision,
-)
+from agicore.risk.risk_execution_authorization import RiskAuthorizationDecision
+from agicore.risk.risk_execution_context import RiskExecutionContext
 from agicore.risk.risk_manager import RiskManager
 
-from .broker_models import ExecutionReport, Order, OrderSide, OrderStatus, OrderType, Position
+from .broker_models import ExecutionReport, Order, OrderStatus, OrderType, Position
+from .execution_outbox import (
+    L5ExecutionDeliveryAcknowledgement,
+    L5ExecutionInboxReceipt,
+    L5ExecutionOutcome,
+    L5ExecutionOutcomeInbox,
+)
 from .execution_transaction import (
     L5ExecutionAggregateState,
+    L5ExecutionAuthorityState,
     L5ExecutionTransactionError,
     L5ExecutionTransactionStore,
 )
@@ -156,6 +164,59 @@ class CanonicalL5CancellationRequest:
             object.__setattr__(self, name, _identifier(getattr(self, name), name))
         object.__setattr__(self, "cancelled_at", _time(self.cancelled_at, "cancelled_at"))
 
+    @property
+    def intent_id(self) -> str:
+        return f"cancellation:{self.operation_id}"
+
+
+def _canonical_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, ExecutionIntent):
+        return {
+            "intent_id": value.intent_id,
+            "symbol": value.symbol,
+            "side": value.side.value,
+            "quantity": float(value.quantity),
+            "estimated_price": float(value.estimated_price),
+            "timestamp": value.timestamp.isoformat(),
+        }
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise L5CanonicalExecutionError(
+                "INVALID_EXECUTION_REQUEST",
+                "canonical mapping keys must be strings",
+            )
+        return {key: _canonical_value(value[key]) for key in sorted(value)}
+    if isinstance(value, tuple):
+        return [_canonical_value(nested) for nested in value]
+    return value
+
+
+def _request_payload(request: object) -> dict[str, object]:
+    if not hasattr(request, "__dataclass_fields__"):
+        raise L5CanonicalExecutionError("INVALID_EXECUTION_REQUEST", "request is not canonical")
+    return {
+        "request_type": type(request).__name__,
+        **{
+            name: _canonical_value(getattr(request, name))
+            for name in request.__dataclass_fields__
+        },
+    }
+
+
+def _request_hash(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
 
 @dataclass(frozen=True)
 class CanonicalL5ExecutionResult:
@@ -179,6 +240,13 @@ class CanonicalL5ExecutionResult:
     price_observation_hash: str | None = None
     execution_price: float | None = None
     violation_codes: tuple[str, ...] = ()
+    outcome_id: str | None = None
+    outcome_hash: str | None = None
+    request_hash: str | None = None
+    delivery_state_version: int | None = None
+    delivery_state_hash: str | None = None
+    redelivered: bool = False
+    outcome: L5ExecutionOutcome | None = None
 
 
 class ExecutionService:
@@ -200,8 +268,10 @@ class ExecutionService:
             raise ValueError("ExecutionService and transaction store must share one price provider")
         self._store = transaction_store
         self._price_provider = price_provider
-        self._boundary = RiskAuthorizationBoundary(risk_manager, transaction_store.context_provider)
-        self._lock = threading.RLock()
+        try:
+            self._boundary = transaction_store.authorization_boundary(risk_manager)
+        except L5ExecutionTransactionError as exc:
+            raise ValueError(f"{exc.code}: {exc.message}") from exc
 
     @property
     def state(self) -> L5ExecutionAggregateState:
@@ -222,8 +292,11 @@ class ExecutionService:
     def execute(self, request: CanonicalL5ExecutionRequest) -> CanonicalL5ExecutionResult:
         if not isinstance(request, CanonicalL5ExecutionRequest):
             raise L5CanonicalExecutionError("INVALID_EXECUTION_REQUEST", "canonical request is required")
-        with self._lock:
-            self._require_unused_intent(request.intent.intent_id)
+        with self._store.intent_guard(request.intent.intent_id):
+            existing = self._existing_result(request.intent.intent_id, _request_payload(request))
+            if existing is not None:
+                return existing
+            self._require_unfinalized_intent(request.intent.intent_id)
             return self._execute_locked(request)
 
     def _execute_locked(self, request: CanonicalL5ExecutionRequest) -> CanonicalL5ExecutionResult:
@@ -232,9 +305,18 @@ class ExecutionService:
             if request.order_type == OrderType.MARKET
             else None
         )
-        decision = self._authorize(request.intent)
+        authority_before = self._store.authority_state
+        decision = self._authorize(request.intent, authority_before.aggregate_state.risk_context)
         if not decision.allowed:
-            return self._blocked_result(request.order_id, decision, observation)
+            return self._blocked_result(
+                request=request,
+                intent_id=request.intent.intent_id,
+                operation_kind=("MARKET" if request.order_type == OrderType.MARKET else "LIMIT_PLACEMENT"),
+                requested_order_id=request.order_id,
+                decision=decision,
+                observation=observation,
+                authority_before=authority_before,
+            )
         consumption = self._boundary.verify_for_execution(decision, request.intent)
         if request.order_type == OrderType.MARKET:
             transition = self._store.derive_fill_transition(
@@ -268,21 +350,18 @@ class ExecutionService:
                 limit_price=request.limit_price,
                 submitted_at=request.submitted_at,
             )
-        state = self._store.commit(plan, boundary=self._boundary)
-        return self._committed_result(
-            state,
-            request.order_id,
-            request.operation_id,
-            decision,
-            consumption,
-            observation,
-        )
+        outcome_spec = self._store.outcome_spec_for_plan(plan, boundary=self._boundary)
+        self._store.commit(plan, boundary=self._boundary, outcome_spec=outcome_spec)
+        return self._result_for_published_outcome(request.intent.intent_id)
 
     def fill_limit(self, request: CanonicalL5LimitFillRequest) -> CanonicalL5ExecutionResult:
         if not isinstance(request, CanonicalL5LimitFillRequest):
             raise L5CanonicalExecutionError("INVALID_EXECUTION_REQUEST", "canonical LIMIT fill request is required")
-        with self._lock:
-            self._require_unused_intent(request.intent.intent_id)
+        with self._store.intent_guard(request.intent.intent_id):
+            existing = self._existing_result(request.intent.intent_id, _request_payload(request))
+            if existing is not None:
+                return existing
+            self._require_unfinalized_intent(request.intent.intent_id)
             return self._fill_limit_locked(request)
 
     def _fill_limit_locked(self, request: CanonicalL5LimitFillRequest) -> CanonicalL5ExecutionResult:
@@ -302,9 +381,18 @@ class ExecutionService:
         )
         if not eligibility.eligible:
             raise L5CanonicalExecutionError("LIMIT_NOT_ELIGIBLE", "limit price has not been crossed")
-        decision = self._authorize(request.intent)
+        authority_before = self._store.authority_state
+        decision = self._authorize(request.intent, authority_before.aggregate_state.risk_context)
         if not decision.allowed:
-            return self._blocked_result(request.order_id, decision, observation)
+            return self._blocked_result(
+                request=request,
+                intent_id=request.intent.intent_id,
+                operation_kind="LIMIT_FILL",
+                requested_order_id=request.order_id,
+                decision=decision,
+                observation=observation,
+                authority_before=authority_before,
+            )
         consumption = self._boundary.verify_for_execution(decision, request.intent)
         transition = self._store.derive_fill_transition(
             intent=request.intent,
@@ -324,46 +412,37 @@ class ExecutionService:
             transition=transition,
             price_observation=observation,
         )
-        state = self._store.commit(plan, boundary=self._boundary)
-        return self._committed_result(
-            state,
-            request.order_id,
-            request.operation_id,
-            decision,
-            consumption,
-            observation,
-        )
+        outcome_spec = self._store.outcome_spec_for_plan(plan, boundary=self._boundary)
+        self._store.commit(plan, boundary=self._boundary, outcome_spec=outcome_spec)
+        return self._result_for_published_outcome(request.intent.intent_id)
 
     def cancel_limit(self, request: CanonicalL5CancellationRequest) -> CanonicalL5ExecutionResult:
         if not isinstance(request, CanonicalL5CancellationRequest):
             raise L5CanonicalExecutionError("INVALID_EXECUTION_REQUEST", "canonical cancellation request is required")
-        with self._lock:
-            state = self._store.cancel_limit(
+        with self._store.intent_guard(request.intent_id):
+            existing = self._existing_result(request.intent_id, _request_payload(request))
+            if existing is not None:
+                return existing
+            outcome_spec = self._store.cancellation_outcome_spec(
                 operation_id=request.operation_id,
                 order_id=request.order_id,
                 report_id=request.report_id,
                 cancelled_at=request.cancelled_at,
             )
-        return CanonicalL5ExecutionResult(
-            order_id=request.order_id,
-            status=OrderStatus.CANCELLED,
-            committed=True,
-            message="limit order cancelled",
-            operation_id=request.operation_id,
-            authorization_id=None,
-            decision_hash=None,
-            consumption_id=None,
-            consumption_hash=None,
-            aggregate_state_version=state.state_version,
-            aggregate_state_hash=state.state_hash,
-            context_state_version=state.risk_context.state_version,
-            context_state_hash=state.risk_context.state_hash,
-            provider_id=state.risk_context.provider_id,
-            risk_limits_hash=None,
-        )
+            self._store.cancel_limit(
+                operation_id=request.operation_id,
+                order_id=request.order_id,
+                report_id=request.report_id,
+                cancelled_at=request.cancelled_at,
+                outcome_spec=outcome_spec,
+            )
+            return self._result_for_published_outcome(request.intent_id)
 
-    def _authorize(self, intent: ExecutionIntent) -> RiskAuthorizationDecision:
-        context = self._store.state.risk_context
+    def _authorize(
+        self,
+        intent: ExecutionIntent,
+        context: RiskExecutionContext,
+    ) -> RiskAuthorizationDecision:
         return self._boundary.authorize(
             intent,
             expected_provider_id=context.provider_id,
@@ -393,7 +472,7 @@ class ExecutionService:
             )
         return observation
 
-    def _require_unused_intent(self, intent_id: str) -> None:
+    def _require_unfinalized_intent(self, intent_id: str) -> None:
         if any(record.intent_id == intent_id for record in self._boundary.consumptions):
             raise L5CanonicalExecutionError("INTENT_ALREADY_CONSUMED", "intent_id authorization is already consumed")
         for event in self._store.state.execution_journal[1:]:
@@ -404,67 +483,137 @@ class ExecutionService:
             if hasattr(intent, "get") and intent.get("intent_id") == intent_id:
                 raise L5CanonicalExecutionError("DUPLICATE_INTENT", "intent_id already produced L5 state")
 
+    def _existing_result(
+        self,
+        intent_id: str,
+        request_payload: Mapping[str, object],
+    ) -> CanonicalL5ExecutionResult | None:
+        outcome = self._store.outcome_for_intent(intent_id)
+        if outcome is None:
+            return None
+        if outcome.request_hash != _request_hash(request_payload):
+            raise L5CanonicalExecutionError(
+                "INTENT_OUTCOME_CONFLICT",
+                "intent_id was finalized with a different payload",
+            )
+        return self._result_from_outcome(outcome, redelivered=True)
+
     def _blocked_result(
         self,
-        order_id: str,
+        *,
+        request: object,
+        intent_id: str,
+        operation_kind: str,
+        requested_order_id: str,
         decision: RiskAuthorizationDecision,
         observation: L5PriceObservation | None,
+        authority_before: L5ExecutionAuthorityState,
     ) -> CanonicalL5ExecutionResult:
-        state = self._store.state
-        codes = (*decision.guard_codes, *(item.code for item in decision.violations))
+        if (
+            intent_id != request.intent.intent_id
+            or operation_kind not in {"MARKET", "LIMIT_PLACEMENT", "LIMIT_FILL"}
+            or requested_order_id != request.order_id
+        ):
+            raise L5CanonicalExecutionError(
+                "INVALID_REJECTION_OUTCOME",
+                "rejection identity differs from canonical request",
+            )
+        delivery = authority_before.delivery_state
+        try:
+            outcome = self._store.publish_rejection_outcome(
+                request_payload=_request_payload(request),
+                price_observation=observation,
+                boundary=self._boundary,
+                decision=decision,
+                expected_aggregate_version=authority_before.aggregate_state.state_version,
+                expected_aggregate_hash=authority_before.aggregate_state.state_hash,
+                expected_delivery_version=delivery.delivery_version,
+                expected_delivery_hash=delivery.delivery_hash,
+            )
+        except L5ExecutionTransactionError as exc:
+            raise L5CanonicalExecutionError(exc.code, exc.message) from exc
+        return self._result_from_outcome(outcome)
+
+    def _result_for_published_outcome(self, intent_id: str) -> CanonicalL5ExecutionResult:
+        outcome = self._store.outcome_for_intent(intent_id)
+        if outcome is None:
+            raise L5CanonicalExecutionError("OUTCOME_NOT_PUBLISHED", "transaction outcome is missing")
+        return self._result_from_outcome(outcome)
+
+    def _result_from_outcome(
+        self,
+        outcome: L5ExecutionOutcome,
+        *,
+        redelivered: bool = False,
+    ) -> CanonicalL5ExecutionResult:
+        delivery = self._store.delivery_state
+        price_identity = outcome.price_identity or {}
+        message = (
+            "risk authorization rejected"
+            if not outcome.committed
+            else "limit order cancelled"
+            if outcome.final_status == OrderStatus.CANCELLED.value
+            else "transaction committed"
+        )
         return CanonicalL5ExecutionResult(
-            order_id=order_id,
-            status=OrderStatus.REJECTED,
-            committed=False,
-            message="risk authorization rejected",
-            operation_id=None,
-            authorization_id=decision.authorization_id,
-            decision_hash=decision.decision_hash,
-            consumption_id=None,
-            consumption_hash=None,
-            aggregate_state_version=state.state_version,
-            aggregate_state_hash=state.state_hash,
-            context_state_version=state.risk_context.state_version,
-            context_state_hash=state.risk_context.state_hash,
-            provider_id=decision.provider_id,
-            risk_limits_hash=decision.risk_limits_hash,
-            price_provider_id=(observation.provider_id if observation else None),
-            price_version=(observation.price_version if observation else None),
-            price_observation_hash=(observation.observation_hash if observation else None),
-            violation_codes=tuple(codes),
+            order_id=outcome.requested_order_id,
+            status=OrderStatus(outcome.final_status),
+            committed=outcome.committed,
+            message=message,
+            operation_id=outcome.operation_id,
+            authorization_id=outcome.authorization_id,
+            decision_hash=outcome.decision_hash,
+            consumption_id=outcome.consumption_id,
+            consumption_hash=outcome.consumption_hash,
+            aggregate_state_version=outcome.aggregate_state_version,
+            aggregate_state_hash=outcome.aggregate_state_hash,
+            context_state_version=outcome.context_state_version,
+            context_state_hash=outcome.context_state_hash,
+            provider_id=outcome.provider_id,
+            risk_limits_hash=outcome.risk_limits_hash,
+            price_provider_id=price_identity.get("provider_id"),
+            price_version=price_identity.get("price_version"),
+            price_observation_hash=price_identity.get("observation_hash"),
+            execution_price=outcome.execution_price,
+            violation_codes=outcome.violation_codes,
+            outcome_id=outcome.outcome_id,
+            outcome_hash=outcome.outcome_hash,
+            request_hash=outcome.request_hash,
+            delivery_state_version=delivery.delivery_version,
+            delivery_state_hash=delivery.delivery_hash,
+            redelivered=redelivered,
+            outcome=outcome,
         )
 
-    @staticmethod
-    def _committed_result(
-        state,
-        order_id,
-        operation_id,
-        decision,
-        consumption,
-        observation,
-    ) -> CanonicalL5ExecutionResult:
-        order = state.orders[order_id]
-        return CanonicalL5ExecutionResult(
-            order_id=order_id,
-            status=order.status,
-            committed=True,
-            message="transaction committed",
-            operation_id=operation_id,
-            authorization_id=decision.authorization_id,
-            decision_hash=decision.decision_hash,
-            consumption_id=consumption.consumption_id,
-            consumption_hash=consumption.consumption_hash,
-            aggregate_state_version=state.state_version,
-            aggregate_state_hash=state.state_hash,
-            context_state_version=state.risk_context.state_version,
-            context_state_hash=state.risk_context.state_hash,
-            provider_id=decision.provider_id,
-            risk_limits_hash=decision.risk_limits_hash,
-            price_provider_id=(observation.provider_id if observation else None),
-            price_version=(observation.price_version if observation else None),
-            price_observation_hash=(observation.observation_hash if observation else None),
-            execution_price=order.filled_price,
-        )
+    def pending_outcomes(self, consumer_id: str) -> tuple[L5ExecutionOutcome, ...]:
+        return self._store.pending_outcomes(consumer_id)
+
+    def outcome_inbox(
+        self,
+        consumer_id: str,
+        proposed: L5ExecutionOutcomeInbox | None = None,
+    ) -> L5ExecutionOutcomeInbox:
+        """Return the store-shared, process-local inbox for one consumer."""
+        try:
+            return self._store.consumer_inbox(consumer_id, proposed)
+        except L5ExecutionTransactionError as exc:
+            raise L5CanonicalExecutionError(exc.code, exc.message) from exc
+
+    def acknowledge_outcome(
+        self,
+        receipt: L5ExecutionInboxReceipt,
+        inbox: L5ExecutionOutcomeInbox,
+    ) -> L5ExecutionDeliveryAcknowledgement:
+        delivery = self._store.delivery_state
+        try:
+            return self._store.acknowledge_outcome(
+                receipt=receipt,
+                inbox=inbox,
+                expected_delivery_version=delivery.delivery_version,
+                expected_delivery_hash=delivery.delivery_hash,
+            )
+        except L5ExecutionTransactionError as exc:
+            raise L5CanonicalExecutionError(exc.code, exc.message) from exc
 
     # Historical raw mutation APIs are retained only as fail-closed sentinels.
     def submit(self, request: object) -> ExecutionReport:
