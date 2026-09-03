@@ -1,9 +1,8 @@
-"""Deterministic aggregate transaction contract for a future L5 migration.
+"""Deterministic aggregate authority for canonical risk-gated L5 execution.
 
-This module is deliberately independent from ``ExecutionService`` and
-``MockBroker``.  It proves that broker state and risk context can be prepared
-without side effects and published through one aggregate-state assignment.
-It does not make the current L5 execution path risk-gated.
+Economic state and local result-delivery state are published through one
+immutable authority assignment.  Their hashes remain separate so an outbox
+acknowledgement cannot alter the committed economic transaction identity.
 """
 from __future__ import annotations
 
@@ -11,11 +10,11 @@ import hashlib
 import json
 import math
 import threading
-from contextlib import nullcontext
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
-from typing import Mapping
 
 from agicore.risk.exposure_models import (
     ExecutionIntent,
@@ -27,6 +26,9 @@ from agicore.risk.exposure_models import (
 from agicore.risk.risk_execution_authorization import (
     RiskAuthorizationBoundary,
     RiskAuthorizationConsumption,
+    RiskAuthorizationDecision,
+    RiskAuthorizationError,
+    verify_blocked_decision_evidence,
 )
 from agicore.risk.risk_execution_context import (
     FillTransition,
@@ -36,10 +38,24 @@ from agicore.risk.risk_execution_context import (
     replay_journal,
     validate_journal,
 )
+from agicore.risk.risk_manager import RiskManager
 
 from .broker_models import OrderSide, OrderStatus, OrderType
+from .execution_outbox import (
+    L5ExecutionDeliveryAcknowledgement,
+    L5ExecutionDeliveryError,
+    L5ExecutionDeliveryEvent,
+    L5ExecutionDeliveryState,
+    L5ExecutionInboxEvent,
+    L5ExecutionInboxReceipt,
+    L5ExecutionInboxState,
+    L5ExecutionOutcome,
+    L5ExecutionOutcomeInbox,
+    L5ExecutionOutcomeSpec,
+    replay_delivery_journal,
+    replay_inbox_journal,
+)
 from .price_provider import L5PriceObservation, L5PriceProvider, L5PriceProviderError
-
 
 TRANSACTION_SCHEMA_VERSION = "l5-execution-transaction/1.1"
 PLAN_SCHEMA_VERSION = "l5-execution-plan/1.1"
@@ -48,6 +64,7 @@ GENESIS_TRANSACTION_HASH = hashlib.sha256(
     b'{"schema_version":"l5-execution-transaction/1.1","type":"GENESIS"}'
 ).hexdigest()
 OPERATION_KINDS = frozenset({"MARKET", "LIMIT_PLACEMENT", "LIMIT_FILL"})
+_AUTO_OUTCOME = object()
 TRANSACTION_EVENT_TYPES = frozenset(
     {
         "AGGREGATE_INITIALIZED",
@@ -154,6 +171,116 @@ def _intent_payload(intent: ExecutionIntent) -> dict[str, object]:
         "estimated_price": _number(intent.estimated_price, "estimated_price", positive=True),
         "timestamp": _explicit_time(intent.timestamp, "intent timestamp").isoformat(),
     }
+
+
+def _intent_from_payload(value: object) -> ExecutionIntent:
+    if not isinstance(value, Mapping):
+        raise L5ExecutionTransactionError("INVALID_INTENT", "intent payload is missing")
+    try:
+        intent = ExecutionIntent(
+            intent_id=value["intent_id"],
+            symbol=value["symbol"],
+            side=IntentSide(value["side"]),
+            quantity=value["quantity"],
+            estimated_price=value["estimated_price"],
+            timestamp=_parse_explicit_time(value["timestamp"], "intent timestamp"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise L5ExecutionTransactionError("INVALID_INTENT", "intent payload is invalid") from exc
+    _intent_payload(intent)
+    return intent
+
+
+def _request_payload_from_plan(plan: L5ExecutionTransactionPlan) -> dict[str, object]:
+    intent = _intent_payload(plan.intent)
+    if plan.operation_kind in {"MARKET", "LIMIT_PLACEMENT"}:
+        return {
+            "request_type": "CanonicalL5ExecutionRequest", "intent": intent,
+            "order_type": "MARKET" if plan.operation_kind == "MARKET" else "LIMIT",
+            "operation_id": plan.operation_id, "order_id": plan.order_id,
+            "report_id": plan.report_id, "submitted_at": plan.submitted_at.isoformat(),
+            "limit_price": plan.limit_price, "fill_id": plan.fill_id,
+            "filled_at": plan.filled_at.isoformat() if plan.filled_at else None,
+        }
+    if plan.operation_kind == "LIMIT_FILL" and plan.eligibility is not None and plan.filled_at is not None:
+        return {
+            "request_type": "CanonicalL5LimitFillRequest", "intent": intent,
+            "order_id": plan.order_id, "eligibility_id": plan.eligibility.eligibility_id,
+            "operation_id": plan.operation_id, "fill_id": plan.fill_id,
+            "report_id": plan.report_id, "market_price": plan.eligibility.market_price,
+            "observed_at": plan.eligibility.observed_at.isoformat(),
+            "filled_at": plan.filled_at.isoformat(),
+        }
+    raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "request cannot be reconstructed")
+
+
+def _cancellation_request_payload(*, operation_id: str, order_id: str, report_id: str, cancelled_at: datetime) -> dict[str, object]:
+    return {
+        "request_type": "CanonicalL5CancellationRequest", "order_id": order_id,
+        "operation_id": operation_id, "report_id": report_id,
+        "cancelled_at": cancelled_at.isoformat(),
+    }
+
+
+def _rejection_request_semantics(payload: Mapping[str, object]) -> tuple[ExecutionIntent, str, str, dict[str, object]]:
+    intent = _intent_from_payload(payload.get("intent"))
+    if payload.get("request_type") == "CanonicalL5ExecutionRequest":
+        required = {"request_type", "intent", "order_type", "operation_id", "order_id", "report_id", "submitted_at", "limit_price", "fill_id", "filled_at"}
+        if set(payload) != required:
+            raise L5ExecutionTransactionError("INVALID_EXECUTION_REQUEST", "execution request fields differ")
+        operation_kind = {"MARKET": "MARKET", "LIMIT": "LIMIT_PLACEMENT"}.get(payload.get("order_type"))
+        if operation_kind is None:
+            raise L5ExecutionTransactionError("INVALID_EXECUTION_REQUEST", "order type is invalid")
+        submitted = _parse_explicit_time(payload.get("submitted_at"), "submitted_at")
+        if intent.timestamp > submitted:
+            raise L5ExecutionTransactionError("INVALID_EXECUTION_REQUEST", "submission chronology is invalid")
+        explicit = {"intent_timestamp": intent.timestamp.isoformat(), "submitted_at": submitted.isoformat(), "filled_at": payload.get("filled_at")}
+    elif payload.get("request_type") == "CanonicalL5LimitFillRequest":
+        required = {"request_type", "intent", "order_id", "eligibility_id", "operation_id", "fill_id", "report_id", "market_price", "observed_at", "filled_at"}
+        if set(payload) != required:
+            raise L5ExecutionTransactionError("INVALID_EXECUTION_REQUEST", "LIMIT fill request fields differ")
+        operation_kind = "LIMIT_FILL"
+        observed = _parse_explicit_time(payload.get("observed_at"), "observed_at")
+        filled = _parse_explicit_time(payload.get("filled_at"), "filled_at")
+        if observed > intent.timestamp or intent.timestamp > filled:
+            raise L5ExecutionTransactionError("INVALID_EXECUTION_REQUEST", "LIMIT fill chronology is invalid")
+        explicit = {"intent_timestamp": intent.timestamp.isoformat(), "observed_at": observed.isoformat(), "filled_at": filled.isoformat()}
+    else:
+        raise L5ExecutionTransactionError("INVALID_EXECUTION_REQUEST", "request type is invalid")
+    for name in ("operation_id", "order_id", "report_id"):
+        _identifier(payload.get(name), name)
+    return intent, operation_kind, str(payload["order_id"]), explicit
+
+
+def _request_payload_from_transaction_event(event: L5ExecutionTransactionEvent) -> dict[str, object]:
+    inputs = _thaw_json(event.payload.get("operation_inputs"))
+    if not isinstance(inputs, Mapping):
+        raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "operation inputs are missing")
+    if event.event_type in {"MARKET_COMMITTED", "LIMIT_PLACED"}:
+        market = event.event_type == "MARKET_COMMITTED"
+        return {
+            "request_type": "CanonicalL5ExecutionRequest", "intent": inputs["intent"],
+            "order_type": "MARKET" if market else "LIMIT", "operation_id": event.operation_id,
+            "order_id": inputs["order_id"], "report_id": inputs["report_id"],
+            "submitted_at": inputs["submitted_at"], "limit_price": None if market else inputs["limit_price"],
+            "fill_id": inputs["fill_id"] if market else None, "filled_at": inputs["filled_at"] if market else None,
+        }
+    if event.event_type == "LIMIT_FILLED":
+        eligibility = inputs["eligibility"]
+        return {
+            "request_type": "CanonicalL5LimitFillRequest", "intent": inputs["intent"],
+            "order_id": inputs["order_id"], "eligibility_id": eligibility["eligibility_id"],
+            "operation_id": event.operation_id, "fill_id": inputs["fill_id"],
+            "report_id": inputs["report_id"], "market_price": eligibility["market_price"],
+            "observed_at": eligibility["observed_at"], "filled_at": inputs["filled_at"],
+        }
+    if event.event_type == "LIMIT_CANCELLED":
+        return {
+            "request_type": "CanonicalL5CancellationRequest", "order_id": inputs["order_id"],
+            "operation_id": event.operation_id, "report_id": inputs["report_id"],
+            "cancelled_at": inputs["cancelled_at"],
+        }
+    raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "event request cannot be reconstructed")
 
 
 def _price_observation_from_payload(payload: object) -> L5PriceObservation:
@@ -431,7 +558,7 @@ class L5ExecutionTransactionEvent:
         state_hash_before: str,
         payload: Mapping[str, object],
         previous_event_hash: str,
-    ) -> "L5ExecutionTransactionEvent":
+    ) -> L5ExecutionTransactionEvent:
         fields = {
             "schema_version": TRANSACTION_SCHEMA_VERSION,
             "sequence_number": sequence_number,
@@ -544,6 +671,39 @@ class L5ExecutionAggregateState:
     @property
     def state_hash(self) -> str:
         return _sha256(self.canonical())
+
+
+@dataclass(frozen=True, eq=False)
+class L5ExecutionAuthorityState:
+    """Single published authority containing economics and local delivery."""
+
+    aggregate_state: L5ExecutionAggregateState
+    delivery_state: L5ExecutionDeliveryState
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.aggregate_state, L5ExecutionAggregateState):
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_STATE", "aggregate state is invalid")
+        if not isinstance(self.delivery_state, L5ExecutionDeliveryState):
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_STATE", "delivery state is invalid")
+
+    @property
+    def authority_hash(self) -> str:
+        return _sha256(
+            {
+                "aggregate_state_hash": self.aggregate_state.state_hash,
+                "delivery_state_hash": self.delivery_state.delivery_hash,
+            }
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, L5ExecutionAuthorityState):
+            return (
+                self.aggregate_state == other.aggregate_state
+                and self.delivery_state == other.delivery_state
+            )
+        if isinstance(other, L5ExecutionAggregateState):
+            return self.aggregate_state == other
+        return NotImplemented
 
 
 def _validate_position_alignment(
@@ -680,7 +840,7 @@ class L5LimitFillEligibility:
         order: L5TransactionOrder,
         state: L5ExecutionAggregateState,
         price_observation: L5PriceObservation,
-    ) -> "L5LimitFillEligibility":
+    ) -> L5LimitFillEligibility:
         if not isinstance(price_observation, L5PriceObservation) or not price_observation.is_intact():
             raise L5ExecutionTransactionError(
                 "INVALID_PRICE_OBSERVATION",
@@ -730,7 +890,7 @@ class L5LimitFillEligibility:
                 and _is_hash(self.eligibility_hash)
                 and self.eligibility_hash == _sha256(self.fields_without_hash())
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed persisted evidence must fail closed
             return False
 
 
@@ -858,8 +1018,7 @@ class L5ExecutionTransactionPlan:
                 or self.transition is not None
             ):
                 raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "LIMIT_PLACEMENT fields are invalid")
-        elif self.operation_kind == "LIMIT_FILL":
-            if (
+        elif self.operation_kind == "LIMIT_FILL" and (
                 self.fill_id is None
                 or self.filled_at is None
                 or self.eligibility is None
@@ -868,8 +1027,8 @@ class L5ExecutionTransactionPlan:
                 or self.submitted_at is not None
                 or self.fill_price is not None
                 or self.limit_price is not None
-            ):
-                raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "LIMIT_FILL fields are incomplete")
+        ):
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "LIMIT_FILL fields are incomplete")
         if self.submitted_at is not None:
             object.__setattr__(self, "submitted_at", _explicit_time(self.submitted_at, "submitted_at"))
         if self.filled_at is not None:
@@ -916,7 +1075,7 @@ class L5ExecutionTransactionPlan:
         price_observation: L5PriceObservation | None = None,
         eligibility: L5LimitFillEligibility | None = None,
         transition: FillTransition | None = None,
-    ) -> "L5ExecutionTransactionPlan":
+    ) -> L5ExecutionTransactionPlan:
         intent_payload = _intent_payload(intent)
         fields = {
             "schema_version": PLAN_SCHEMA_VERSION,
@@ -1029,14 +1188,14 @@ class L5ExecutionTransactionPlan:
                 and self.plan_hash == _sha256(self.fields_without_hash())
                 and self.next_state.state_version == self.expected_state_version + 1
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed persisted evidence must fail closed
             return False
 
 
 class AggregateRiskContextProvider:
     """Read-only RiskContextProvider view over the aggregate state."""
 
-    def __init__(self, store: "L5ExecutionTransactionStore") -> None:
+    def __init__(self, store: L5ExecutionTransactionStore) -> None:
         self._store = store
 
     def snapshot(self) -> RiskExecutionContext:
@@ -1080,15 +1239,33 @@ class L5ExecutionTransactionStore:
             state_version_before=-1, state_hash_before=GENESIS_TRANSACTION_HASH,
             payload=base.components_payload(), previous_event_hash=GENESIS_TRANSACTION_HASH,
         )
-        self._state = replace(base, execution_journal=(genesis,))
+        self._authority = L5ExecutionAuthorityState(
+            aggregate_state=replace(base, execution_journal=(genesis,)),
+            delivery_state=L5ExecutionDeliveryState.initial(),
+        )
         self._lock = threading.RLock()
         self._context_provider = AggregateRiskContextProvider(self)
         self._price_provider = price_provider
+        self._intent_locks: dict[str, threading.RLock] = {}
+        self._evaluation_lock = threading.RLock()
+        self._authorization_boundary: RiskAuthorizationBoundary | None = None
+        self._risk_manager: RiskManager | None = None
+        self._consumer_inboxes: dict[str, L5ExecutionOutcomeInbox] = {}
 
     @property
     def state(self) -> L5ExecutionAggregateState:
         with self._lock:
-            return self._state
+            return self._authority.aggregate_state
+
+    @property
+    def authority_state(self) -> L5ExecutionAuthorityState:
+        with self._lock:
+            return self._authority
+
+    @property
+    def delivery_state(self) -> L5ExecutionDeliveryState:
+        with self._lock:
+            return self._authority.delivery_state
 
     @property
     def context_provider(self) -> AggregateRiskContextProvider:
@@ -1097,6 +1274,58 @@ class L5ExecutionTransactionStore:
     @property
     def price_provider(self) -> L5PriceProvider:
         return self._price_provider
+
+    def authorization_boundary(self, risk_manager: RiskManager) -> RiskAuthorizationBoundary:
+        """Return the one process-local risk boundary shared by this authority."""
+        if not isinstance(risk_manager, RiskManager):
+            raise L5ExecutionTransactionError("INVALID_RISK_MANAGER", "risk manager is invalid")
+        with self._lock:
+            if self._authorization_boundary is None:
+                self._risk_manager = risk_manager
+                self._authorization_boundary = RiskAuthorizationBoundary(
+                    risk_manager,
+                    self._context_provider,
+                )
+            elif self._risk_manager is not risk_manager:
+                raise L5ExecutionTransactionError(
+                    "RISK_BOUNDARY_CONFLICT",
+                    "one transaction authority cannot use independent risk managers",
+                )
+            return self._authorization_boundary
+
+    @contextmanager
+    def intent_guard(self, intent_id: str) -> Iterator[None]:
+        """Serialize one intent across every service sharing this store."""
+        identity = _identifier(intent_id, "intent_id")
+        with self._lock:
+            guard = self._intent_locks.setdefault(identity, threading.RLock())
+        with guard, self._evaluation_lock:
+            yield
+
+    def consumer_inbox(
+        self,
+        consumer_id: str,
+        proposed: L5ExecutionOutcomeInbox | None = None,
+    ) -> L5ExecutionOutcomeInbox:
+        """Converge service consumers onto one in-process inbox authority."""
+        identity = _identifier(consumer_id, "consumer_id")
+        if proposed is not None and proposed.consumer_id != identity:
+            raise L5ExecutionTransactionError(
+                "CONSUMER_CONFIGURATION_CONFLICT",
+                "proposed inbox belongs to another consumer",
+            )
+        with self._lock:
+            existing = self._consumer_inboxes.get(identity)
+            if existing is not None:
+                if proposed is not None and proposed is not existing:
+                    raise L5ExecutionTransactionError(
+                        "CONSUMER_CONFIGURATION_CONFLICT",
+                        "consumer already has another inbox authority",
+                    )
+                return existing
+            inbox = proposed or L5ExecutionOutcomeInbox(identity)
+            self._consumer_inboxes[identity] = inbox
+            return inbox
 
     def prepare_market(
         self,
@@ -1116,7 +1345,7 @@ class L5ExecutionTransactionStore:
     ) -> L5ExecutionTransactionPlan:
         self._validate_consumption_provenance(boundary, consumption)
         with self._lock:
-            current = self._state
+            current = self._authority.aggregate_state
             self._ensure_consumption_unused(current, consumption)
             self._validate_consumption_identity(consumption, intent, current)
             return self._prepare_market_from_state(
@@ -1152,7 +1381,7 @@ class L5ExecutionTransactionStore:
     ) -> L5ExecutionTransactionPlan:
         self._validate_consumption_provenance(boundary, consumption)
         with self._lock:
-            current = self._state
+            current = self._authority.aggregate_state
             self._ensure_consumption_unused(current, consumption)
             self._validate_consumption_identity(consumption, intent, current)
             return self._prepare_limit_placement_from_state(
@@ -1176,7 +1405,7 @@ class L5ExecutionTransactionStore:
         observed_at: datetime | None = None,
     ) -> L5LimitFillEligibility:
         with self._lock:
-            order = self._state.orders.get(order_id)
+            order = self._authority.aggregate_state.orders.get(order_id)
             if order is None:
                 raise L5ExecutionTransactionError("ORDER_NOT_FOUND", "pending order does not exist")
             observation = (
@@ -1195,7 +1424,7 @@ class L5ExecutionTransactionStore:
                     "caller observed_at differs from authoritative observation",
                 )
             return L5LimitFillEligibility._create(
-                eligibility_id=eligibility_id, order=order, state=self._state,
+                eligibility_id=eligibility_id, order=order, state=self._authority.aggregate_state,
                 price_observation=observation,
             )
 
@@ -1217,7 +1446,7 @@ class L5ExecutionTransactionStore:
         price = _number(fill_price, "fill_price", positive=True)
         filled = _explicit_time(filled_at, "filled_at")
         with self._lock:
-            current = self._state
+            current = self._authority.aggregate_state
             fill = L5TransactionFill(
                 fill_id=fill_id,
                 order_id="derived-transition-order",
@@ -1278,6 +1507,56 @@ class L5ExecutionTransactionStore:
                 },
             )
 
+    def cancellation_outcome_spec(
+        self,
+        *,
+        operation_id: str,
+        order_id: str,
+        report_id: str,
+        cancelled_at: datetime,
+    ) -> L5ExecutionOutcomeSpec:
+        """Reconstruct the required cancellation outcome without mutation."""
+        cancelled = _explicit_time(cancelled_at, "cancelled_at")
+        with self._lock:
+            current = self._authority.aggregate_state
+            order = current.orders.get(_identifier(order_id, "order_id"))
+            if order is None:
+                raise L5ExecutionTransactionError("ORDER_NOT_FOUND", "pending order does not exist")
+            request_payload = _cancellation_request_payload(
+                operation_id=_identifier(operation_id, "operation_id"),
+                order_id=order.order_id,
+                report_id=_identifier(report_id, "report_id"),
+                cancelled_at=cancelled,
+            )
+            return L5ExecutionOutcomeSpec(
+                request_payload=request_payload,
+                intent_id=f"cancellation:{operation_id}",
+                intent_hash=_sha256(request_payload),
+                operation_kind="LIMIT_CANCELLATION",
+                final_status=OrderStatus.CANCELLED.value,
+                committed=True,
+                requested_order_id=order.order_id,
+                operation_id=operation_id,
+                order_id=order.order_id,
+                fill_id=None,
+                report_id=report_id,
+                authorization_id=None,
+                decision_hash=None,
+                consumption_id=None,
+                consumption_hash=None,
+                provider_id=current.risk_context.provider_id,
+                risk_limits_hash=None,
+                context_state_version=current.risk_context.state_version,
+                context_state_hash=current.risk_context.state_hash,
+                aggregate_state_version_before=current.state_version,
+                aggregate_state_hash_before=current.state_hash,
+                decision_evidence=None,
+                consumption_evidence=None,
+                risk_context_evidence=current.risk_context.canonical(),
+                explicit_times={"cancelled_at": cancelled.isoformat()},
+                authorized_price=order.limit_price,
+            )
+
     def cancel_limit(
         self,
         *,
@@ -1285,11 +1564,17 @@ class L5ExecutionTransactionStore:
         order_id: str,
         report_id: str,
         cancelled_at: datetime,
+        outcome_spec: L5ExecutionOutcomeSpec | object,
     ) -> L5ExecutionAggregateState:
         """Atomically cancel one pending LIMIT in the aggregate authority."""
+        if not isinstance(outcome_spec, L5ExecutionOutcomeSpec):
+            raise L5ExecutionTransactionError(
+                "OUTCOME_REQUIRED",
+                "LIMIT cancellation requires a canonical outcome",
+            )
         cancelled = _explicit_time(cancelled_at, "cancelled_at")
         with self._lock:
-            current = self._state
+            current = self._authority.aggregate_state
             self._require_new_ids(current, operation_id, None, None, report_id)
             order = current.orders.get(_identifier(order_id, "order_id"))
             if order is None:
@@ -1300,6 +1585,16 @@ class L5ExecutionTransactionStore:
                 raise L5ExecutionTransactionError(
                     "INVALID_TRANSACTION_CHRONOLOGY",
                     "cancellation precedes LIMIT placement",
+                )
+            if outcome_spec != self.cancellation_outcome_spec(
+                operation_id=operation_id,
+                order_id=order_id,
+                report_id=report_id,
+                cancelled_at=cancelled,
+            ):
+                raise L5ExecutionTransactionError(
+                    "INVALID_OUTCOME_SEMANTICS",
+                    "cancellation outcome differs from authoritative reconstruction",
                 )
             cancelled_order = replace(
                 order,
@@ -1335,14 +1630,23 @@ class L5ExecutionTransactionStore:
                 next_state.execution_journal,
                 expected_final_hash=next_state.execution_journal[-1].event_hash,
             )
+            delivery_state = self._authority.delivery_state
             try:
-                self._publish_state(next_state)
+                outcome = self._finalize_outcome(outcome_spec, next_state)
+                self._validate_outcome_against_state(outcome, next_state)
+                delivery_state = delivery_state.publish(outcome)
+            except L5ExecutionDeliveryError as exc:
+                raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+            try:
+                self._publish_state(L5ExecutionAuthorityState(next_state, delivery_state))
+            except (KeyboardInterrupt, SystemExit, MemoryError):
+                raise
             except Exception as exc:
                 raise L5ExecutionTransactionError(
                     "TRANSACTION_PUBLICATION_FAILED",
                     "aggregate publication failed",
                 ) from exc
-            return self._state
+            return self._authority.aggregate_state
 
     def prepare_limit_fill(
         self,
@@ -1360,7 +1664,7 @@ class L5ExecutionTransactionStore:
     ) -> L5ExecutionTransactionPlan:
         self._validate_consumption_provenance(boundary, consumption)
         with self._lock:
-            current = self._state
+            current = self._authority.aggregate_state
             self._ensure_consumption_unused(current, consumption)
             self._validate_consumption_identity(consumption, intent, current)
             return self._prepare_limit_fill_from_state(
@@ -1662,17 +1966,111 @@ class L5ExecutionTransactionStore:
             transition=transition,
         )
 
+    def outcome_spec_for_plan(
+        self,
+        plan: L5ExecutionTransactionPlan,
+        *,
+        boundary: RiskAuthorizationBoundary,
+    ) -> L5ExecutionOutcomeSpec:
+        """Purely reconstruct the only outcome specification valid for ``plan``."""
+        if not isinstance(plan, L5ExecutionTransactionPlan) or not plan.is_intact():
+            raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "plan integrity check failed")
+        with self._lock:
+            current = self._authority.aggregate_state
+            if (
+                plan.expected_state_version != current.state_version
+                or plan.expected_state_hash != current.state_hash
+            ):
+                raise L5ExecutionTransactionError("STALE_AGGREGATE_STATE", "aggregate CAS failed")
+            return self._committed_outcome_spec(plan, current, boundary)
+
+    @staticmethod
+    def _committed_outcome_spec(
+        plan: L5ExecutionTransactionPlan,
+        current: L5ExecutionAggregateState,
+        boundary: RiskAuthorizationBoundary,
+    ) -> L5ExecutionOutcomeSpec:
+        try:
+            decision = boundary.decision_for_consumption(plan.consumption)
+        except RiskAuthorizationError as exc:
+            raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+        request_payload = _request_payload_from_plan(plan)
+        if plan.operation_kind == "MARKET":
+            status = OrderStatus.FILLED
+            explicit_times = {
+                "intent_timestamp": plan.intent.timestamp.isoformat(),
+                "submitted_at": plan.submitted_at.isoformat(),
+                "filled_at": plan.filled_at.isoformat(),
+            }
+            execution_price = plan.fill_price
+        elif plan.operation_kind == "LIMIT_PLACEMENT":
+            status = OrderStatus.PENDING
+            explicit_times = {
+                "intent_timestamp": plan.intent.timestamp.isoformat(),
+                "submitted_at": plan.submitted_at.isoformat(),
+                "filled_at": None,
+            }
+            execution_price = None
+        else:
+            status = OrderStatus.FILLED
+            explicit_times = {
+                "intent_timestamp": plan.intent.timestamp.isoformat(),
+                "observed_at": plan.eligibility.observed_at.isoformat(),
+                "filled_at": plan.filled_at.isoformat(),
+            }
+            execution_price = plan.price_observation.price
+        return L5ExecutionOutcomeSpec(
+            request_payload=request_payload,
+            intent_id=plan.intent.intent_id,
+            intent_hash=plan.intent_hash,
+            operation_kind=plan.operation_kind,
+            final_status=status.value,
+            committed=True,
+            requested_order_id=plan.order_id,
+            operation_id=plan.operation_id,
+            order_id=plan.order_id,
+            fill_id=plan.fill_id,
+            report_id=plan.report_id,
+            authorization_id=decision.authorization_id,
+            decision_hash=decision.decision_hash,
+            consumption_id=plan.consumption.consumption_id,
+            consumption_hash=plan.consumption.consumption_hash,
+            provider_id=decision.provider_id,
+            risk_limits_hash=decision.risk_limits_hash,
+            context_state_version=current.risk_context.state_version,
+            context_state_hash=current.risk_context.state_hash,
+            aggregate_state_version_before=current.state_version,
+            aggregate_state_hash_before=current.state_hash,
+            decision_evidence=dict(decision.canonical()),
+            consumption_evidence=dict(plan.consumption.canonical()),
+            risk_context_evidence=current.risk_context.canonical(),
+            price_identity=(
+                plan.price_observation.canonical()
+                if plan.price_observation is not None
+                else None
+            ),
+            explicit_times=explicit_times,
+            execution_price=execution_price,
+            authorized_price=float(plan.intent.estimated_price),
+        )
+
     def commit(
         self,
         plan: L5ExecutionTransactionPlan,
         *,
         boundary: RiskAuthorizationBoundary,
+        outcome_spec: L5ExecutionOutcomeSpec | object = _AUTO_OUTCOME,
     ) -> L5ExecutionAggregateState:
+        if outcome_spec is not _AUTO_OUTCOME and not isinstance(outcome_spec, L5ExecutionOutcomeSpec):
+            raise L5ExecutionTransactionError(
+                "OUTCOME_REQUIRED",
+                "every transaction commit requires a canonical outcome",
+            )
         if not isinstance(plan, L5ExecutionTransactionPlan) or not plan.is_intact():
             raise L5ExecutionTransactionError("INVALID_TRANSACTION_PLAN", "plan integrity check failed")
         self._validate_consumption_provenance(boundary, plan.consumption)
         with self._lock:
-            current = self._state
+            current = self._authority.aggregate_state
             committed_operations = {
                 event.operation_id for event in current.execution_journal if event.operation_id is not None
             }
@@ -1694,11 +2092,15 @@ class L5ExecutionTransactionStore:
                     else nullcontext()
                 )
                 with guard:
-                    return self._commit_plan_locked(plan, current)
+                    return self._commit_plan_locked(plan, current, outcome_spec, boundary)
             except L5ExecutionTransactionError:
                 raise
+            except L5ExecutionDeliveryError as exc:
+                raise L5ExecutionTransactionError(exc.code, exc.message) from exc
             except L5PriceProviderError as exc:
                 raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+            except (KeyboardInterrupt, SystemExit, MemoryError):
+                raise
             except Exception as exc:
                 raise L5ExecutionTransactionError(
                     "PRICE_PROVIDER_ERROR",
@@ -1709,6 +2111,8 @@ class L5ExecutionTransactionStore:
         self,
         plan: L5ExecutionTransactionPlan,
         current: L5ExecutionAggregateState,
+        outcome_spec: L5ExecutionOutcomeSpec | object,
+        boundary: RiskAuthorizationBoundary,
     ) -> L5ExecutionAggregateState:
         expected_plan = self._reconstruct_plan(plan, current)
         if expected_plan != plan:
@@ -1717,17 +2121,395 @@ class L5ExecutionTransactionStore:
                 "plan differs from deterministic reconstruction",
             )
         self._validate_next_state(expected_plan, current)
+        expected_spec = self._committed_outcome_spec(expected_plan, current, boundary)
+        supplied_spec = expected_spec if outcome_spec is _AUTO_OUTCOME else outcome_spec
+        if supplied_spec != expected_spec:
+            raise L5ExecutionTransactionError(
+                "INVALID_OUTCOME_SEMANTICS",
+                "provided outcome differs from authoritative reconstruction",
+            )
+        delivery_state = self._authority.delivery_state
+        outcome = self._finalize_outcome(supplied_spec, expected_plan.next_state)
+        self._validate_outcome_against_state(outcome, expected_plan.next_state)
+        delivery_state = delivery_state.publish(outcome)
         try:
-            self._publish_state(expected_plan.next_state)
+            self._publish_state(L5ExecutionAuthorityState(expected_plan.next_state, delivery_state))
+        except (KeyboardInterrupt, SystemExit, MemoryError):
+            raise
         except Exception as exc:
             raise L5ExecutionTransactionError(
                 "TRANSACTION_PUBLICATION_FAILED",
                 "aggregate publication failed",
             ) from exc
-        return self._state
+        return self._authority.aggregate_state
 
-    def _publish_state(self, next_state: L5ExecutionAggregateState) -> None:
-        self._state = next_state
+    def _publish_state(
+        self,
+        next_state: L5ExecutionAggregateState | L5ExecutionAuthorityState,
+    ) -> None:
+        self._authority = (
+            next_state
+            if isinstance(next_state, L5ExecutionAuthorityState)
+            else L5ExecutionAuthorityState(next_state, self._authority.delivery_state)
+        )
+
+    def outcome_for_intent(self, intent_id: str) -> L5ExecutionOutcome | None:
+        """Return the canonical finalized outcome, if any, without mutation."""
+        identity = _identifier(intent_id, "intent_id")
+        with self._lock:
+            outcome_id = self._authority.delivery_state.intent_outcomes.get(identity)
+            return (
+                self._authority.delivery_state.outcomes[outcome_id]
+                if outcome_id is not None
+                else None
+            )
+
+    def pending_outcomes(self, consumer_id: str) -> tuple[L5ExecutionOutcome, ...]:
+        with self._lock:
+            return self._authority.delivery_state.pending_for(consumer_id)
+
+    def publish_rejection_outcome(
+        self,
+        *,
+        request_payload: Mapping[str, object],
+        price_observation: L5PriceObservation | None,
+        boundary: RiskAuthorizationBoundary,
+        decision: RiskAuthorizationDecision,
+        expected_aggregate_version: int,
+        expected_aggregate_hash: str,
+        expected_delivery_version: int,
+        expected_delivery_hash: str,
+    ) -> L5ExecutionOutcome:
+        """Publish an evaluated risk rejection without economic L5 mutation."""
+        try:
+            issued = boundary.verify_decision_evidence(decision)
+        except RiskAuthorizationError as exc:
+            raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+        if issued.allowed:
+            raise L5ExecutionTransactionError(
+                "INVALID_REJECTION_OUTCOME",
+                "rejection decision is not blocked",
+            )
+        intent, operation_kind, requested_order_id, explicit_times = _rejection_request_semantics(
+            request_payload
+        )
+        with self._lock:
+            aggregate = self._authority.aggregate_state
+            delivery = self._authority.delivery_state
+            existing_id = delivery.intent_outcomes.get(intent.intent_id)
+            if existing_id is not None:
+                existing = delivery.outcomes[existing_id]
+                if existing.request_hash != _sha256(_thaw_json(request_payload)):
+                    raise L5ExecutionTransactionError(
+                        "INTENT_OUTCOME_CONFLICT",
+                        "intent already has a different outcome",
+                    )
+                return existing
+            if (
+                aggregate.state_version != expected_aggregate_version
+                or aggregate.state_hash != expected_aggregate_hash
+                or decision.context_state_version != aggregate.risk_context.state_version
+                or decision.context_state_hash != aggregate.risk_context.state_hash
+                or decision.provider_id != aggregate.risk_context.provider_id
+            ):
+                raise L5ExecutionTransactionError("STALE_AGGREGATE_STATE", "rejection aggregate CAS failed")
+            if (
+                delivery.delivery_version != expected_delivery_version
+                or delivery.delivery_hash != expected_delivery_hash
+            ):
+                raise L5ExecutionTransactionError("STALE_DELIVERY_STATE", "delivery CAS failed")
+            try:
+                verify_blocked_decision_evidence(decision, intent, aggregate.risk_context)
+            except RiskAuthorizationError as exc:
+                raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+            observation = (
+                _require_price_observation(price_observation, intent=intent)
+                if price_observation is not None
+                else None
+            )
+            outcome_spec = L5ExecutionOutcomeSpec(
+                request_payload=request_payload,
+                intent_id=intent.intent_id,
+                intent_hash=_sha256(_intent_payload(intent)),
+                operation_kind=operation_kind,
+                final_status=OrderStatus.REJECTED.value,
+                committed=False,
+                requested_order_id=requested_order_id,
+                operation_id=None,
+                order_id=None,
+                fill_id=None,
+                report_id=None,
+                authorization_id=decision.authorization_id,
+                decision_hash=decision.decision_hash,
+                consumption_id=None,
+                consumption_hash=None,
+                provider_id=decision.provider_id,
+                risk_limits_hash=decision.risk_limits_hash,
+                context_state_version=aggregate.risk_context.state_version,
+                context_state_hash=aggregate.risk_context.state_hash,
+                aggregate_state_version_before=aggregate.state_version,
+                aggregate_state_hash_before=aggregate.state_hash,
+                decision_evidence=dict(decision.canonical()),
+                consumption_evidence=None,
+                risk_context_evidence=aggregate.risk_context.canonical(),
+                violation_codes=(*decision.guard_codes, *(item.code for item in decision.violations)),
+                price_identity=observation.canonical() if observation else None,
+                explicit_times=explicit_times,
+                authorized_price=float(intent.estimated_price),
+            )
+            outcome = self._finalize_outcome(outcome_spec, aggregate)
+            self._validate_outcome_against_state(outcome, aggregate)
+            try:
+                next_delivery = delivery.publish(outcome)
+            except L5ExecutionDeliveryError as exc:
+                raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+            self._publish_state(
+                L5ExecutionAuthorityState(aggregate, next_delivery)
+            )
+            return outcome
+
+    def acknowledge_outcome(
+        self,
+        *,
+        receipt: L5ExecutionInboxReceipt,
+        inbox: L5ExecutionOutcomeInbox,
+        expected_delivery_version: int,
+        expected_delivery_hash: str,
+    ) -> L5ExecutionDeliveryAcknowledgement:
+        """CAS-acknowledge a locally accepted outcome; repeated ack is a no-op."""
+        if inbox.consumer_id != receipt.consumer_id:
+            raise L5ExecutionTransactionError(
+                "UNISSUED_RECEIPT",
+                "receipt was not issued by this consumer inbox",
+            )
+        try:
+            authority = self.consumer_inbox(receipt.consumer_id, inbox)
+            authority.verify_receipt(receipt)
+        except L5ExecutionDeliveryError as exc:
+            raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+        except L5ExecutionTransactionError:
+            raise
+        with self._lock:
+            delivery = self._authority.delivery_state
+            existing_for_outcome = next((
+                item
+                for item in delivery.acknowledgements.values()
+                if item.consumer_id == receipt.consumer_id
+                and item.outcome_id == receipt.outcome_id
+            ), None)
+            if existing_for_outcome is not None:
+                if existing_for_outcome.receipt_hash != receipt.receipt_hash:
+                    raise L5ExecutionTransactionError(
+                        "ACKNOWLEDGEMENT_CONFLICT",
+                        "acknowledgement differs from the authoritative record",
+                    )
+                return existing_for_outcome
+            if (
+                delivery.delivery_version != expected_delivery_version
+                or delivery.delivery_hash != expected_delivery_hash
+            ):
+                raise L5ExecutionTransactionError("STALE_DELIVERY_STATE", "delivery CAS failed")
+            try:
+                acknowledgement = authority.acknowledgement_for(receipt)
+                next_delivery = delivery.acknowledge(acknowledgement)
+            except L5ExecutionDeliveryError as exc:
+                raise L5ExecutionTransactionError(exc.code, exc.message) from exc
+            self._publish_state(
+                L5ExecutionAuthorityState(self._authority.aggregate_state, next_delivery)
+            )
+            return acknowledgement
+
+    @staticmethod
+    def _finalize_outcome(
+        outcome_spec: L5ExecutionOutcomeSpec,
+        state: L5ExecutionAggregateState,
+    ) -> L5ExecutionOutcome:
+        event = state.execution_journal[-1] if outcome_spec.committed else None
+        return L5ExecutionOutcome.from_spec(
+            outcome_spec,
+            aggregate_state_version=state.state_version,
+            aggregate_state_hash=state.state_hash,
+            transaction_event_hash=event.event_hash if event else None,
+            transaction_sequence_number=event.sequence_number if event else None,
+            transaction_event_type=event.event_type if event else None,
+            context_state_version_after=state.risk_context.state_version,
+            context_state_hash_after=state.risk_context.state_hash,
+        )
+
+    @staticmethod
+    def _validate_outcome_against_state(
+        outcome: L5ExecutionOutcome,
+        state: L5ExecutionAggregateState,
+    ) -> None:
+        if not outcome.is_intact():
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome integrity failed")
+        if (
+            outcome.aggregate_state_version != state.state_version
+            or outcome.aggregate_state_hash != state.state_hash
+            or outcome.context_state_version_after != state.risk_context.state_version
+            or outcome.context_state_hash_after != state.risk_context.state_hash
+        ):
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome state identity differs")
+        try:
+            evidence_context = _context_from_payload(outcome.risk_context_evidence)
+        except L5ExecutionTransactionError as exc:
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "risk context evidence is invalid") from exc
+        if (
+            evidence_context.state_version != outcome.context_state_version
+            or evidence_context.state_hash != outcome.context_state_hash
+            or evidence_context.provider_id != outcome.provider_id
+        ):
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome context evidence differs")
+        if not outcome.committed:
+            if (
+                outcome.transaction_event_hash is not None
+                or outcome.order_id is not None
+                or outcome.aggregate_state_version_before != state.state_version
+                or outcome.aggregate_state_hash_before != state.state_hash
+                or evidence_context != state.risk_context
+            ):
+                raise L5ExecutionTransactionError("INVALID_OUTCOME", "rejection outcome contains transaction state")
+            try:
+                intent, operation_kind, order_id, explicit_times = _rejection_request_semantics(
+                    outcome.request_payload
+                )
+                decision = RiskAuthorizationDecision.from_canonical(outcome.decision_evidence)
+                verify_blocked_decision_evidence(decision, intent, evidence_context)
+            except (RiskAuthorizationError, L5ExecutionTransactionError) as exc:
+                raise L5ExecutionTransactionError("INVALID_OUTCOME", "rejection evidence differs") from exc
+            codes = (*decision.guard_codes, *(item.code for item in decision.violations))
+            if (
+                outcome.intent_id != intent.intent_id
+                or outcome.intent_hash != _sha256(_intent_payload(intent))
+                or outcome.operation_kind != operation_kind
+                or outcome.requested_order_id != order_id
+                or dict(outcome.explicit_times) != explicit_times
+                or outcome.authorization_id != decision.authorization_id
+                or outcome.decision_hash != decision.decision_hash
+                or outcome.risk_limits_hash != decision.risk_limits_hash
+                or outcome.violation_codes != codes
+                or outcome.authorized_price != float(intent.estimated_price)
+                or outcome.consumption_evidence is not None
+            ):
+                raise L5ExecutionTransactionError("INVALID_OUTCOME", "rejection semantics differ")
+            return
+        event = state.execution_journal[-1]
+        event_by_kind = {
+            "MARKET": "MARKET_COMMITTED",
+            "LIMIT_PLACEMENT": "LIMIT_PLACED",
+            "LIMIT_FILL": "LIMIT_FILLED",
+            "LIMIT_CANCELLATION": "LIMIT_CANCELLED",
+        }
+        if (
+            outcome.transaction_event_hash != event.event_hash
+            or outcome.transaction_sequence_number != event.sequence_number
+            or outcome.transaction_event_type != event.event_type
+            or outcome.operation_id != event.operation_id
+            or event.event_type != event_by_kind[outcome.operation_kind]
+        ):
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome transaction identity differs")
+        try:
+            before, _ = _replay_execution_transaction_journal(
+                state.execution_journal[:-1],
+                expected_final_hash=event.previous_event_hash,
+            )
+        except L5ExecutionTransactionError as exc:
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "transaction before-state cannot be reconstructed") from exc
+        if (
+            outcome.aggregate_state_version_before != before.state_version
+            or outcome.aggregate_state_hash_before != before.state_hash
+            or evidence_context != before.risk_context
+        ):
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome before-state differs")
+        expected_request = _request_payload_from_transaction_event(event)
+        if dict(_thaw_json(outcome.request_payload)) != expected_request:
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome request differs from transaction")
+        order = state.orders.get(outcome.order_id)
+        report = state.reports.get(outcome.report_id)
+        if order is None or report is None or order.status.value != outcome.final_status:
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome order or report differs")
+        if outcome.fill_id is not None:
+            fill = state.fills.get(outcome.fill_id)
+            if fill is None or fill.order_id != outcome.order_id or fill.intent_id != outcome.intent_id:
+                raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome fill differs")
+        if outcome.operation_kind == "LIMIT_CANCELLATION":
+            if (
+                outcome.intent_id != f"cancellation:{event.operation_id}"
+                or outcome.intent_hash != _sha256(expected_request)
+                or any(value is not None for value in (
+                    outcome.authorization_id,
+                    outcome.decision_hash,
+                    outcome.consumption_id,
+                    outcome.consumption_hash,
+                    outcome.risk_limits_hash,
+                    outcome.decision_evidence,
+                    outcome.consumption_evidence,
+                ))
+                or dict(outcome.explicit_times) != {"cancelled_at": expected_request["cancelled_at"]}
+                or outcome.authorized_price != order.limit_price
+            ):
+                raise L5ExecutionTransactionError("INVALID_OUTCOME", "cancellation outcome semantics differ")
+            return
+        try:
+            intent = _intent_from_payload(expected_request["intent"])
+            decision = RiskAuthorizationDecision.from_canonical(outcome.decision_evidence)
+            consumption = RiskAuthorizationConsumption.from_canonical(outcome.consumption_evidence)
+            expected_consumption = RiskAuthorizationConsumption._from_decision(decision)
+        except (RiskAuthorizationError, L5ExecutionTransactionError) as exc:
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "risk evidence is invalid") from exc
+        if (
+            not decision.allowed
+            or decision.intent_id != intent.intent_id
+            or decision.intent_hash != _sha256(_intent_payload(intent))
+            or decision.provider_id != evidence_context.provider_id
+            or decision.context_state_version != evidence_context.state_version
+            or decision.context_state_hash != evidence_context.state_hash
+            or decision.risk_limits_hash != _sha256(evidence_context.risk_limits.model_dump(mode="json"))
+            or consumption != expected_consumption
+            or event.payload.get("consumption_hash") != consumption.consumption_hash
+            or outcome.intent_id != intent.intent_id
+            or outcome.intent_hash != decision.intent_hash
+            or outcome.authorization_id != decision.authorization_id
+            or outcome.decision_hash != decision.decision_hash
+            or outcome.consumption_id != consumption.consumption_id
+            or outcome.consumption_hash != consumption.consumption_hash
+            or outcome.risk_limits_hash != decision.risk_limits_hash
+            or outcome.authorized_price != float(intent.estimated_price)
+        ):
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome risk semantics differ")
+        request_intent = expected_request["intent"]
+        if outcome.operation_kind == "MARKET":
+            expected_times = {
+                "intent_timestamp": request_intent["timestamp"],
+                "submitted_at": expected_request["submitted_at"],
+                "filled_at": expected_request["filled_at"],
+            }
+            expected_price = expected_request["intent"]["estimated_price"]
+            expected_price_identity = _thaw_json(event.payload["operation_inputs"])["price_observation"]
+        elif outcome.operation_kind == "LIMIT_PLACEMENT":
+            expected_times = {
+                "intent_timestamp": request_intent["timestamp"],
+                "submitted_at": expected_request["submitted_at"],
+                "filled_at": None,
+            }
+            expected_price = None
+            expected_price_identity = None
+        else:
+            expected_times = {
+                "intent_timestamp": request_intent["timestamp"],
+                "observed_at": expected_request["observed_at"],
+                "filled_at": expected_request["filled_at"],
+            }
+            expected_price = expected_request["market_price"]
+            expected_price_identity = _thaw_json(event.payload["operation_inputs"])["price_observation"]
+        if (
+            dict(outcome.explicit_times) != expected_times
+            or outcome.execution_price != expected_price
+            or (
+                None if outcome.price_identity is None else _thaw_json(outcome.price_identity)
+            ) != expected_price_identity
+        ):
+            raise L5ExecutionTransactionError("INVALID_OUTCOME", "outcome price or time semantics differ")
 
     def _validate_consumption_provenance(
         self,
@@ -2364,9 +3146,10 @@ def _validate_execution_transaction_chain(
                     raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "consumption_hash is duplicated")
                 seen_consumptions.add(consumption_hash)
         previous = event.event_hash
-    if expected_final_hash is not None:
-        if not _is_hash(expected_final_hash) or previous != expected_final_hash:
-            raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "journal final hash differs")
+    if expected_final_hash is not None and (
+        not _is_hash(expected_final_hash) or previous != expected_final_hash
+    ):
+        raise L5ExecutionTransactionError("INVALID_TRANSACTION_JOURNAL", "journal final hash differs")
     return previous
 
 
@@ -2436,11 +3219,138 @@ def replay_execution_transaction_journal(
     )
 
 
+def replay_l5_execution_delivery_journal(
+    events: tuple[L5ExecutionDeliveryEvent, ...],
+    *,
+    execution_events: tuple[L5ExecutionTransactionEvent, ...],
+    expected_final_hash: str,
+    inbox_events: tuple[L5ExecutionInboxEvent, ...] | Mapping[str, tuple[L5ExecutionInboxEvent, ...]],
+    expected_inbox_hash: str | Mapping[str, str],
+) -> tuple[L5ExecutionDeliveryState, str]:
+    """Strictly replay outcomes/acks and bind committed outcomes to L5 events."""
+    transaction_by_hash = {
+        event.event_hash: (index, event)
+        for index, event in enumerate(execution_events)
+    }
+
+
+    expected_event_type = {
+        "MARKET": "MARKET_COMMITTED",
+        "LIMIT_PLACEMENT": "LIMIT_PLACED",
+        "LIMIT_FILL": "LIMIT_FILLED",
+        "LIMIT_CANCELLATION": "LIMIT_CANCELLED",
+    }
+    last_outcome_state_version = -1
+
+    def validate_outcome(outcome: L5ExecutionOutcome) -> None:
+        nonlocal last_outcome_state_version
+        if outcome.aggregate_state_version < last_outcome_state_version:
+            raise L5ExecutionDeliveryError(
+                "INVALID_DELIVERY_JOURNAL",
+                "outcome publication regresses aggregate causality",
+            )
+        last_outcome_state_version = outcome.aggregate_state_version
+        if not outcome.committed:
+            if outcome.transaction_event_hash is not None:
+                raise L5ExecutionDeliveryError(
+                    "INVALID_DELIVERY_JOURNAL",
+                    "rejection outcome has a transaction reference",
+                )
+            prefix_length = outcome.aggregate_state_version + 1
+            if prefix_length > len(execution_events):
+                raise L5ExecutionDeliveryError(
+                    "INVALID_DELIVERY_JOURNAL",
+                    "rejection state version has no transaction prefix",
+                )
+            state, _ = _replay_execution_transaction_journal(
+                execution_events[:prefix_length],
+                expected_final_hash=execution_events[prefix_length - 1].event_hash,
+            )
+            try:
+                L5ExecutionTransactionStore._validate_outcome_against_state(outcome, state)
+            except L5ExecutionTransactionError as exc:
+                raise L5ExecutionDeliveryError(
+                    "INVALID_DELIVERY_JOURNAL",
+                    "rejection differs from canonical risk evidence",
+                ) from exc
+            return
+        transaction = transaction_by_hash.get(outcome.transaction_event_hash)
+        if transaction is None:
+            raise L5ExecutionDeliveryError(
+                "INVALID_DELIVERY_JOURNAL",
+                "committed outcome has no transaction",
+            )
+        index, event = transaction
+        if (
+            event.operation_id != outcome.operation_id
+            or event.event_type != expected_event_type.get(outcome.operation_kind)
+        ):
+            raise L5ExecutionDeliveryError(
+                "INVALID_DELIVERY_JOURNAL",
+                "outcome operation differs from transaction",
+            )
+        state, _ = _replay_execution_transaction_journal(
+            execution_events[: index + 1],
+            expected_final_hash=event.event_hash,
+        )
+        try:
+            L5ExecutionTransactionStore._validate_outcome_against_state(outcome, state)
+        except L5ExecutionTransactionError as exc:
+            raise L5ExecutionDeliveryError(
+                "INVALID_DELIVERY_JOURNAL",
+                "outcome differs from authoritative transaction state",
+            ) from exc
+
+    inbox_states: dict[str, L5ExecutionInboxState] = {}
+    if isinstance(inbox_events, Mapping):
+        if not isinstance(expected_inbox_hash, Mapping) or set(inbox_events) != set(expected_inbox_hash):
+            raise L5ExecutionDeliveryError("INVALID_INBOX_JOURNAL", "consumer anchors differ")
+        for consumer_id, consumer_events in inbox_events.items():
+            inbox_state, _ = replay_inbox_journal(
+                consumer_events,
+                expected_final_hash=expected_inbox_hash[consumer_id],
+            )
+            if any(receipt.consumer_id != consumer_id for receipt in inbox_state.receipts.values()):
+                raise L5ExecutionDeliveryError("INVALID_INBOX_JOURNAL", "consumer journal identity differs")
+            inbox_states[consumer_id] = inbox_state
+    else:
+        if not isinstance(expected_inbox_hash, str):
+            raise L5ExecutionDeliveryError("INVALID_INBOX_JOURNAL", "single consumer anchor is invalid")
+        inbox_state, _ = replay_inbox_journal(
+            inbox_events,
+            expected_final_hash=expected_inbox_hash,
+        )
+        consumers = {receipt.consumer_id for receipt in inbox_state.receipts.values()}
+        if len(consumers) > 1:
+            raise L5ExecutionDeliveryError("INVALID_INBOX_JOURNAL", "single journal mixes consumers")
+        if consumers:
+            inbox_states[next(iter(consumers))] = inbox_state
+    return replay_delivery_journal(
+        events,
+        expected_final_hash=expected_final_hash,
+        validate_outcome=validate_outcome,
+        inbox_states=inbox_states,
+    )
+
+
 __all__ = [
-    "AggregateRiskContextProvider", "ELIGIBILITY_SCHEMA_VERSION", "GENESIS_TRANSACTION_HASH",
-    "L5ExecutionAggregateState", "L5ExecutionTransactionError", "L5ExecutionTransactionEvent",
-    "L5ExecutionTransactionPlan", "L5ExecutionTransactionStore", "L5LimitFillEligibility",
-    "L5TransactionFill", "L5TransactionOrder", "L5TransactionPosition", "L5TransactionReport",
-    "PLAN_SCHEMA_VERSION", "TRANSACTION_SCHEMA_VERSION", "replay_execution_transaction_journal",
+    "ELIGIBILITY_SCHEMA_VERSION",
+    "GENESIS_TRANSACTION_HASH",
+    "PLAN_SCHEMA_VERSION",
+    "TRANSACTION_SCHEMA_VERSION",
+    "AggregateRiskContextProvider",
+    "L5ExecutionAggregateState",
+    "L5ExecutionAuthorityState",
+    "L5ExecutionTransactionError",
+    "L5ExecutionTransactionEvent",
+    "L5ExecutionTransactionPlan",
+    "L5ExecutionTransactionStore",
+    "L5LimitFillEligibility",
+    "L5TransactionFill",
+    "L5TransactionOrder",
+    "L5TransactionPosition",
+    "L5TransactionReport",
+    "replay_execution_transaction_journal",
+    "replay_l5_execution_delivery_journal",
     "validate_execution_transaction_journal",
 ]

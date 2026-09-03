@@ -9,15 +9,14 @@ import hashlib
 import json
 import math
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Mapping
 
 from .exposure_models import ExecutionIntent, IntentSide, RiskLimits, RiskViolation
 from .risk_execution_context import RiskContextError, RiskContextProvider, RiskExecutionContext
 from .risk_manager import RiskManager
-
 
 AUTHORIZATION_SCHEMA_VERSION = "risk-execution-authorization/1.0"
 CONSUMPTION_SCHEMA_VERSION = "risk-execution-consumption/1.0"
@@ -99,7 +98,7 @@ class RiskAuthorizationViolation:
     actual_value: float | None
 
     @classmethod
-    def from_risk_violation(cls, violation: RiskViolation) -> "RiskAuthorizationViolation":
+    def from_risk_violation(cls, violation: RiskViolation) -> RiskAuthorizationViolation:
         return cls(
             code=violation.code.value,
             level=violation.level.value,
@@ -116,6 +115,22 @@ class RiskAuthorizationViolation:
             "limit_value": self.limit_value,
             "actual_value": self.actual_value,
         }
+
+    @classmethod
+    def from_canonical(cls, value: object) -> RiskAuthorizationViolation:
+        """Reconstruct one immutable violation from canonical evidence."""
+        if not isinstance(value, Mapping):
+            raise RiskAuthorizationError("INVALID_AUTHORIZATION", "violation evidence is invalid")
+        try:
+            return cls(
+                code=str(value["code"]),
+                level=str(value["level"]),
+                message=str(value["message"]),
+                limit_value=_finite_number(value["limit_value"], "violation limit_value"),
+                actual_value=_finite_number(value["actual_value"], "violation actual_value"),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RiskAuthorizationError("INVALID_AUTHORIZATION", "violation evidence is malformed") from exc
 
 
 @dataclass(frozen=True)
@@ -147,7 +162,7 @@ class RiskAuthorizationDecision:
         risk_limits_hash: str,
         violations: tuple[RiskAuthorizationViolation, ...] = (),
         guard_codes: tuple[str, ...] = (),
-    ) -> "RiskAuthorizationDecision":
+    ) -> RiskAuthorizationDecision:
         if not isinstance(allowed, bool):
             raise RiskAuthorizationError("INVALID_AUTHORIZATION", "allowed must be a boolean")
         if not isinstance(provider_id, str) or not provider_id.strip():
@@ -243,8 +258,37 @@ class RiskAuthorizationDecision:
                 self.decision_hash == _sha256(self.fields_without_identity())
                 and self.authorization_id == f"risk-auth-{self.decision_hash}"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed persisted evidence must fail closed
             return False
+
+    @classmethod
+    def from_canonical(cls, value: object) -> RiskAuthorizationDecision:
+        """Reconstruct and integrity-check canonical decision evidence."""
+        if not isinstance(value, Mapping):
+            raise RiskAuthorizationError("INVALID_AUTHORIZATION", "decision evidence is invalid")
+        try:
+            decision = cls(
+                schema_version=str(value["schema_version"]),
+                allowed=value["allowed"],
+                authorization_id=str(value["authorization_id"]),
+                provider_id=str(value["provider_id"]),
+                intent_id=str(value["intent_id"]),
+                intent_hash=str(value["intent_hash"]),
+                context_state_version=value["context_state_version"],
+                context_state_hash=str(value["context_state_hash"]),
+                risk_limits_hash=str(value["risk_limits_hash"]),
+                violations=tuple(
+                    RiskAuthorizationViolation.from_canonical(item)
+                    for item in value["violations"]
+                ),
+                guard_codes=tuple(str(item) for item in value["guard_codes"]),
+                decision_hash=str(value["decision_hash"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RiskAuthorizationError("INVALID_AUTHORIZATION", "decision evidence is malformed") from exc
+        if not decision.is_intact():
+            raise RiskAuthorizationError("INVALID_AUTHORIZATION", "decision evidence integrity failed")
+        return decision
 
 
 @dataclass(frozen=True)
@@ -264,7 +308,7 @@ class RiskAuthorizationConsumption:
     consumption_hash: str
 
     @classmethod
-    def _from_decision(cls, decision: RiskAuthorizationDecision) -> "RiskAuthorizationConsumption":
+    def _from_decision(cls, decision: RiskAuthorizationDecision) -> RiskAuthorizationConsumption:
         if not isinstance(decision, RiskAuthorizationDecision) or not decision.is_intact():
             raise RiskAuthorizationError("INVALID_AUTHORIZATION", "cannot consume an invalid decision")
         if not decision.allowed:
@@ -338,8 +382,25 @@ class RiskAuthorizationConsumption:
                 self.consumption_hash == _sha256(self.fields_without_identity())
                 and self.consumption_id == f"risk-consumption-{self.consumption_hash}"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed persisted evidence must fail closed
             return False
+
+    @classmethod
+    def from_canonical(cls, value: object) -> RiskAuthorizationConsumption:
+        """Reconstruct and integrity-check canonical consumption evidence."""
+        if not isinstance(value, Mapping):
+            raise RiskAuthorizationError("INVALID_CONSUMPTION", "consumption evidence is invalid")
+        try:
+            record = cls(**{key: value[key] for key in (
+                "schema_version", "consumption_id", "authorization_id", "decision_hash",
+                "provider_id", "intent_id", "intent_hash", "context_state_version",
+                "context_state_hash", "risk_limits_hash", "consumption_hash",
+            )})
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RiskAuthorizationError("INVALID_CONSUMPTION", "consumption evidence is malformed") from exc
+        if not record.is_intact():
+            raise RiskAuthorizationError("INVALID_CONSUMPTION", "consumption evidence integrity failed")
+        return record
 
 
 class RiskAuthorizationBoundary:
@@ -412,7 +473,7 @@ class RiskAuthorizationBoundary:
                 violations=violations,
                 guard_codes=("RISK_MANAGER_BLOCKED",) if blocked else (),
             ))
-        except Exception:
+        except Exception:  # noqa: BLE001 - risk-manager failures must deny authorization
             return self._issue(RiskAuthorizationDecision.create(
                 allowed=False,
                 provider_id=context.provider_id,
@@ -514,6 +575,40 @@ class RiskAuthorizationBoundary:
                 )
             return issued
 
+    def decision_for_consumption(
+        self,
+        record: object,
+    ) -> RiskAuthorizationDecision:
+        """Return the exact issued decision causally consumed by ``record``."""
+        consumption = self.verify_consumption_evidence(record)
+        with self._registry_lock:
+            decision = self._issued_decisions.get(consumption.decision_hash)
+            if decision is None or decision.authorization_id != consumption.authorization_id:
+                raise RiskAuthorizationError(
+                    "UNISSUED_AUTHORIZATION",
+                    "consumption has no exact issued decision",
+                )
+            return decision
+
+    def verify_decision_evidence(
+        self,
+        decision: object,
+    ) -> RiskAuthorizationDecision:
+        """Verify structural integrity and local issuance of a risk decision."""
+        if not isinstance(decision, RiskAuthorizationDecision) or not decision.is_intact():
+            raise RiskAuthorizationError(
+                "INVALID_AUTHORIZATION",
+                "risk decision integrity check failed",
+            )
+        with self._registry_lock:
+            issued = self._issued_decisions.get(decision.decision_hash)
+            if issued is None or issued != decision:
+                raise RiskAuthorizationError(
+                    "UNISSUED_AUTHORIZATION",
+                    "risk decision was not issued by this boundary",
+                )
+            return issued
+
     def _publish_consumption_state(
         self,
         next_state: Mapping[str, RiskAuthorizationConsumption],
@@ -547,12 +642,12 @@ class RiskAuthorizationBoundary:
                 self._context_provider.assert_current(context.state_version, context.state_hash)
             except RiskContextError:
                 codes.append("STALE_RISK_CONTEXT")
-            except Exception:
+            except Exception:  # noqa: BLE001 - provider failures must deny authorization
                 codes.append("CONTEXT_PROVIDER_ERROR")
         try:
             if _limits_canonical(self._risk_manager.limits) != _limits_canonical(context.risk_limits):
                 codes.append("RISK_LIMITS_MISMATCH")
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed limits must deny authorization
             codes.append("RISK_LIMITS_MISMATCH")
         if not context.execution_enabled:
             codes.append("EXECUTION_DISABLED")
@@ -575,7 +670,7 @@ def _safe_intent_identity(intent: object) -> tuple[str, str, bool]:
     try:
         canonical = _intent_canonical(intent)  # type: ignore[arg-type]
         return str(canonical["intent_id"]), _sha256(canonical), True
-    except Exception:
+    except Exception:  # noqa: BLE001 - malformed intents must be rejected deterministically
         return "<invalid-intent>", _sha256({"invalid_intent": True}), False
 
 
@@ -586,8 +681,132 @@ def _safe_limits_hash(context: RiskExecutionContext) -> str:
         return _sha256({"invalid_limits": True})
 
 
+def _deterministic_risk_violations(
+    intent: ExecutionIntent,
+    context: RiskExecutionContext,
+) -> tuple[RiskAuthorizationViolation, ...]:
+    """Pure projection of the RiskManager 1.0 business checks for replay."""
+    snapshot = context.exposure_snapshot
+    limits = context.risk_limits
+    delta = intent.quantity if intent.side == IntentSide.BUY else -intent.quantity
+    current = snapshot.positions.get(intent.symbol)
+    current_quantity = current.quantity if current else 0.0
+    proposed_quantity = current_quantity + delta
+    violations: list[RiskAuthorizationViolation] = []
+
+    def add(code: str, message: str, limit_value: float, actual_value: float) -> None:
+        violations.append(RiskAuthorizationViolation(
+            code=code,
+            level="BLOCK",
+            message=message,
+            limit_value=float(limit_value),
+            actual_value=float(actual_value),
+        ))
+
+    if proposed_quantity < 0:
+        add(
+            "INSUFFICIENT_POSITION",
+            f"insufficient position : have={current_quantity}, want_to_sell={intent.quantity}",
+            current_quantity,
+            proposed_quantity,
+        )
+    if limits.max_position_size is not None and abs(proposed_quantity) > limits.max_position_size:
+        add(
+            "POSITION_SIZE_EXCEEDED",
+            f"position size limit breached on {intent.symbol}",
+            limits.max_position_size,
+            abs(proposed_quantity),
+        )
+    if limits.max_exposure_value is not None:
+        current_symbol_exposure = current.exposure_value if current else 0.0
+        proposed_total = max(0.0, snapshot.total_gross_exposure - current_symbol_exposure) + (
+            abs(proposed_quantity) * intent.estimated_price
+        )
+        if proposed_total > limits.max_exposure_value:
+            add(
+                "EXPOSURE_EXCEEDED",
+                "gross exposure limit breached",
+                limits.max_exposure_value,
+                proposed_total,
+            )
+    if limits.max_drawdown_pct is not None and snapshot.drawdown_pct > limits.max_drawdown_pct:
+        add(
+            "DRAWDOWN_EXCEEDED",
+            "max drawdown exceeded",
+            limits.max_drawdown_pct,
+            snapshot.drawdown_pct,
+        )
+    if limits.daily_loss_limit is not None and snapshot.daily_pnl < -limits.daily_loss_limit:
+        add(
+            "DAILY_LOSS_EXCEEDED",
+            "daily loss limit exceeded",
+            -limits.daily_loss_limit,
+            snapshot.daily_pnl,
+        )
+    return tuple(violations)
+
+
+def verify_blocked_decision_evidence(
+    decision: object,
+    intent: ExecutionIntent,
+    context: RiskExecutionContext,
+) -> RiskAuthorizationDecision:
+    """Verify a blocked decision against canonical intent, context and rules.
+
+    This is deliberately pure and never invokes ``RiskManager``.  Operational
+    boundary failures that cannot be reproduced from canonical state are not
+    accepted as replayable risk evidence.
+    """
+    if not isinstance(decision, RiskAuthorizationDecision) or not decision.is_intact():
+        raise RiskAuthorizationError("INVALID_AUTHORIZATION", "blocked decision integrity failed")
+    intent_payload = _intent_canonical(intent)
+    if decision.allowed:
+        raise RiskAuthorizationError("INVALID_AUTHORIZATION", "decision is not blocked")
+    if (
+        decision.intent_id != intent.intent_id
+        or decision.intent_hash != _sha256(intent_payload)
+        or decision.provider_id != context.provider_id
+        or decision.context_state_version != context.state_version
+        or decision.context_state_hash != context.state_hash
+        or decision.risk_limits_hash != _sha256(_limits_canonical(context.risk_limits))
+    ):
+        raise RiskAuthorizationError("INVALID_AUTHORIZATION", "blocked decision provenance differs")
+    deterministic_guards = tuple(
+        code
+        for condition, code in (
+            (not context.execution_enabled, "EXECUTION_DISABLED"),
+            (context.kill_switch_active, "KILL_SWITCH_ACTIVE"),
+            (context.legacy_hard_deny, "LEGACY_HARD_DENY"),
+        )
+        if condition
+    )
+    violations = _deterministic_risk_violations(intent, context)
+    expected = RiskAuthorizationDecision.create(
+        allowed=False,
+        provider_id=context.provider_id,
+        intent_id=intent.intent_id,
+        intent_hash=_sha256(intent_payload),
+        context=context,
+        risk_limits_hash=_sha256(_limits_canonical(context.risk_limits)),
+        violations=() if deterministic_guards else violations,
+        guard_codes=(
+            deterministic_guards
+            if deterministic_guards
+            else ("RISK_MANAGER_BLOCKED",) if violations else ()
+        ),
+    )
+    if not deterministic_guards and not violations:
+        raise RiskAuthorizationError(
+            "UNVERIFIABLE_BLOCKED_DECISION",
+            "blocked decision has no reproducible canonical cause",
+        )
+    if decision != expected:
+        raise RiskAuthorizationError("INVALID_AUTHORIZATION", "blocked decision semantics differ")
+    return decision
+
+
 __all__ = [
     "AUTHORIZATION_SCHEMA_VERSION", "CONSUMPTION_SCHEMA_VERSION", "RiskAuthorizationBoundary",
     "RiskAuthorizationConsumption", "RiskAuthorizationDecision", "RiskAuthorizationError",
-    "RiskAuthorizationViolation",
+    "RiskAuthorizationViolation", "verify_blocked_decision_evidence",
 ]

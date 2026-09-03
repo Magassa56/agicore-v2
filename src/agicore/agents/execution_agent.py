@@ -10,7 +10,8 @@ import structlog
 from agicore.core.events import EventBus
 from agicore.l2_memory.schemas.task import TaskRead
 from agicore.l2_memory.services.memory_service import MemoryService
-from agicore.l5_action.broker_models import OrderSide, OrderType
+from agicore.l5_action.broker_models import OrderType
+from agicore.l5_action.execution_outbox import L5ExecutionOutcomeInbox
 from agicore.l5_action.execution_service import (
     CanonicalL5ExecutionRequest,
     ExecutionService,
@@ -33,10 +34,12 @@ class ExecutionAgent:
         execution_service: ExecutionService,
         memory: MemoryService,
         event_bus: EventBus | None = None,
+        outcome_inbox: L5ExecutionOutcomeInbox | None = None,
     ) -> None:
         self._svc = execution_service
         self._memory = memory
         self._bus = event_bus
+        self._inbox = execution_service.outcome_inbox(AGENT_ID, outcome_inbox)
         self._processed_count = 0
 
     @property
@@ -47,10 +50,25 @@ class ExecutionAgent:
     def agent_id(self) -> str:
         return AGENT_ID
 
+    @property
+    def outcome_inbox(self) -> L5ExecutionOutcomeInbox:
+        return self._inbox
+
     def __call__(self, task: TaskRead) -> dict[str, Any]:
         t0 = time.monotonic()
         request = self._build_execution_request(dict(task.payload or {}))
         result = self._svc.execute(request)
+        if result.outcome is None:
+            raise L5CanonicalExecutionError("OUTCOME_NOT_PUBLISHED", "canonical outcome is missing")
+        required_effects = (
+            ("memory", "event_bus")
+            if self._bus is not None
+            else ("memory",)
+        )
+        acceptance = self._inbox.accept(
+            result.outcome,
+            required_effects=required_effects,
+        )
         position = self._svc.state.positions.get(request.intent.symbol)
         runtime_duration_ms = max(round((time.monotonic() - t0) * 1000.0, 3), 0.001)
         feedback: dict[str, Any] = {
@@ -90,19 +108,39 @@ class ExecutionAgent:
             "price_provider_id": result.price_provider_id,
             "price_version": result.price_version,
             "price_observation_hash": result.price_observation_hash,
+            "outcome_id": result.outcome_id,
+            "outcome_hash": result.outcome_hash,
+            "request_hash": result.request_hash,
+            "delivery_state_version": result.delivery_state_version,
+            "delivery_state_hash": result.delivery_state_hash,
+            "receipt_id": acceptance.receipt.receipt_id,
+            "receipt_hash": acceptance.receipt.receipt_hash,
+            "redelivered": not acceptance.accepted_new,
             "task_id": task.id,
             "agent_id": AGENT_ID,
             "started_at": request.intent.timestamp.isoformat(),
         }
-        self._memory.create_event(
-            EVT_ORDER_PROCESSED,
-            task_id=task.id,
-            agent_id=AGENT_ID,
-            payload=dict(feedback),
+        memory_applied = self._inbox.apply_effect(
+            acceptance.receipt,
+            "memory",
+            lambda: self._memory.create_event(
+                EVT_ORDER_PROCESSED,
+                task_id=task.id,
+                agent_id=AGENT_ID,
+                payload=dict(feedback),
+            ),
         )
+        if memory_applied:
+            self._processed_count += 1
         if self._bus is not None:
-            self._bus.emit(EVT_ORDER_PROCESSED, **dict(feedback))
-        self._processed_count += 1
+            self._inbox.apply_effect(
+                acceptance.receipt,
+                "event_bus",
+                lambda: self._bus.emit(EVT_ORDER_PROCESSED, **dict(feedback)),
+            )
+        acknowledgement = self._svc.acknowledge_outcome(acceptance.receipt, self._inbox)
+        feedback["acknowledgement_id"] = acknowledgement.acknowledgement_id
+        feedback["acknowledgement_hash"] = acknowledgement.acknowledgement_hash
         feedback["processed_count"] = self._processed_count
         logger.info(
             "execution_agent.order_processed",
@@ -191,4 +229,4 @@ class ExecutionAgent:
         return parsed
 
 
-__all__ = ["ExecutionAgent", "TASK_TYPE_ORDER", "EVT_ORDER_PROCESSED", "AGENT_ID"]
+__all__ = ["AGENT_ID", "EVT_ORDER_PROCESSED", "TASK_TYPE_ORDER", "ExecutionAgent"]
