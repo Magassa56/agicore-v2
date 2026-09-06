@@ -32,30 +32,32 @@ Aucune date de passage en live n'est annoncée.
 - Gate 6.3C et exécution L5 déterministe : PR #236 ;
 - Controlled Simulation Review Precheck : PR #117 ;
 - Observability Verification : PR #78.
+- EventBus canonique, ACK durable et replay croisé : PR #238.
 
 Ces capacités sont présentes sur `main` au commit
-`903e035a36077f38c054dfd006b8dba4de11614b`, validé par `AGIcore CI #154`.
+`248d762038164cd6a58842382e06207baf0e63d0`, validé par `AGIcore CI #157`.
 
-## Unique prochaine gate pré-paper
+## Unique prochaine phase
 
-**SINK-B3 — EventBus canonique et replay croisé** est la seule prochaine gate
-identifiée. Cette roadmap ne l’implémente pas.
+L’**audit post-SINK-B3 des écarts pré-paper** est la seule prochaine phase.
+Cette roadmap ne préjuge pas de son résultat et n’implémente aucune nouvelle
+capacité.
 
-La gate devra prouver, sur une branche et dans une PR dédiées :
+L’audit devra vérifier :
 
-1. une API canonique dont le bus résout lui-même le manifest de handlers ;
-2. l’injection explicite de l’autorité durable dans le runtime ;
-3. un ACK L5 lié à l’événement durable `EMISSION_ACCEPTED` exact ;
-4. un replay croisé cohérent entre outbox, inbox et journal EventBus ;
-5. une progression des handlers distincte de l’acceptation de l’émission ;
-6. les reprises après crash et redémarrage SQLite sans duplication ;
-7. le refus fail-closed des preuves absentes, conflictuelles ou falsifiées.
+1. si le bootstrap runtime compose réellement les autorités intégrées sans
+   configuration implicite ;
+2. si une reprise bout en bout manque encore au-delà des preuves par composant ;
+3. si les contrôles pré-paper existants couvrent déjà ce dernier écart ;
+4. si AGIcore peut revenir aux expériences MNQ offline avec une hypothèse unique
+   et un OOS immuable ;
+5. quelle unique prochaine gate ou expérience est justifiée par les preuves.
 
 Le chemin reste offline et SQLite. EventBus legacy ne devient pas une autorité.
-Cette gate n’active aucun broker, compte, ordre, paper trading ou live trading.
+L’audit n’active aucun broker, compte, ordre, paper trading ou live trading.
 
-Après SINK-B3, la prochaine décision sera prise à partir des preuves intégrées et
-de la CI ; aucune gate supplémentaire n’est pré-sélectionnée ici.
+Une seule suite sera retenue après l’audit. Aucune gate supplémentaire n’est
+pré-sélectionnée ici.
 
 ## Backlog protégé
 
