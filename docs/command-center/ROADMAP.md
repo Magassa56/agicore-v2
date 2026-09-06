@@ -1,6 +1,6 @@
 # AGIcore Trading V1 — Roadmap
 
-Dernière mise à jour : 2026-08-28
+Dernière vérification : 2026-09-06
 
 ## Priorité produit
 
@@ -25,12 +25,39 @@ Aucune date de passage en live n'est annoncée.
 - évaluations de politiques ;
 - Paper Loop et apprentissage contrôlé.
 
-## Ordre de reprise après cette gouvernance documentaire
+## Fondations pré-paper intégrées
 
-1. revue humaine de la documentation Command Center ;
-2. traitement séparé des travaux locaux selon leur statut et leur revue ;
-3. poursuite contrôlée des Gates Trading V1 ;
-4. aucune activation paper ou live par simple mise à jour documentaire.
+- autorités mémoire et EventBus SQLite : PR #234 ;
+- handler mémoire idempotent avec reprise : PR #235 ;
+- Gate 6.3C et exécution L5 déterministe : PR #236 ;
+- Controlled Simulation Review Precheck : PR #117 ;
+- Observability Verification : PR #78.
+- EventBus canonique, ACK durable et replay croisé : PR #238.
+
+Ces capacités sont présentes sur `main` au commit
+`248d762038164cd6a58842382e06207baf0e63d0`, validé par `AGIcore CI #157`.
+
+## Unique prochaine phase
+
+L’**audit post-SINK-B3 des écarts pré-paper** est la seule prochaine phase.
+Cette roadmap ne préjuge pas de son résultat et n’implémente aucune nouvelle
+capacité.
+
+L’audit devra vérifier :
+
+1. si le bootstrap runtime compose réellement les autorités intégrées sans
+   configuration implicite ;
+2. si une reprise bout en bout manque encore au-delà des preuves par composant ;
+3. si les contrôles pré-paper existants couvrent déjà ce dernier écart ;
+4. si AGIcore peut revenir aux expériences MNQ offline avec une hypothèse unique
+   et un OOS immuable ;
+5. quelle unique prochaine gate ou expérience est justifiée par les preuves.
+
+Le chemin reste offline et SQLite. EventBus legacy ne devient pas une autorité.
+L’audit n’active aucun broker, compte, ordre, paper trading ou live trading.
+
+Une seule suite sera retenue après l’audit. Aucune gate supplémentaire n’est
+pré-sélectionnée ici.
 
 ## Backlog protégé
 
