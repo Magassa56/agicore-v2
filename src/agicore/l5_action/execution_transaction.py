@@ -15,6 +15,12 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+from agicore.core.event_delivery_contracts import AnchorRecord, canonical_json_text
+
+if TYPE_CHECKING:
+    from agicore.l2_memory.services.event_delivery_service import EventDeliveryService
 
 from agicore.risk.exposure_models import (
     ExecutionIntent,
@@ -3234,8 +3240,59 @@ def replay_l5_execution_delivery_journal(
     expected_final_hash: str,
     inbox_events: tuple[L5ExecutionInboxEvent, ...] | Mapping[str, tuple[L5ExecutionInboxEvent, ...]],
     expected_inbox_hash: str | Mapping[str, str],
+    bus_authority: EventDeliveryService | None = None,
+    expected_bus_anchor: AnchorRecord | None = None,
 ) -> tuple[L5ExecutionDeliveryState, str]:
-    """Strictly replay outcomes/acks and bind committed outcomes to L5 events."""
+    """Replay L5/inbox evidence, optionally binding ACKs to an anchored SQLite bus.
+
+    Canonical ACKs require the bus authority and an independently retained anchor.
+    The authority verifies its chain and SQL projection before linkage is checked.
+    Legacy ACKs without bus evidence remain valid only outside canonical mode.
+    """
+    if (bus_authority is None) != (expected_bus_anchor is None):
+        raise L5ExecutionDeliveryError("UNVERIFIED_BUS_ACCEPTANCE", "bus authority and anchor are both required")
+    bus_state = (
+        bus_authority.replay(expected_anchor=expected_bus_anchor)
+        if bus_authority is not None else None
+    )
+
+    def validate_emission(
+        ack: L5ExecutionDeliveryAcknowledgement,
+        outcome: L5ExecutionOutcome,
+        source_sequence: int,
+    ) -> None:
+        if bus_state is None:
+            raise L5ExecutionDeliveryError("UNVERIFIED_BUS_ACCEPTANCE", "bus proof is missing")
+        matches = [
+            emission for emission in bus_state.emissions
+            if bus_state.acceptance_hashes.get(emission.emission_effect_id)
+            == ack.emission_accepted_hash
+        ]
+        if len(matches) != 1:
+            raise L5ExecutionDeliveryError("UNVERIFIED_BUS_ACCEPTANCE", "acceptance hash is absent or ambiguous")
+        emission = matches[0]
+        expected_payload = {
+            "schema": "agicore.execution-outcome-emission.v1",
+            "consumer_id": ack.consumer_id,
+            "outcome_id": outcome.outcome_id,
+            "outcome_hash": outcome.outcome_hash,
+            "receipt_id": ack.receipt_id,
+            "receipt_hash": ack.receipt_hash,
+            "source_sequence": source_sequence,
+            "outcome": outcome.canonical(),
+        }
+        if (
+            emission.source_identity != ack.receipt_id
+            or emission.consumer_id != ack.consumer_id
+            or emission.outcome_id != outcome.outcome_id
+            or emission.outcome_hash != outcome.outcome_hash
+            or emission.receipt_hash != ack.receipt_hash
+            or emission.source_sequence != source_sequence
+            or emission.event_type != "agent.execution.order.processed"
+            or canonical_json_text(emission.payload) != canonical_json_text(expected_payload)
+        ):
+            raise L5ExecutionDeliveryError("UNVERIFIED_BUS_ACCEPTANCE", "acceptance differs from exact outcome linkage")
+
     transaction_by_hash = {
         event.event_hash: (index, event)
         for index, event in enumerate(execution_events)
@@ -3338,6 +3395,7 @@ def replay_l5_execution_delivery_journal(
         expected_final_hash=expected_final_hash,
         validate_outcome=validate_outcome,
         inbox_states=inbox_states,
+        validate_emission=validate_emission if bus_state is not None else None,
     )
 
 

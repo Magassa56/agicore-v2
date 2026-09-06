@@ -3,21 +3,21 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.orm import Session
 
 from agicore.core.event_delivery_contracts import (
-    ApplyStatus,
+    GENESIS_HASH,
     AnchorRecord,
+    ApplyStatus,
     ClaimResult,
     ClaimStatus,
     DeliveryRecord,
     DispatchClass,
     EmissionApplyResult,
     EmissionRecord,
-    GENESIS_HASH,
     HandlerManifestEntry,
     JournalEventType,
     ManifestApplyResult,
@@ -30,13 +30,17 @@ from agicore.core.event_delivery_contracts import (
     canonical_time,
     handler_effect_id,
     journal_event_hash,
+    prepare_emission,
     sha256_canonical,
     synthetic_result_hash,
-    prepare_emission,
     verify_emission,
     verify_manifest,
 )
 
+from ..adapters.sqlalchemy_engine import (
+    _DeliverySessionCapability,
+    _require_delivery_session_capability,
+)
 from ..models.event_delivery import (
     EventBusEmission,
     EventDeliveryAnchor,
@@ -44,10 +48,6 @@ from ..models.event_delivery import (
     EventHandlerDelivery,
     EventHandlerManifest,
     EventHandlerManifestEntry,
-)
-from ..adapters.sqlalchemy_engine import (
-    _DeliverySessionCapability,
-    _require_delivery_session_capability,
 )
 
 
@@ -672,6 +672,11 @@ class EventDeliveryRepository:
                 raise RuntimeError("emission manifest snapshot is not authoritative")
         return ReplayResult(
             anchor=actual_anchor,
+            acceptance_hashes={
+                row.emission_effect_id: row.event_hash
+                for row in rows
+                if row.event_type == JournalEventType.EMISSION_ACCEPTED.value
+            },
             emissions=tuple(self._emission_record(row) for row in sql_emissions),
             deliveries=tuple(
                 self._delivery_record(delivery, emission)
@@ -1384,9 +1389,9 @@ class EventDeliveryRepository:
     @staticmethod
     def _parse_canonical_time(value: object, *, field: str) -> datetime:
         if not isinstance(value, str):
-            raise ValueError(f"{field} must be a canonical timestamp")
+            raise ValueError(f"{field} must be a canonical timestamp")  # noqa: TRY004 - preserve replay ValueError contract
         try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value)
         except ValueError as exc:
             raise ValueError(f"{field} must be a canonical timestamp") from exc
         normalized, rendered = canonical_time(parsed, field=field)
@@ -1397,8 +1402,8 @@ class EventDeliveryRepository:
     @staticmethod
     def _normalized_time(value: datetime) -> datetime:
         if value.tzinfo is None or value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @classmethod
     def _render_time(cls, value: datetime) -> str:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,13 +14,42 @@ from agicore.core.event_delivery_contracts import (
     prepare_emission,
     prepare_manifest,
     synthetic_result_hash,
+    verify_emission,
+    verify_manifest,
 )
+from agicore.l2_memory.repositories.event_delivery_repository import EventDeliveryRepository
 from agicore.l2_memory.services.event_delivery_service import EventDeliveryService
 
-
-NOW = datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 27, 9, 0, tzinfo=UTC)
 HASH_A = "a" * 64
 HASH_B = "b" * 64
+
+
+@pytest.mark.parametrize("operation", [
+    lambda: verify_manifest(None),
+    lambda: verify_emission(None),
+    lambda: _entry(required=1),
+    lambda: prepare_manifest(
+        runtime_profile_id="offline", event_type="audit", manifest_version="v1", entries=None,
+    ),
+    lambda: synthetic_result_hash(
+        handler_effect_digest=HASH_A, status=ApplyStatus.APPLIED_CONFIRMED, payload=None,
+    ),
+    lambda: EventDeliveryRepository._parse_canonical_time(None, field="test"),
+])
+def test_validation_preserves_exact_value_error_contract(operation) -> None:
+    with pytest.raises(ValueError) as raised:
+        operation()
+    assert type(raised.value) is ValueError
+
+
+def test_replay_timestamp_preserves_canonical_z_contract() -> None:
+    parse = EventDeliveryRepository._parse_canonical_time
+    assert parse("2026-08-27T09:00:00.000000Z", field="test") == NOW
+    for invalid in ("2026-08-27T09:00:00.000000+00:00", "not-a-time"):
+        with pytest.raises(ValueError) as raised:
+            parse(invalid, field="test")
+        assert type(raised.value) is ValueError
 
 
 def _entry(**changes) -> HandlerManifestEntry:
@@ -133,8 +162,8 @@ def test_emission_hashes_all_semantic_fields_and_copies_payload() -> None:
 @pytest.mark.parametrize(
     "field,value",
     (
-        ("occurred_at", datetime(2026, 8, 27, 9, 0)),
-        ("accepted_at", datetime(2026, 8, 27, 9, 0)),
+        ("occurred_at", datetime(2026, 8, 27, 9, 0)),  # noqa: DTZ001 - intentionally naive rejection input
+        ("accepted_at", datetime(2026, 8, 27, 9, 0)),  # noqa: DTZ001 - intentionally naive rejection input
         ("outcome_hash", "not-a-hash"),
         ("receipt_hash", "A" * 64),
         ("source_sequence", -1),

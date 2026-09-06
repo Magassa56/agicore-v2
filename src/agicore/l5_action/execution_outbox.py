@@ -1279,6 +1279,7 @@ def replay_delivery_journal(
     expected_final_hash: str,
     validate_outcome: Callable[[L5ExecutionOutcome], None],
     inbox_states: Mapping[str, L5ExecutionInboxState] = MappingProxyType({}),
+    validate_emission: Callable[[L5ExecutionDeliveryAcknowledgement, L5ExecutionOutcome, int], None] | None = None,
 ) -> tuple[L5ExecutionDeliveryState, str]:
     """Replay an anchored delivery journal with caller-provided transaction semantics."""
     if not isinstance(events, tuple) or not events or not _is_hash(expected_final_hash):
@@ -1350,6 +1351,21 @@ def replay_delivery_journal(
                 raise L5ExecutionDeliveryError(
                     "ORPHAN_ACKNOWLEDGEMENT",
                     "acknowledgement lacks exact prior inbox acceptance/effect causality",
+                )
+            if acknowledgement.emission_accepted_hash is not None or validate_emission is not None:
+                if validate_emission is None:
+                    raise L5ExecutionDeliveryError(
+                        "UNVERIFIED_BUS_ACCEPTANCE", "durable bus proof is required"
+                    )
+                publication = next(
+                    item for item in current.journal
+                    if item.event_type == "OUTCOME_PUBLISHED"
+                    and item.payload["outcome"]["outcome_id"] == acknowledgement.outcome_id
+                )
+                validate_emission(
+                    acknowledgement,
+                    current.outcomes[acknowledgement.outcome_id],
+                    publication.sequence_number,
                 )
             current = current.acknowledge(acknowledgement)
         else:

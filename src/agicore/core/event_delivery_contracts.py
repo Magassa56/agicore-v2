@@ -12,10 +12,9 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
-
 
 DELIVERY_SCHEMA = "agicore.event-delivery.v1"
 GENESIS_HASH = "0" * 64
@@ -78,7 +77,7 @@ def canonical_time(value: object, *, field: str) -> tuple[datetime, str]:
     """Normalize an explicitly supplied timezone-aware datetime to UTC."""
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field} must be an explicit timezone-aware datetime")
-    normalized = value.astimezone(timezone.utc)
+    normalized = value.astimezone(UTC)
     rendered = normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
     return normalized, rendered
 
@@ -154,7 +153,7 @@ class HandlerManifestEntry:
             canonical_identity(self.handler_version, field="handler_version"),
         )
         if not isinstance(self.required, bool):
-            raise ValueError("required must be a boolean")
+            raise ValueError("required must be a boolean")  # noqa: TRY004 - preserve public ValueError contract
         if not isinstance(self.ordinal, int) or isinstance(self.ordinal, bool) or self.ordinal < 0:
             raise ValueError("ordinal must be a non-negative integer")
         try:
@@ -224,7 +223,7 @@ def prepare_manifest(
     event = canonical_identity(event_type, field="event_type")
     version = canonical_identity(manifest_version, field="manifest_version")
     if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence):
-        raise ValueError("entries must be an explicit sequence")
+        raise ValueError("entries must be an explicit sequence")  # noqa: TRY004 - preserve public ValueError contract
     immutable_entries = tuple(entries)
     if any(not isinstance(item, HandlerManifestEntry) for item in immutable_entries):
         raise ValueError("entries must contain HandlerManifestEntry values")
@@ -256,7 +255,7 @@ def prepare_manifest(
 def verify_manifest(value: PreparedManifest) -> PreparedManifest:
     """Reconstruct a prepared manifest and reject forged internal values."""
     if not isinstance(value, PreparedManifest):
-        raise ValueError("manifest input has an invalid prepared type")
+        raise ValueError("manifest input has an invalid prepared type")  # noqa: TRY004 - preserve public ValueError contract
     rebuilt = prepare_manifest(
         runtime_profile_id=value.runtime_profile_id,
         event_type=value.event_type,
@@ -383,6 +382,10 @@ class ReplayResult:
     anchor: AnchorRecord
     emissions: tuple[EmissionRecord, ...]
     deliveries: tuple[DeliveryRecord, ...]
+    acceptance_hashes: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "acceptance_hashes", MappingProxyType(dict(self.acceptance_hashes)))
 
 
 def prepare_emission(
@@ -423,10 +426,10 @@ def prepare_emission(
     event_time, event_time_text = canonical_time(occurred_at, field="occurred_at")
     acceptance_time, acceptance_time_text = canonical_time(accepted_at, field="accepted_at")
     if not isinstance(payload, Mapping):
-        raise ValueError("payload must be a mapping")
+        raise ValueError("payload must be a mapping")  # noqa: TRY004 - preserve public ValueError contract
     payload_value = canonical_json_value(payload)
     if not isinstance(payload_value, dict):  # pragma: no cover - guarded above
-        raise ValueError("payload must canonicalize to an object")
+        raise ValueError("payload must canonicalize to an object")  # noqa: TRY004 - preserve public ValueError contract
     payload_json = canonical_json_text(payload_value)
     payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
     effect_content = {
@@ -469,7 +472,7 @@ def canonical_source_sequence(value: int) -> int:
 def verify_emission(value: PreparedEmission) -> PreparedEmission:
     """Reconstruct a prepared emission and reject forged internal values."""
     if not isinstance(value, PreparedEmission):
-        raise ValueError("emission input has an invalid prepared type")
+        raise ValueError("emission input has an invalid prepared type")  # noqa: TRY004 - preserve public ValueError contract
     rebuilt = prepare_emission(
         authority_id=value.authority_id,
         authority_version=value.authority_version,
@@ -520,10 +523,10 @@ def synthetic_result_hash(
     except (TypeError, ValueError) as exc:
         raise ValueError("handler result status is invalid") from exc
     if not isinstance(payload, Mapping):
-        raise ValueError("handler result payload must be a mapping")
+        raise ValueError("handler result payload must be a mapping")  # noqa: TRY004 - preserve public ValueError contract
     canonical_payload = canonical_json_value(payload)
     if not isinstance(canonical_payload, dict):  # pragma: no cover
-        raise ValueError("handler result payload must canonicalize to an object")
+        raise ValueError("handler result payload must canonicalize to an object")  # noqa: TRY004 - preserve public ValueError contract
     payload_json = canonical_json_text(canonical_payload)
     digest = sha256_canonical(
         {
@@ -581,16 +584,16 @@ def journal_event_hash(
 
 
 __all__ = [
-    "ApplyStatus",
+    "DELIVERY_SCHEMA",
+    "GENESIS_HASH",
     "AnchorRecord",
+    "ApplyStatus",
     "ClaimResult",
     "ClaimStatus",
-    "DELIVERY_SCHEMA",
     "DeliveryRecord",
     "DispatchClass",
     "EmissionApplyResult",
     "EmissionRecord",
-    "GENESIS_HASH",
     "HandlerManifestEntry",
     "JournalEventType",
     "ManifestApplyResult",

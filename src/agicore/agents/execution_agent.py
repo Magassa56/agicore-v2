@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from agicore.core.event_delivery_contracts import ApplyStatus
 from agicore.core.events import EventBus
 from agicore.l2_memory.schemas.task import TaskRead
 from agicore.l2_memory.services.memory_service import MemoryService
@@ -155,6 +156,14 @@ class ExecutionAgent:
                     occurred_at=request.intent.timestamp,
                     payload=canonical_payload,
                 )
+                if emission.status not in (
+                    ApplyStatus.APPLIED_NEW,
+                    ApplyStatus.ALREADY_APPLIED,
+                ):
+                    raise L5CanonicalExecutionError(
+                        "EMISSION_NOT_ACCEPTED",
+                        "durable bus refused the outcome emission",
+                    )
                 emission_accepted_hash = emission.emission_accepted_hash
                 self._inbox.apply_effect(
                     acceptance.receipt,
