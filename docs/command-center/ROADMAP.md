@@ -1,6 +1,6 @@
 # AGIcore Trading V1 — Roadmap
 
-Dernière mise à jour : 2026-08-28
+Dernière vérification : 2026-09-06
 
 ## Priorité produit
 
@@ -25,12 +25,37 @@ Aucune date de passage en live n'est annoncée.
 - évaluations de politiques ;
 - Paper Loop et apprentissage contrôlé.
 
-## Ordre de reprise après cette gouvernance documentaire
+## Fondations pré-paper intégrées
 
-1. revue humaine de la documentation Command Center ;
-2. traitement séparé des travaux locaux selon leur statut et leur revue ;
-3. poursuite contrôlée des Gates Trading V1 ;
-4. aucune activation paper ou live par simple mise à jour documentaire.
+- autorités mémoire et EventBus SQLite : PR #234 ;
+- handler mémoire idempotent avec reprise : PR #235 ;
+- Gate 6.3C et exécution L5 déterministe : PR #236 ;
+- Controlled Simulation Review Precheck : PR #117 ;
+- Observability Verification : PR #78.
+
+Ces capacités sont présentes sur `main` au commit
+`903e035a36077f38c054dfd006b8dba4de11614b`, validé par `AGIcore CI #154`.
+
+## Unique prochaine gate pré-paper
+
+**SINK-B3 — EventBus canonique et replay croisé** est la seule prochaine gate
+identifiée. Cette roadmap ne l’implémente pas.
+
+La gate devra prouver, sur une branche et dans une PR dédiées :
+
+1. une API canonique dont le bus résout lui-même le manifest de handlers ;
+2. l’injection explicite de l’autorité durable dans le runtime ;
+3. un ACK L5 lié à l’événement durable `EMISSION_ACCEPTED` exact ;
+4. un replay croisé cohérent entre outbox, inbox et journal EventBus ;
+5. une progression des handlers distincte de l’acceptation de l’émission ;
+6. les reprises après crash et redémarrage SQLite sans duplication ;
+7. le refus fail-closed des preuves absentes, conflictuelles ou falsifiées.
+
+Le chemin reste offline et SQLite. EventBus legacy ne devient pas une autorité.
+Cette gate n’active aucun broker, compte, ordre, paper trading ou live trading.
+
+Après SINK-B3, la prochaine décision sera prise à partir des preuves intégrées et
+de la CI ; aucune gate supplémentaire n’est pré-sélectionnée ici.
 
 ## Backlog protégé
 
