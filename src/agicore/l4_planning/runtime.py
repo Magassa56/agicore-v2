@@ -18,7 +18,7 @@ Pipeline executed end-to-end on each enqueue() :
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
 
 import structlog
 
@@ -30,6 +30,7 @@ from agicore.core.task_queue import TaskQueue
 from agicore.l2_memory.adapters.sqlalchemy_engine import SqlAlchemyEngine
 from agicore.l2_memory.migrations.init_schema import init_schema
 from agicore.l2_memory.schemas.task import TaskCreate, TaskRead
+from agicore.l2_memory.services.event_delivery_service import EventDeliveryService
 from agicore.l2_memory.services.memory_service import MemoryService
 
 from .dispatcher import Dispatcher
@@ -49,6 +50,7 @@ class RuntimeEngine:
         db_url: str = "sqlite:///:memory:",
         retry_policy: RetryPolicy | None = None,
         event_bus: EventBus | None = None,
+        event_delivery_service: EventDeliveryService | None = None,
         poll_interval: float = 0.5,
         batch_size: int = 10,
         configure_logging_now: bool = False,
@@ -66,7 +68,13 @@ class RuntimeEngine:
 
         # L4 wiring
         self._registry = HandlerRegistry()
-        self._event_bus = event_bus or EventBus()
+        if event_bus is not None and event_delivery_service is not None:
+            raise ValueError(
+                "inject canonical delivery through EventBus or RuntimeEngine, not both"
+            )
+        self._event_bus = event_bus or EventBus(
+            canonical_delivery=event_delivery_service
+        )
         self._dispatcher = Dispatcher(self._registry, self._event_bus)
         self._orchestrator = AgentOrchestrator(
             memory=self._memory,
@@ -172,7 +180,7 @@ class RuntimeEngine:
         logger.info("runtime.shutdown_complete")
 
     # ------------------------------------------------------------------ Context manager
-    def __enter__(self) -> "RuntimeEngine":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
