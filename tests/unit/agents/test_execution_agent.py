@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from agicore.agents.execution_agent import AGENT_ID, EVT_ORDER_PROCESSED, TASK_TYPE_ORDER, ExecutionAgent
+from agicore.agents.execution_agent import (
+    AGENT_ID,
+    EVT_ORDER_PROCESSED,
+    TASK_TYPE_ORDER,
+    ExecutionAgent,
+)
+from agicore.core.event_delivery_contracts import DispatchClass, HandlerManifestEntry
 from agicore.core.events import EventBus
 from agicore.l2_memory.adapters.sqlalchemy_engine import SqlAlchemyEngine
+from agicore.l2_memory.migrations.add_event_delivery_authority import (
+    add_event_delivery_authority,
+)
 from agicore.l2_memory.migrations.init_schema import init_schema
 from agicore.l2_memory.schemas.task import TaskRead
+from agicore.l2_memory.services.event_delivery_service import EventDeliveryService
 from agicore.l2_memory.services.memory_service import MemoryService
 from agicore.l5_action.execution_service import L5CanonicalExecutionError
 from tests.l5_secure_helpers import make_execution_service, market_payload
@@ -29,7 +39,7 @@ def memory(engine) -> MemoryService:
 
 
 def _task(task_id: str, payload: dict[str, object]) -> TaskRead:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return TaskRead(
         id=task_id, task_type=TASK_TYPE_ORDER, status="running",
         assigned_to=None, payload=payload, result=None, error=None,
@@ -115,3 +125,66 @@ def test_execution_without_event_bus_persists_and_has_positive_runtime(memory) -
     assert result["order_status"] == "FILLED"
     events = memory.get_recent_events(event_type=EVT_ORDER_PROCESSED, limit=5)
     assert len(events) == 1 and events[0].payload["intent_id"] == "intent-no-bus"
+
+
+def test_canonical_retry_links_ack_to_one_durable_emission(monkeypatch) -> None:
+    engine = SqlAlchemyEngine("sqlite:///:memory:", delivery_authority=True)
+    init_schema(engine)
+    add_event_delivery_authority(engine)
+    memory = MemoryService(engine)
+    delivery = EventDeliveryService(
+        engine,
+        authority_id="event-delivery",
+        authority_version="v1",
+        runtime_profile_id="execution-base-v1",
+        manifest_version="v1",
+    )
+    delivery.register_manifest(
+        event_type=EVT_ORDER_PROCESSED,
+        entries=(
+            HandlerManifestEntry(
+                handler_id="idempotent-memory-delivery",
+                handler_version="v1",
+                required=True,
+                ordinal=0,
+                dispatch_class=DispatchClass.DIRECT,
+            ),
+        ),
+        registered_at=datetime(2026, 8, 15, 10, 0, tzinfo=UTC),
+    )
+    bus = EventBus(
+        canonical_delivery=delivery,
+        acceptance_clock=lambda: datetime(2026, 8, 15, 10, 1, tzinfo=UTC),
+    )
+    service = make_execution_service()
+    agent = ExecutionAgent(service, memory, bus)
+    original_acknowledge = service.acknowledge_outcome
+    calls = 0
+
+    def lose_once(receipt, inbox, *, emission_accepted_hash=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise L5CanonicalExecutionError("ACK_LOST", "simulated acknowledgement loss")
+        return original_acknowledge(
+            receipt,
+            inbox,
+            emission_accepted_hash=emission_accepted_hash,
+        )
+
+    monkeypatch.setattr(service, "acknowledge_outcome", lose_once)
+    payload = market_payload("canonical-retry")
+    with pytest.raises(L5CanonicalExecutionError, match="ACK_LOST"):
+        agent(_task("task-canonical-first", payload))
+
+    feedback = agent(_task("task-canonical-retry", payload))
+    replay = delivery.replay()
+
+    assert feedback["redelivered"] is True
+    assert feedback["emission_accepted_hash"] == replay.anchor.last_hash
+    assert len(replay.emissions) == len(replay.deliveries) == 1
+    assert replay.deliveries[0].status == "PENDING"
+    assert replay.emissions[0].payload["outcome"]["outcome_id"] == replay.emissions[0].outcome_id
+    assert replay.emissions[0].payload["outcome"]["outcome_hash"] == replay.emissions[0].outcome_hash
+    assert service.pending_outcomes(AGENT_ID) == ()
+    engine.dispose()

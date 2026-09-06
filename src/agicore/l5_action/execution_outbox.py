@@ -666,6 +666,7 @@ class L5ExecutionDeliveryAcknowledgement:
     acceptance_event_hash: str
     effect_event_hashes: Mapping[str, str]
     inbox_anchor_hash: str
+    emission_accepted_hash: str | None
     acknowledgement_hash: str
 
     def __post_init__(self) -> None:
@@ -679,11 +680,17 @@ class L5ExecutionDeliveryAcknowledgement:
         acceptance_event_hash: str,
         effect_event_hashes: Mapping[str, str],
         inbox_anchor_hash: str,
+        emission_accepted_hash: str | None = None,
     ) -> L5ExecutionDeliveryAcknowledgement:
         if not isinstance(receipt, L5ExecutionInboxReceipt) or not receipt.is_intact():
             raise L5ExecutionDeliveryError("INVALID_RECEIPT", "receipt integrity failed")
         if not all(_is_hash(value) for value in (acceptance_event_hash, inbox_anchor_hash)):
             raise L5ExecutionDeliveryError("INVALID_ACKNOWLEDGEMENT", "inbox causal hashes are invalid")
+        if emission_accepted_hash is not None and not _is_hash(emission_accepted_hash):
+            raise L5ExecutionDeliveryError(
+                "INVALID_ACKNOWLEDGEMENT",
+                "durable emission acceptance hash is invalid",
+            )
         effects = dict(effect_event_hashes)
         if set(effects) != set(receipt.required_effects) or any(not _is_hash(value) for value in effects.values()):
             raise L5ExecutionDeliveryError("INCOMPLETE_EFFECTS", "required effects are not all complete")
@@ -696,6 +703,7 @@ class L5ExecutionDeliveryAcknowledgement:
             "acceptance_event_hash": acceptance_event_hash,
             "effect_event_hashes": dict(sorted(effects.items())),
             "inbox_anchor_hash": inbox_anchor_hash,
+            "emission_accepted_hash": emission_accepted_hash,
         }
         acknowledgement_id = f"l5-ack-{_sha256(identity)}"
         fields = {
@@ -721,6 +729,7 @@ class L5ExecutionDeliveryAcknowledgement:
             "acceptance_event_hash": self.acceptance_event_hash,
             "effect_event_hashes": dict(sorted(self.effect_event_hashes.items())),
             "inbox_anchor_hash": self.inbox_anchor_hash,
+            "emission_accepted_hash": self.emission_accepted_hash,
         }
 
     def canonical(self) -> dict[str, object]:
@@ -737,6 +746,7 @@ class L5ExecutionDeliveryAcknowledgement:
                 "acceptance_event_hash": self.acceptance_event_hash,
                 "effect_event_hashes": dict(sorted(self.effect_event_hashes.items())),
                 "inbox_anchor_hash": self.inbox_anchor_hash,
+                "emission_accepted_hash": self.emission_accepted_hash,
             }
             return (
                 self.schema_version == DELIVERY_SCHEMA_VERSION
@@ -745,6 +755,10 @@ class L5ExecutionDeliveryAcknowledgement:
                 and _is_hash(self.receipt_hash)
                 and _is_hash(self.acceptance_event_hash)
                 and _is_hash(self.inbox_anchor_hash)
+                and (
+                    self.emission_accepted_hash is None
+                    or _is_hash(self.emission_accepted_hash)
+                )
                 and all(_is_hash(value) for value in self.effect_event_hashes.values())
                 and self.acknowledgement_hash == _sha256(self.fields_without_hash())
             )
@@ -1238,6 +1252,8 @@ class L5ExecutionOutcomeInbox:
     def acknowledgement_for(
         self,
         receipt: L5ExecutionInboxReceipt,
+        *,
+        emission_accepted_hash: str | None = None,
     ) -> L5ExecutionDeliveryAcknowledgement:
         """Build an ack only after every required effect is journalled."""
         with self._lock:
@@ -1250,6 +1266,7 @@ class L5ExecutionOutcomeInbox:
                 acceptance_event_hash=self._state.acceptance_event_hashes[receipt.outcome_id],
                 effect_event_hashes=effects,
                 inbox_anchor_hash=self._state.journal[-1].event_hash,
+                emission_accepted_hash=emission_accepted_hash,
             )
 
     def _publish_state(self, next_state: L5ExecutionInboxState) -> None:

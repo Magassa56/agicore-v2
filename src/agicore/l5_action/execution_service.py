@@ -245,6 +245,7 @@ class CanonicalL5ExecutionResult:
     request_hash: str | None = None
     delivery_state_version: int | None = None
     delivery_state_hash: str | None = None
+    outcome_delivery_sequence: int | None = None
     redelivered: bool = False
     outcome: L5ExecutionOutcome | None = None
 
@@ -547,6 +548,12 @@ class ExecutionService:
         redelivered: bool = False,
     ) -> CanonicalL5ExecutionResult:
         delivery = self._store.delivery_state
+        outcome_delivery_sequence = next(
+            event.sequence_number
+            for event in delivery.journal
+            if event.event_type == "OUTCOME_PUBLISHED"
+            and event.payload["outcome"]["outcome_id"] == outcome.outcome_id
+        )
         price_identity = outcome.price_identity or {}
         message = (
             "risk authorization rejected"
@@ -581,6 +588,7 @@ class ExecutionService:
             request_hash=outcome.request_hash,
             delivery_state_version=delivery.delivery_version,
             delivery_state_hash=delivery.delivery_hash,
+            outcome_delivery_sequence=outcome_delivery_sequence,
             redelivered=redelivered,
             outcome=outcome,
         )
@@ -603,6 +611,8 @@ class ExecutionService:
         self,
         receipt: L5ExecutionInboxReceipt,
         inbox: L5ExecutionOutcomeInbox,
+        *,
+        emission_accepted_hash: str | None = None,
     ) -> L5ExecutionDeliveryAcknowledgement:
         delivery = self._store.delivery_state
         try:
@@ -611,6 +621,7 @@ class ExecutionService:
                 inbox=inbox,
                 expected_delivery_version=delivery.delivery_version,
                 expected_delivery_hash=delivery.delivery_hash,
+                emission_accepted_hash=emission_accepted_hash,
             )
         except L5ExecutionTransactionError as exc:
             raise L5CanonicalExecutionError(exc.code, exc.message) from exc

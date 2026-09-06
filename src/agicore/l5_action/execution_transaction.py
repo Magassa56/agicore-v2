@@ -2275,6 +2275,7 @@ class L5ExecutionTransactionStore:
         inbox: L5ExecutionOutcomeInbox,
         expected_delivery_version: int,
         expected_delivery_hash: str,
+        emission_accepted_hash: str | None = None,
     ) -> L5ExecutionDeliveryAcknowledgement:
         """CAS-acknowledge a locally accepted outcome; repeated ack is a no-op."""
         if inbox.consumer_id != receipt.consumer_id:
@@ -2298,7 +2299,11 @@ class L5ExecutionTransactionStore:
                 and item.outcome_id == receipt.outcome_id
             ), None)
             if existing_for_outcome is not None:
-                if existing_for_outcome.receipt_hash != receipt.receipt_hash:
+                if (
+                    existing_for_outcome.receipt_hash != receipt.receipt_hash
+                    or existing_for_outcome.emission_accepted_hash
+                    != emission_accepted_hash
+                ):
                     raise L5ExecutionTransactionError(
                         "ACKNOWLEDGEMENT_CONFLICT",
                         "acknowledgement differs from the authoritative record",
@@ -2310,7 +2315,10 @@ class L5ExecutionTransactionStore:
             ):
                 raise L5ExecutionTransactionError("STALE_DELIVERY_STATE", "delivery CAS failed")
             try:
-                acknowledgement = authority.acknowledgement_for(receipt)
+                acknowledgement = authority.acknowledgement_for(
+                    receipt,
+                    emission_accepted_hash=emission_accepted_hash,
+                )
                 next_delivery = delivery.acknowledge(acknowledgement)
             except L5ExecutionDeliveryError as exc:
                 raise L5ExecutionTransactionError(exc.code, exc.message) from exc

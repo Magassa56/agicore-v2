@@ -133,14 +133,57 @@ class ExecutionAgent:
         if memory_applied:
             self._processed_count += 1
         if self._bus is not None:
-            self._inbox.apply_effect(
+            if self._bus.canonical_delivery_enabled:
+                if result.outcome is None or result.outcome_delivery_sequence is None:
+                    raise L5CanonicalExecutionError(
+                        "OUTCOME_DELIVERY_IDENTITY_MISSING",
+                        "canonical outcome publication identity is missing",
+                    )
+                canonical_payload = {
+                    "schema": "agicore.execution-outcome-emission.v1",
+                    "consumer_id": AGENT_ID,
+                    "outcome_id": result.outcome.outcome_id,
+                    "outcome_hash": result.outcome.outcome_hash,
+                    "receipt_id": acceptance.receipt.receipt_id,
+                    "receipt_hash": acceptance.receipt.receipt_hash,
+                    "source_sequence": result.outcome_delivery_sequence,
+                    "outcome": result.outcome.canonical(),
+                }
+                emission = self._bus.accept_idempotent(
+                    source_identity=acceptance.receipt.receipt_id,
+                    event_type=EVT_ORDER_PROCESSED,
+                    occurred_at=request.intent.timestamp,
+                    payload=canonical_payload,
+                )
+                emission_accepted_hash = emission.emission_accepted_hash
+                self._inbox.apply_effect(
+                    acceptance.receipt,
+                    "event_bus",
+                    lambda: None,
+                )
+            else:
+                emission_accepted_hash = None
+                self._inbox.apply_effect(
+                    acceptance.receipt,
+                    "event_bus",
+                    lambda: self._bus.emit(EVT_ORDER_PROCESSED, **dict(feedback)),
+                )
+        else:
+            emission_accepted_hash = None
+        if emission_accepted_hash is None:
+            acknowledgement = self._svc.acknowledge_outcome(
                 acceptance.receipt,
-                "event_bus",
-                lambda: self._bus.emit(EVT_ORDER_PROCESSED, **dict(feedback)),
+                self._inbox,
             )
-        acknowledgement = self._svc.acknowledge_outcome(acceptance.receipt, self._inbox)
+        else:
+            acknowledgement = self._svc.acknowledge_outcome(
+                acceptance.receipt,
+                self._inbox,
+                emission_accepted_hash=emission_accepted_hash,
+            )
         feedback["acknowledgement_id"] = acknowledgement.acknowledgement_id
         feedback["acknowledgement_hash"] = acknowledgement.acknowledgement_hash
+        feedback["emission_accepted_hash"] = emission_accepted_hash
         feedback["processed_count"] = self._processed_count
         logger.info(
             "execution_agent.order_processed",

@@ -9,13 +9,35 @@ Events are propagated to the LTM event log in parallel via the
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 import structlog
+
+if TYPE_CHECKING:
+    from agicore.core.event_delivery_contracts import EmissionApplyResult
+
+
+class CanonicalEventDelivery(Protocol):
+    """Narrow durable authority consumed by the canonical bus path."""
+
+    def accept_emission(
+        self,
+        *,
+        source_identity: str,
+        consumer_id: str,
+        outcome_id: str,
+        outcome_hash: str,
+        receipt_hash: str,
+        source_sequence: int,
+        event_type: str,
+        occurred_at: datetime,
+        accepted_at: datetime,
+        payload: Mapping[str, object],
+    ) -> EmissionApplyResult: ...
 
 logger = structlog.get_logger(__name__)
 
@@ -40,9 +62,9 @@ class Event:
     event_type: str
     payload: dict[str, Any] = field(default_factory=dict)
     event_id: str = field(default_factory=lambda: str(uuid4()))
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def with_payload(self, **kwargs: Any) -> "Event":
+    def with_payload(self, **kwargs: Any) -> Event:
         merged = dict(self.payload)
         merged.update(kwargs)
         return Event(event_type=self.event_type, payload=merged)
@@ -58,8 +80,73 @@ class EventBus:
     are NOT designed for high-concurrency async usage in Phase 3.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        canonical_delivery: CanonicalEventDelivery | None = None,
+        acceptance_clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._subscribers: dict[str, list[Handler]] = defaultdict(list)
+        self._canonical_delivery = canonical_delivery
+        self._acceptance_clock = acceptance_clock or (lambda: datetime.now(UTC))
+
+    @property
+    def canonical_delivery_enabled(self) -> bool:
+        """Whether the durable canonical publishing path was injected."""
+        return self._canonical_delivery is not None
+
+    def accept_idempotent(
+        self,
+        *,
+        source_identity: str,
+        event_type: str,
+        occurred_at: datetime,
+        payload: Mapping[str, object],
+    ) -> EmissionApplyResult:
+        """Durably accept one emission before legacy best-effort propagation.
+
+        Handler identities are intentionally absent from this API. The durable
+        authority resolves its registered manifest. Gate linkage values live in
+        the canonical payload and are validated again by that authority.
+        """
+        if self._canonical_delivery is None:
+            raise RuntimeError("canonical EventBus delivery authority is not configured")
+        if not isinstance(payload, Mapping):
+            raise TypeError("canonical EventBus payload must be a mapping")
+        required = (
+            "consumer_id",
+            "outcome_id",
+            "outcome_hash",
+            "receipt_hash",
+            "source_sequence",
+        )
+        missing = tuple(name for name in required if name not in payload)
+        if missing:
+            raise ValueError(f"canonical EventBus payload is missing linkage fields: {missing}")
+        result = self._canonical_delivery.accept_emission(
+            source_identity=source_identity,
+            consumer_id=payload["consumer_id"],
+            outcome_id=payload["outcome_id"],
+            outcome_hash=payload["outcome_hash"],
+            receipt_hash=payload["receipt_hash"],
+            source_sequence=payload["source_sequence"],
+            event_type=event_type,
+            occurred_at=occurred_at,
+            accepted_at=self._acceptance_clock(),
+            payload=payload,
+        )
+        from agicore.core.event_delivery_contracts import ApplyStatus
+
+        if result.status == ApplyStatus.APPLIED_NEW:
+            self.publish(
+                Event(
+                    event_type=event_type,
+                    payload=dict(payload),
+                    event_id=result.emission.emission_effect_id,
+                    timestamp=occurred_at,
+                )
+            )
+        return result
 
     def subscribe(self, event_type: str, handler: Handler) -> Callable[[], None]:
         """Register a handler. Returns an unsubscribe function."""
@@ -88,12 +175,11 @@ class EventBus:
                 handler(event)
                 invoked += 1
             except Exception as exc:
-                logger.error(
+                logger.exception(
                     "event_bus.handler_failed",
                     event_type=event.event_type,
                     event_id=event.event_id,
                     error=str(exc),
-                    exc_info=True,
                 )
         logger.debug(
             "event_bus.published",
@@ -113,15 +199,16 @@ class EventBus:
 
 
 __all__ = [
+    "EVT_TASK_CANCELLED",
+    "EVT_TASK_COMPLETED",
+    "EVT_TASK_CREATED",
+    "EVT_TASK_DISPATCHED",
+    "EVT_TASK_FAILED",
+    "EVT_TASK_RETRIED",
+    "EVT_TASK_STARTED",
+    "WILDCARD",
+    "CanonicalEventDelivery",
     "Event",
     "EventBus",
     "Handler",
-    "WILDCARD",
-    "EVT_TASK_CREATED",
-    "EVT_TASK_DISPATCHED",
-    "EVT_TASK_STARTED",
-    "EVT_TASK_COMPLETED",
-    "EVT_TASK_FAILED",
-    "EVT_TASK_RETRIED",
-    "EVT_TASK_CANCELLED",
 ]

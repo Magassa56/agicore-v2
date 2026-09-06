@@ -325,11 +325,29 @@ def test_repeated_identical_acknowledgement_is_idempotent() -> None:
     outcome = service.execute(_market("ack-repeat")).outcome
     inbox = L5ExecutionOutcomeInbox("consumer-a")
     receipt = inbox.accept(outcome).receipt
-    first = service.acknowledge_outcome(receipt, inbox)
+    emission_hash = "e" * 64
+    first = service.acknowledge_outcome(
+        receipt,
+        inbox,
+        emission_accepted_hash=emission_hash,
+    )
     version = store.delivery_state.delivery_version
-    second = service.acknowledge_outcome(receipt, inbox)
+    second = service.acknowledge_outcome(
+        receipt,
+        inbox,
+        emission_accepted_hash=emission_hash,
+    )
     assert first == second and store.delivery_state.delivery_version == version
+    assert first.emission_accepted_hash == emission_hash
     assert len(store.delivery_state.acknowledgements) == 1
+
+    with pytest.raises(L5CanonicalExecutionError) as conflict:
+        service.acknowledge_outcome(
+            receipt,
+            inbox,
+            emission_accepted_hash="f" * 64,
+        )
+    assert conflict.value.code == "ACKNOWLEDGEMENT_CONFLICT"
 
 
 def test_falsified_or_wrong_consumer_acknowledgement_is_rejected() -> None:
