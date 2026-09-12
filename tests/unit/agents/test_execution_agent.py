@@ -59,6 +59,30 @@ def test_canonical_constants() -> None:
     )
 
 
+def test_memory_identity_conflict_prevents_emission_and_ack(memory, monkeypatch) -> None:
+    class UnreachableDelivery:
+        def accept_emission(self, **kwargs):
+            raise AssertionError("memory conflict must stop before bus acceptance")
+
+    original = memory.create_event_idempotent
+
+    def seed_conflicting_payload(**kwargs):
+        original(**(kwargs | {"payload": {"different": "outcome"}}))
+        return original(**kwargs)
+
+    monkeypatch.setattr(memory, "create_event_idempotent", seed_conflicting_payload)
+    service = make_execution_service(max_position_size=2.0)
+    service.price_provider.set_market_price(
+        "MNQ", 100.0, observed_at=datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+    )
+    agent = ExecutionAgent(service, memory, EventBus(canonical_delivery=UnreachableDelivery()))
+    with pytest.raises(L5CanonicalExecutionError, match="MEMORY_EFFECT_CONFLICT"):
+        agent(_task("memory-conflict", market_payload("memory-conflict", symbol="MNQ")))
+    assert len(service.pending_outcomes(AGENT_ID)) == 1
+    assert agent.processed_count == 0
+    assert not agent.outcome_inbox.state.effect_event_hashes
+
+
 def test_canonical_conflict_does_not_acknowledge_outcome(memory) -> None:
     class ConflictingDelivery:
         def accept_emission(self, **kwargs):

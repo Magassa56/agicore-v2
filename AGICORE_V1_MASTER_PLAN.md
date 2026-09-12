@@ -12,9 +12,11 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
 
 1. Fondations SINK-A/B1/B2/B3 et Gate 6.3C : intégrées, tests ciblés vérifiés.
 2. Audit post-SINK-B3 : réalisé ; composition durable bout en bout non démontrée.
-3. Décision humaine sur le profil runtime obligatoire : en attente (D001).
+3. Décision humaine sur le profil runtime obligatoire : D001 approuvée le 2026-09-12.
 4. Implémentation de la composition approuvée, identité persistante, reprise complète,
    ACK après acceptation durable et achèvement séparé. Injection de crash à chaque frontière.
+   Première correction : effet mémoire direct canonique idempotent (D002), diff local non commité ; aucune PR D002 publiée.
+   La reprise complète de L5/outbox/inbox reste à implémenter après intégration de ce prérequis.
 5. Replay offline MNQ synthétique avec risque inchangé, rejets, conflits, doublons,
    dépassements de quantité et reprise sans double effet. Comparaison indépendante des journaux.
 6. Provenance des données de développement et protocole quantitatif figé ; les expériences
@@ -28,3 +30,6 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
 Exécuter automatiquement les tâches non bloquées. Mettre à jour l'état et le journal après
 chaque tâche. Aucun passage automatique d'une gate architecturale ou fusion sensible.
 Les tests de composants verts ne constituent pas une preuve de reprise de tout le runtime.
+
+La stratégie personnelle EMA pullback (pente, croisement MACD, sortie à clôture sous EMA20)
+est distincte de EMA19/50 V3 rejetée. Formalisation exacte requise avant évaluation.

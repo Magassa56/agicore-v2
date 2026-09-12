@@ -1,6 +1,10 @@
 # AGIcore decisions
 
-## D001 — Profil durable post-SINK-B3 (proposition, non approuvée)
+## D001 — Profil durable post-SINK-B3 (approuvée le 2026-09-12)
+
+Approbation utilisateur : « oui on fait ça », puis instruction de démarrer et poursuivre.
+Le texte ci-dessous conserve la proposition initiale pour traçabilité ; son attente est levée.
+SignalLoopOrchestrator et RuntimeEventBridge restent hors garantie durable du profil initial.
 
 1. **Faits observés** : main c1316a06 ; CI #159 verte ; PR #238 intégrée.
    MemoryEvent possède ux_events_effect_id unique. MemoryService fournit create_event_idempotent.
@@ -32,9 +36,61 @@
    les autorités L5/inbox/outbox, figer manifeste et schéma de reprise, ajouter un test de crash
    en processus distinct, implémenter la persistance bornée, rejouer les tests ci-dessus,
    produire une PR sensible sans fusion automatique. Aucun Risk Engine modifié.
-9. **Verdict** : ATTENDRE — BLOCKED_HUMAN_GATE.
+9. **Verdict initial** : ATTENDRE — BLOCKED_HUMAN_GATE.
+   **État actuel** : APPROUVÉE le 2026-09-12 ; attente D001 levée.
 
-**Décision demandée** : approuver ce profil offline initial avec SignalLoopOrchestrator et
+**Proposition historique, déjà approuvée** : approuver ce profil offline initial avec SignalLoopOrchestrator et
 RuntimeEventBridge hors garantie durable, ou exiger leur inclusion durable avant toute validation V1.
-Cette proposition n'a pas valeur d'autorisation et ne supprime aucune exigence de reprise complète
+L’approbation D001 ne supprime aucune exigence de reprise complète
 des composants effectivement obligatoires du profil retenu.
+
+## D002 — Idempotence de l'effet mémoire direct canonique
+
+1. Faits : le test en processus distinct échoue avant correction : trois événements sans effect_id
+   pour une seule issue canonique après crash SQL et deux retries. D001 est désormais approuvée.
+2. Problème : ExecutionAgent utilise create_event sous une inbox en RAM ; le commit SQL peut
+   précéder la perte du processus et donc la connaissance locale de la réussite.
+3. Hypothèse : une identité fondée sur le receipt_hash et un payload canonique stable suffisent
+   à dédupliquer ce sink précis, y compris après redémarrage et changement d'identifiant de tâche.
+4. Modification : chemin EventBus canonique seulement ; create_event_idempotent existant,
+   effect_id execution-memory-<receipt_hash>, schema agicore.execution-memory-effect.v1,
+   receipt + outcome, date explicite. Les durées et task_id transitoires restent dans le feedback.
+   Conflit mémoire : erreur MEMORY_EFFECT_CONFLICT avant émission et ACK. Chemin legacy inchangé.
+5. Tests : test crash réel os._exit(73), retries dans de nouveaux processus, comparaison à une
+   exécution indépendante ; conflit SQL réel, aucune émission/ACK ; régressions agent/runtime/handler.
+6. Acceptation : un événement et mêmes effect_id/payload_hash après reprise et référence ;
+   conflit bloqué ; suite verte ; aucun changement Risk Engine. Fusion sensible humaine requise.
+7. Surapprentissage : aucun PnL, uniquement MNQ synthétique, quantité 1, limite fixture 2.
+8. Ticket : POST-SINK-B3-MEMORY-EFFECT-V1 ; trois fichiers code/tests plus quatre checkpoints
+   obligatoires. Branche feature/post-sink-b3-memory-effect-v1, dépend de la PR documentaire #239.
+9. Verdict : TESTER — validation de ce sink uniquement, pas validation V1 complète.
+
+Limite de migration : les anciens événements sans effect_id ne sont pas reclassés ou dédupliqués.
+Le futur profil durable doit utiliser une autorité neuve ou une migration explicitement validée.
+La persistance de L5/outbox/inbox et la preuve de reprise de toutes les positions restent requises.
+
+
+## Ticket suivant préparé — POST-SINK-B3-L5-RECOVERY-V1
+
+1. Faits observés : execution_transaction.py initialise _authority en RAM et _publish_state
+   ne fait qu'une affectation ; execution_outbox.py conserve _state et _publish_state en RAM.
+   Les validateurs replay_execution_transaction_journal, replay_delivery_journal,
+   replay_inbox_journal et replay_l5_execution_delivery_journal existent déjà.
+2. Problème : perte des positions, résultats en attente et reçus au redémarrage complet.
+3. Hypothèse unique : persister atomiquement les transitions L5/outbox et les transitions
+   inbox, puis reconstruire avec les validateurs existants permet une reprise vérifiable.
+4. Modification proposée : dans la phase dédiée après D002, autorité SQLite explicite,
+   journal et ancre versionnés, contrôle CAS avant publication RAM, restauration obligatoire
+   depuis journaux ; refuser base incohérente, ancre absente, manifeste différent et toute
+   remise à zéro silencieuse. Aucun changement de règle du Risk Engine.
+5. Tests : audit statique effectué ; aucun test de restauration complète ajouté ou revendiqué.
+6. Acceptation : nouveau processus sans objets conservés ; position MNQ non nulle restaurée ;
+   outbox pending et inbox restaurées ; crash avant/après commit, effet mémoire, acceptation
+   bus et ACK ; retries sans nouvel ordre/fill/effet ; conflit et stale writer refusés ;
+   replay final identique à référence indépendante ; refus d'une base tronquée/corrompue.
+7. Surapprentissage : fixtures MNQ synthétiques seulement, aucun ajustement de stratégie/OOS.
+8. Ticket Codex : examiner execution_transaction.py, execution_outbox.py, runtime.py et
+   les tests d'intégration associés ; réutiliser l'autorité SQLite existante si compatible.
+   Livrer diff borné et preuves, sans commit/push/PR automatique. Toute extension profonde
+   au-delà du profil D001 devra être présentée avant implémentation.
+9. Verdict : ATTENDRE — prérequis D002 prêt à soumettre à la gate de commit explicite.

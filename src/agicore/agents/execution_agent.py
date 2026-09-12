@@ -9,6 +9,7 @@ import structlog
 
 from agicore.core.event_delivery_contracts import ApplyStatus
 from agicore.core.events import EventBus
+from agicore.l2_memory.schemas.event import IdempotentEventApplyStatus
 from agicore.l2_memory.schemas.task import TaskRead
 from agicore.l2_memory.services.memory_service import MemoryService
 from agicore.l5_action.broker_models import OrderType
@@ -121,15 +122,41 @@ class ExecutionAgent:
             "agent_id": AGENT_ID,
             "started_at": request.intent.timestamp.isoformat(),
         }
+        def persist_memory() -> None:
+            if self._bus is not None and self._bus.canonical_delivery_enabled:
+                # The receipt and outcome are stable across attempts. Task IDs,
+                # runtime duration and redelivery flags are not durable identity.
+                applied = self._memory.create_event_idempotent(
+                    effect_id=f"execution-memory-{acceptance.receipt.receipt_hash}",
+                    occurred_at=request.intent.timestamp,
+                    event_type=EVT_ORDER_PROCESSED,
+                    agent_id=AGENT_ID,
+                    payload={
+                        "schema": "agicore.execution-memory-effect.v1",
+                        "receipt_id": acceptance.receipt.receipt_id,
+                        "receipt_hash": acceptance.receipt.receipt_hash,
+                        "outcome": result.outcome.canonical(),
+                    },
+                )
+                if applied.status not in (
+                    IdempotentEventApplyStatus.APPLIED_NEW,
+                    IdempotentEventApplyStatus.ALREADY_APPLIED,
+                ):
+                    raise L5CanonicalExecutionError(
+                        "MEMORY_EFFECT_CONFLICT", "durable memory refused the outcome effect",
+                    )
+            else:
+                self._memory.create_event(
+                    EVT_ORDER_PROCESSED,
+                    task_id=task.id,
+                    agent_id=AGENT_ID,
+                    payload=dict(feedback),
+                )
+
         memory_applied = self._inbox.apply_effect(
             acceptance.receipt,
             "memory",
-            lambda: self._memory.create_event(
-                EVT_ORDER_PROCESSED,
-                task_id=task.id,
-                agent_id=AGENT_ID,
-                payload=dict(feedback),
-            ),
+            persist_memory,
         )
         if memory_applied:
             self._processed_count += 1
