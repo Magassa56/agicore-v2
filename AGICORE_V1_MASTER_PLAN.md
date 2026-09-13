@@ -15,8 +15,9 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
 3. Décision humaine sur le profil runtime obligatoire : D001 approuvée le 2026-09-12.
 4. Implémentation de la composition approuvée, identité persistante, reprise complète,
    ACK après acceptation durable et achèvement séparé. Injection de crash à chaque frontière.
-   Première correction : effet mémoire direct canonique idempotent (D002), diff local non commité ; aucune PR D002 publiée.
-   La reprise complète de L5/outbox/inbox reste à implémenter après intégration de ce prérequis.
+   Première correction : effet mémoire direct canonique idempotent (D002), fusionnée via PR #240.
+   Reconstruction L5/outbox/inbox implémentée et testée localement le 2026-09-13 ; diff non commité
+   en attente de la gate humaine. Ce résultat vaut pour le profil offline borné approuvé par D001.
 5. Replay offline MNQ synthétique avec risque inchangé, rejets, conflits, doublons,
    dépassements de quantité et reprise sans double effet. Comparaison indépendante des journaux.
 6. Provenance des données de développement et protocole quantitatif figé ; les expériences
