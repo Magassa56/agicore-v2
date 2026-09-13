@@ -21,9 +21,14 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
    offline borné approuvé par D001 et ne démontre pas encore la reprise du runtime global complet.
 5. Replay offline MNQ synthétique avec risque inchangé, rejets, conflits, doublons,
    dépassements de quantité et reprise sans double effet. Comparaison indépendante des journaux.
-   Les tests de PR #241 couvrent la tranche L5 de ces preuves ; la Gate 5 globale reste à auditer.
+   Gate 5 vérifiée le 2026-09-13 pour tous les composants obligatoires du profil offline D001 :
+   test relancé sur main d41103265, 24 passed in 30.01s. Les neuf crashes, retries, refus +2,
+   incohérences et comparaison indépendante sont couverts. RuntimeEngine, SignalLoopOrchestrator
+   et RuntimeEventBridge restent hors garantie conformément à D001 ; aucune extension implicite.
 6. Provenance des données de développement et protocole quantitatif figé ; les expériences
    rejetées restent rejetées. Aucun nouvel OOS sans réservation préalable.
+   BLOCKED_HUMAN_GATE : D003 doit fixer timestamps/fuseau/DST, rollover/contrats, OHLCV/volume,
+   sessions/jours fériés/clôtures anticipées, hash/période et frontières développement/OOS.
 7. Paper local simulé borné, persistant, reproductible ; revue humaine avant intégration sensible.
 8. Documentation, preuves de CI/tests/replay et rapport final sans revendication de rentabilité
    non démontrée. V1_READY_FOR_HUMAN_GATE puis V1_VALIDATED_OFFLINE_PAPER seulement sur preuves.

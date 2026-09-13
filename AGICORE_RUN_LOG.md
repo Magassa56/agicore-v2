@@ -135,3 +135,24 @@
 - Aucun changement Risk Engine, D002, stratégie, OOS, data/, NinjaTrader, broker ou ordre réel.
 - Worktree documentaire créé depuis le merge sur chore/post-l5-recovery-checkpoint-sync.
   STOP avant commit du checkpoint post-fusion.
+
+## 2026-09-13 — Checkpoint #242 intégré et Gate 5 auditée
+
+- PR #242 passée Ready après vérification : head 0c8e895b6563ab4a790891d2d153738b85d8094e,
+  base 6c3c6bb5299e0fe8ee6db646e94b79fb4bed45df, mergeable=true/clean.
+- CI AGIcore #165 (run 34781880719) : completed/success sur le head exact.
+- Fusion protégée par expected_head_sha : merged=true, merge
+  d41103265f3afc5e324a01d45dd66b14bea0d148.
+- Main distant et FETCH_HEAD vérifiés : même SHA, arbre
+  d352e3daf60cae41bfe1935577f60b3b64fb8785, parents 6c3c6bb5 et 0c8e895b.
+- Branche feature/gate5-global-offline-replay-v1 créée depuis ce main ; worktree initial propre.
+- Audit Gate 5 : le test intégré couvre tous les composants obligatoires du profil offline D001,
+  et non RuntimeEngine, SignalLoopOrchestrator ou RuntimeEventBridge, exclus par la décision D001.
+- Relance : `tests/integration/test_sqlite_l5_recovery.py` — 24 passed in 30.01s.
+- Suite complète de la branche : 5892 passed, 6 warnings in 114.32s ; aucune erreur.
+- Preuves mappées : neuf crashes réels ; processus neufs ; position MNQ restaurée ; un seul
+  ordre/fill/effet après retries ; refus +2 ; incohérences fail-closed ; journaux et effet mémoire
+  identiques à une exécution indépendante de référence.
+- Aucun changement runtime nécessaire. Aucun accès `data/`, OOS, secret, broker, compte,
+  NinjaTrader ou ordre réel ; Risk Engine et stratégie inchangés.
+- Gate 5 : GATE_5_D001_PROFILE_VERIFIED. Prochaine gate : contrat de provenance D003.
