@@ -94,3 +94,41 @@ La persistance de L5/outbox/inbox et la preuve de reprise de toutes les position
    Livrer diff borné et preuves, sans commit/push/PR automatique. Toute extension profonde
    au-delà du profil D001 devra être présentée avant implémentation.
 9. Verdict : ATTENDRE — prérequis D002 prêt à soumettre à la gate de commit explicite.
+
+
+## État des gates après intégration D002
+
+D002 MERGED par PR #240, d52e9212eadac55e9d3d24482fd744ca54839771.
+Précondition du ticket L5-RECOVERY levée. D001 couvre le profil offline explicite.
+Les trois autorisations D002 sont consommées pour D002 uniquement ; prochain diff soumis
+à revue humaine avant commit. Aucun changement du Risk Engine, OOS, data/ ou broker.
+
+## Résultat local — POST-SINK-B3-L5-RECOVERY-V1 (2026-09-13)
+
+1. **Faits observés** : main d52e9212 après fusion PR #240. Le store L5, son outbox et
+   les inbox étaient en RAM. Les validateurs de replay existaient déjà. Le premier diff local
+   a exposé puis corrigé trois incohérences : outcome étranger, ACK bus forgé et effet mémoire
+   déclaré terminé alors que sa preuve SQL avait disparu.
+2. **Problème** : un redémarrage complet perdait positions, résultats en attente et reçus ;
+   une preuve de reprise limitée à des objets conservés en RAM ne satisfaisait pas D001.
+3. **Hypothèse unique** : une autorité SQLite explicitement créée/reprise, avec document canonique,
+   ancre, CAS et replay sémantique avant exposition, permet une reconstruction bornée et fail-closed.
+4. **Modification proposée** : SQLiteL5RecoveryStore persiste atomiquement journaux L5/outbox/inbox
+   avant publication RAM, fige consumers/effets et exige les preuves exactes Memory/EventBus.
+   CREATE refuse un fichier existant ; RESUME refuse une base absente ou incohérente.
+5. **Tests exécutés** : 24 ciblés PASS en 23.27s ; suite complète 5892 PASS, 6 warnings,
+   77.02s ; Ruff, compilation Python et git diff --check PASS.
+6. **Critères d'acceptation** : neuf crashes réels en nouveaux processus ; position MNQ non nulle,
+   outbox/inbox/effets/ACK restaurés ; retry sans nouveau fill ; dépassement +2 refusé par le risque ;
+   replay identique à une référence ; corruptions, faux ACK, autorités absentes/étrangères,
+   outcome étranger et stale writer refusés ; handler obligatoire COMPLETED séparément.
+7. **Risques de surapprentissage** : aucun PnL, paramètre ou signal ; uniquement MNQ synthétique,
+   quantité 1 et test de refus +2. OOS et stratégie personnelle non lus et non modifiés.
+8. **Ticket Codex** : implémentation et revue locales terminées sur
+   feature/post-sink-b3-l5-recovery-v1. Deux nouveaux fichiers code/tests et quatre checkpoints.
+   Aucun commit, push, PR ou fusion effectué.
+9. **Verdict** : BLOCKED_HUMAN_GATE — L5_RECOVERY_COMMIT_AUTHORIZATION.
+
+Limites conservées : profil offline borné de D001, pas bootstrap RuntimeEngine global ; le CAS
+borne la publication mais les sinks doivent rester idempotents ; rollback cohérent de toute la
+base détectable seulement avec L5RecoveryAnchor conservée indépendamment.

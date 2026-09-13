@@ -67,3 +67,51 @@
 - STOP avant commit conformément à la gate utilisateur ; aucune publication/fusion.
   Demande précise : autoriser le commit local du diff D002 et des quatre checkpoints.
   Push/PR/fusion restent distincts. V1_VALIDATED_OFFLINE_PAPER non atteint.
+
+
+## 2026-09-12 — D002 intégrée, reprise automatique
+
+- Autorisations utilisateur successives : commit, publication/PR draft, puis ready/merge.
+- PR #240 head revérifié 242991685f8f23268a9bc7e0456528afed43dddf, CI #161 success.
+- Fusion avec garde expected_head_sha, résultat merged=true :
+  d52e9212eadac55e9d3d24482fd744ca54839771.
+- Main distant relu via GitHub puis git fetch origin main réussi ; FETCH_HEAD identique.
+- Worktree dédié créé sur ce SHA : feature/post-sink-b3-l5-recovery-v1.
+- Ticket de reconstruction confié à Codex ; parent supervise preuves et checkpoints.
+- D002 n'est pas recommencée. D001 reste approuvée. Aucun autre commit autorisé à ce stade.
+
+
+## 2026-09-13 — Reprise exacte après PR #240
+
+- GitHub main relu : d52e9212eadac55e9d3d24482fd744ca54839771 ; PR #240 merged=true.
+- Checkpoint indiquait encore implémentation ; code local présent en deux nouveaux fichiers,
+  sans commit : sqlite_l5_recovery.py et test_sqlite_l5_recovery.py.
+- Ancien log ciblé retrouvé : 16 passed in 16.94s. D002 non recommencée.
+- Suite avant renforcement des preuves mémoire : 5884 passed, 6 warnings in 79.65s.
+  Ce résultat ne valide pas le correctif supplémentaire en cours.
+- Revue statique précédente : outcome étranger et ACK forgé désormais refusés avant persist.
+- Revue finale a reproduit un défaut supplémentaire : crash after_effect exit73,
+  suppression d'une ligne mémoire synthétique, retry exit0 avec ACK et mémoire vide.
+  Correction dans le module de récupération : preuve mémoire exacte en lecture seule requise
+  à la reprise et avant publication des effets terminés ; preuve EventBus requise même sans ACK.
+- Aucun changement ExecutionAgent/D002, Risk Engine, stratégie, OOS ou NinjaTrader.
+- Autorisation du 2026-09-13 : implémentation/tests/checkpoints seulement ; STOP avant commit.
+
+## 2026-09-13 — L5 recovery finalisée localement
+
+- Correction de la lacune reproduite : un effet mémoire marqué terminé ne peut plus être repris
+  si la ligne SQL D002 exacte (effect_id, payload_hash, payload, métadonnées, timestamp) manque.
+- La preuve EventBus exacte est également requise pour un effet bus terminé, même avant ACK.
+- Fixture de reprise durcie : elle n'initialise plus silencieusement une base mémoire absente.
+- Tests ciblés finaux : 24 passed in 23.27s. Neuf points de crash, nouveaux processus,
+  référence indépendante, position MNQ restaurée, retry sans fill supplémentaire, refus risque +2,
+  corruption rehashée, stale writer, faux ACK, outcome étranger et autorités incohérentes.
+- Handler idempotent mémoire exécuté jusqu'à livraison/émission COMPLETED ; replay après achèvement OK.
+- Suite finale sur le même arbre : 5892 passed, 6 warnings in 77.02s (exit 0).
+- Warnings : dépréciations Starlette/httpx/anyio et adaptateur datetime SQLite ; aucune erreur.
+- Ruff : All checks passed. py_compile et git diff --check : exit 0.
+- SHA-256 code : 4e64a636d02a617629a82fffbd0e7c84070b7f9319f948c00205405f3af07701.
+- SHA-256 test : 2de24c8930af6a5695fd4a0cdb4715fdbd3fa8d66a385f167d3134d3e1a7f1b6.
+- Revue indépendante : outcome étranger et ACK forgé détectés puis corrigés ; CAS/bootstrap relus.
+- Sécurité : fichiers Risk/OOS/stratégie/data/NinjaTrader inchangés ; aucun broker, secret ou ordre réel.
+- Arrêt obligatoire avant commit. Gate : L5_RECOVERY_COMMIT_AUTHORIZATION.
