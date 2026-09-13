@@ -115,3 +115,23 @@
 - Revue indépendante : outcome étranger et ACK forgé détectés puis corrigés ; CAS/bootstrap relus.
 - Sécurité : fichiers Risk/OOS/stratégie/data/NinjaTrader inchangés ; aucun broker, secret ou ordre réel.
 - Arrêt obligatoire avant commit. Gate : L5_RECOVERY_COMMIT_AUTHORIZATION.
+
+## 2026-09-13 — Publication et fusion de L5 recovery
+
+- Commit local autorisé et créé : f3a44868523f92c5ef36ad9df50411aec9bba3d9 ; arbre
+  e95abdedc2183b22b97d323135db420e17290854 ; worktree propre.
+- Push HTTPS exact refusé avant transfert faute d'identifiant Git local. Aucun secret demandé ou exposé.
+- Option B autorisée : six blobs recréés via le connecteur GitHub et comparés un à un aux blobs locaux.
+  Arbre distant obtenu : e95abdedc2183b22b97d323135db420e17290854, identique à l'arbre testé.
+- Commit distant équivalent : b1e5e37080e88f755353bb6cd1f7b5fcf4d26811, parent
+  d52e9212eadac55e9d3d24482fd744ca54839771, même message et exactement six fichiers.
+- PR #241 créée en brouillon, 892 ajouts et 51 suppressions ; CI AGIcore #163
+  (run 34780120469) success, tests et contrôle whitespace réussis.
+- Passage Ready autorisé séparément ; PR ouverte, mergeable=true et mergeable_state=clean.
+- Fusion autorisée avec expected_head_sha b1e5e37080e88f755353bb6cd1f7b5fcf4d26811.
+  Résultat : merged=true, merge 6c3c6bb5299e0fe8ee6db646e94b79fb4bed45df.
+- Main distant et FETCH_HEAD vérifiés sur ce merge ; parents d52e9212 et b1e5e370 ; arbre e95abded
+  inchangé. Aucun workflow post-fusion distinct déclenché ; la preuve CI est le run PR #163.
+- Aucun changement Risk Engine, D002, stratégie, OOS, data/, NinjaTrader, broker ou ordre réel.
+- Worktree documentaire créé depuis le merge sur chore/post-l5-recovery-checkpoint-sync.
+  STOP avant commit du checkpoint post-fusion.

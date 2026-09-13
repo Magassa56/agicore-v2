@@ -16,10 +16,12 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
 4. Implémentation de la composition approuvée, identité persistante, reprise complète,
    ACK après acceptation durable et achèvement séparé. Injection de crash à chaque frontière.
    Première correction : effet mémoire direct canonique idempotent (D002), fusionnée via PR #240.
-   Reconstruction L5/outbox/inbox implémentée et testée localement le 2026-09-13 ; diff non commité
-   en attente de la gate humaine. Ce résultat vaut pour le profil offline borné approuvé par D001.
+   Reconstruction L5/outbox/inbox intégrée le 2026-09-13 par PR #241, merge
+   6c3c6bb5299e0fe8ee6db646e94b79fb4bed45df ; CI #163 success. Ce résultat vaut pour le profil
+   offline borné approuvé par D001 et ne démontre pas encore la reprise du runtime global complet.
 5. Replay offline MNQ synthétique avec risque inchangé, rejets, conflits, doublons,
    dépassements de quantité et reprise sans double effet. Comparaison indépendante des journaux.
+   Les tests de PR #241 couvrent la tranche L5 de ces preuves ; la Gate 5 globale reste à auditer.
 6. Provenance des données de développement et protocole quantitatif figé ; les expériences
    rejetées restent rejetées. Aucun nouvel OOS sans réservation préalable.
 7. Paper local simulé borné, persistant, reproductible ; revue humaine avant intégration sensible.
