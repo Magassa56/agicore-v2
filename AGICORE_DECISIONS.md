@@ -103,7 +103,7 @@ Précondition du ticket L5-RECOVERY levée. D001 couvre le profil offline explic
 Les trois autorisations D002 sont consommées pour D002 uniquement ; prochain diff soumis
 à revue humaine avant commit. Aucun changement du Risk Engine, OOS, data/ ou broker.
 
-## Résultat local — POST-SINK-B3-L5-RECOVERY-V1 (2026-09-13)
+## Résultat intégré — POST-SINK-B3-L5-RECOVERY-V1 (2026-09-13)
 
 1. **Faits observés** : main d52e9212 après fusion PR #240. Le store L5, son outbox et
    les inbox étaient en RAM. Les validateurs de replay existaient déjà. Le premier diff local
@@ -124,11 +124,20 @@ Les trois autorisations D002 sont consommées pour D002 uniquement ; prochain di
    outcome étranger et stale writer refusés ; handler obligatoire COMPLETED séparément.
 7. **Risques de surapprentissage** : aucun PnL, paramètre ou signal ; uniquement MNQ synthétique,
    quantité 1 et test de refus +2. OOS et stratégie personnelle non lus et non modifiés.
-8. **Ticket Codex** : implémentation et revue locales terminées sur
-   feature/post-sink-b3-l5-recovery-v1. Deux nouveaux fichiers code/tests et quatre checkpoints.
-   Aucun commit, push, PR ou fusion effectué.
-9. **Verdict** : BLOCKED_HUMAN_GATE — L5_RECOVERY_COMMIT_AUTHORIZATION.
+8. **Ticket Codex** : implémentation et revue terminées sur
+   feature/post-sink-b3-l5-recovery-v1. Deux nouveaux fichiers code/tests et quatre checkpoints
+   intégrés par PR #241 ; head b1e5e37080e88f755353bb6cd1f7b5fcf4d26811, CI #163 success,
+   merge 6c3c6bb5299e0fe8ee6db646e94b79fb4bed45df.
+9. **Verdict** : L5_RECOVERY_MERGED_AND_VERIFIED — profil offline borné accepté ;
+   V1_VALIDATED_OFFLINE_PAPER non atteint.
 
 Limites conservées : profil offline borné de D001, pas bootstrap RuntimeEngine global ; le CAS
 borne la publication mais les sinks doivent rester idempotents ; rollback cohérent de toute la
 base détectable seulement avec L5RecoveryAnchor conservée indépendamment.
+
+## Gate après intégration L5 recovery
+
+Les autorisations commit, publication par connecteur, passage Ready et fusion de la PR #241
+ont été données séparément puis consommées. La prochaine étape produit est la Gate 5 du replay
+offline global ; elle n'est ni démarrée ni autorisée par cette synchronisation documentaire.
+Le présent diff de checkpoint doit être revu avant tout commit, push ou PR.
