@@ -135,9 +135,44 @@ Limites conservées : profil offline borné de D001, pas bootstrap RuntimeEngine
 borne la publication mais les sinks doivent rester idempotents ; rollback cohérent de toute la
 base détectable seulement avec L5RecoveryAnchor conservée indépendamment.
 
-## Gate après intégration L5 recovery
+## Gate historique après intégration L5 recovery — consommée
 
 Les autorisations commit, publication par connecteur, passage Ready et fusion de la PR #241
-ont été données séparément puis consommées. La prochaine étape produit est la Gate 5 du replay
-offline global ; elle n'est ni démarrée ni autorisée par cette synchronisation documentaire.
-Le présent diff de checkpoint doit être revu avant tout commit, push ou PR.
+ont été données séparément puis consommées. La synchronisation documentaire a ensuite été
+intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est auditée ci-dessous.
+
+## Résultat audité — GATE-5-OFFLINE-REPLAY-D001 (2026-09-13)
+
+1. **Faits observés** : PR #242 et CI #165 sont intégrées par le merge
+   d41103265f3afc5e324a01d45dd66b14bea0d148. Le test de PR #241 compose déjà les autorités
+   L5/outbox/inbox, ExecutionService, ExecutionAgent, mémoire SQLite et EventBus du profil D001.
+2. **Problème audité** : les checkpoints distinguaient la tranche L5 testée d'une Gate 5 dite
+   « globale », sans établir si une preuve supplémentaire était réellement requise dans D001.
+3. **Hypothèse unique** : les critères Gate 5 sont satisfaits si chaque composant obligatoire D001
+   est recréé après crash, si les retries sont sans double effet et si les journaux égalent une référence.
+4. **Modification** : aucune modification runtime. Audit des assertions intégrées et mise à jour
+   documentaire uniquement ; RuntimeEngine, SignalLoopOrchestrator et RuntimeEventBridge restent exclus.
+5. **Tests** : `tests/integration/test_sqlite_l5_recovery.py` relancé sur d41103265 :
+   24 passed in 30.01s. Suite complète de la branche : 5892 passed, 6 warnings in 114.32s.
+   La suite de l'arbre de PR #241 était déjà 5892 passed, 6 warnings in 77.02s.
+6. **Acceptation** : neuf crashes `os._exit(73)` en processus neufs ; position MNQ = 1 restaurée ;
+   retry du même intent avec un seul ordre/fill/effet ; refus MNQ +2 ; autorités, manifeste,
+   corruption, stale writer, outcome et ACK incohérents refusés ; document L5 et effet mémoire
+   égaux à une exécution indépendante de référence.
+7. **Surapprentissage** : aucune donnée de marché, stratégie, métrique ou OOS ; fixtures MNQ synthétiques.
+8. **Portée** : PASS pour le profil offline borné D001 uniquement. Ce verdict ne certifie ni le
+   RuntimeEngine global, ni les composants explicitement exclus par D001, ni une performance de stratégie.
+9. **Verdict** : GATE_5_D001_PROFILE_VERIFIED. V1_VALIDATED_OFFLINE_PAPER non atteint.
+
+## D003 — Contrat de provenance MNQ avant protocole quantitatif
+
+1. **Faits observés** : aucun document suivi ne fige la sémantique des timestamps exportés,
+   le rollover, le volume et le calendrier de séances/jours fériés du futur jeu de développement.
+2. **Problème** : sans ces métadonnées et sans hash/frontières, causalité, reproductibilité et
+   séparation OOS ne peuvent pas être prouvées sans hypothèse implicite.
+3. **Décision requise** : fournir ou approuver un contrat traçable précisant : timestamp de barre
+   et fuseau/DST ; contrat/rollover ; OHLCV/volume ; sessions, jours fériés et clôtures anticipées ;
+   hash, période et frontières du jeu de développement permis et de l'OOS réservé.
+4. **Périmètre actuel** : aucune lecture de `data/`, aucun accès OOS, aucune intervention NinjaTrader,
+   aucun changement Risk Engine ou stratégie. Ces interdictions restent actives.
+5. **Verdict** : BLOCKED_HUMAN_GATE — G6_MNQ_PROVENANCE_CONTRACT.
