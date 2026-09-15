@@ -156,3 +156,29 @@
 - Aucun changement runtime nécessaire. Aucun accès `data/`, OOS, secret, broker, compte,
   NinjaTrader ou ordre réel ; Risk Engine et stratégie inchangés.
 - Gate 5 : GATE_5_D001_PROFILE_VERIFIED. Prochaine gate : contrat de provenance D003.
+
+## 2026-09-15 — D003_NQ_MNQ_LINEAGE_READONLY
+
+- Reprise depuis main 111c23657a4614c38c73d6bbbd51605c4fec80af, merge PR #243 ; lecture des quatre
+  checkpoints et du cadre de confidentialité. Checkout documentaire isolé et propre avant modification.
+- D002, SINK-B3 et Gate 5 conservés sans réexécution. Autorisations Git permanentes appliquées.
+- Archive existante récupérée dans le périmètre autorisé : SHA-256 conforme à la déclaration ;
+  neuf membres, CRC ZIP valides. Aucun nouveau téléchargement de données de marché.
+- Audit local sans émission de valeurs de marché : tailles, nombre de lignes et timestamps vérifiés ;
+  aucun en-tête dans les neuf membres. Un pas dominant de 60 secondes est observé, sans en déduire un contrat
+  de granularité, de timestamp ou de fuseau. Identité réelle de chaque contrat UNKNOWN.
+- Disque Windows inaccessible ; extraction antérieure de 83 manifestes retrouvée et analysée,
+  sans reconstitution humaine ni prétention de relecture des originaux. 66 run_id distincts ;
+  doublons conservés ; neuf champs intégralement UNKNOWN, dont toute la provenance amont.
+- 145 manifestes locaux supplémentaires examinés séparément ; zéro correspondance directe avec
+  les neuf hashes de membres. Zéro correspondance également dans les 83 enregistrements historiques.
+  Les entrées multifichiers restent des listes : aucune association filename/hash inventée.
+- Registre historique retrouvé avec le candidat et son hash déclaré ; exposition antérieure consignée.
+  Le contrat de session local ne contient pas de liaison par hash aux sources et rapports.
+- Manifeste privé : 239 entrées, chacune limitée aux douze champs autorisés ; ordre : 83 historiques,
+  145 locales, archive, neuf membres, candidat. Champs de provenance absents UNKNOWN ; l'archive
+  n'est pas inventée comme parent_dataset_sha256. Hash du candidat non vérifié donc input_sha256 UNKNOWN.
+- Vérifications locales PASS : schéma, absence de valeurs de marché, hash archive, CRC et rapprochements.
+  Périmètre Git : quatre checkpoints uniquement ; aucun export, rapport privé, prix, secret ou chemin
+  personnel publié. Revue du diff et CI de PR obligatoires avant fusion selon le mandat permanent.
+- Verdict D003 : BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED. Action unique consignée dans CURRENT_STATE.

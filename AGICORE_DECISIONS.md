@@ -176,3 +176,32 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
 4. **Périmètre actuel** : aucune lecture de `data/`, aucun accès OOS, aucune intervention NinjaTrader,
    aucun changement Risk Engine ou stratégie. Ces interdictions restent actives.
 5. **Verdict** : BLOCKED_HUMAN_GATE — G6_MNQ_PROVENANCE_CONTRACT.
+
+## D003 — Audit de filiation en lecture seule (2026-09-15)
+
+- Autorisation spécifique : récupérer l'archive déjà existante et examiner localement ses octets
+  pour en extraire seulement des métadonnées assainies. Aucun nouveau dataset, remplacement,
+  téléchargement de marché, accès NinjaTrader/broker, replay de marché ou changement OOS.
+- Autorisation Git permanente : commits, branches, push, PR et fusion documentaires sans nouvelle
+  confirmation après revue du diff exact, vérifications concernées, diff-check, CI et absence de
+  conflits, secrets ou fichiers inattendus. Les anciennes attentes Git de D001/D002 sont historiques.
+- Frontières métier conservées : données, OOS, stratégie, Risk Engine et trading réel nécessitent
+  leurs preuves et une décision spécifique. Aucun changement de ces domaines dans cette phase.
+- Archive : hash vérifié, neuf membres distincts, intégrité ZIP contrôlée ; classification
+  EXPOSED_DEVELOPMENT obligatoire, jamais holdout ni preuve de performance indépendante.
+- Sources de rapports : 83 enregistrements issus d'une extraction antérieure complète conservée,
+  et 145 manifestes locaux supplémentaires lisibles. Les 83 originaux Windows ne sont pas accessibles.
+  Aucune déduplication ni assimilation de ces populations. Leurs champs absents restent UNKNOWN.
+- Filiation : zéro correspondance directe des hashes de membres avec les input_sha256 des rapports ;
+  aucune chaîne source/transformation/parent documentée dans ces enregistrements. Une absence de
+  correspondance des octets ne démontre pas l'absence d'une transformation historique.
+- Identité : tous les contract_id restent UNKNOWN. Les noms NQ_* restent LEGACY_NQ_UNVERIFIED ;
+  les rapports localement étiquetés MNQ ne sont pas validés par leur nom ou leur modèle de coût.
+- Registre retrouvé : le candidat séparé porte déjà une classification historique d'exposition ;
+  sa mention et son hash déclaré ne le relient pas cryptographiquement au pipeline.
+  CANDIDATE_MNQ_NOT_LINKED reste applicable, sans réaffectation OOS ni nouvelle lecture de ses prix.
+- Vérifications D003 : hash archive, CRC ZIP, inventaire exact, tailles, lignes, structure et timestamps,
+  rapprochements de hashes et schéma privé de douze champs. Aucune nouvelle mesure de performance.
+- Verdict : BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED ; V1_VALIDATED_OFFLINE_PAPER non atteint.
+- Action unique : joindre une preuve d'export/transformation existante, assainie, reliant un membre
+  de l'archive par SHA-256 à un input_sha256 de rapport, avec identité de contrat attestée.
