@@ -29,6 +29,10 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
    rejetées restent rejetées. Aucun nouvel OOS sans réservation préalable.
    BLOCKED_HUMAN_GATE : D003 doit fixer timestamps/fuseau/DST, rollover/contrats, OHLCV/volume,
    sessions/jours fériés/clôtures anticipées, hash/période et frontières développement/OOS.
+   Audit D003 en lecture seule du 2026-09-15 : D003_NQ_MNQ_LINEAGE_REQUIRED, BLOCKED.
+   Archive existante EXPOSED_DEVELOPMENT ; anciens résultats NQ classés LEGACY_NQ_UNVERIFIED.
+   Aucun lien cryptographique source/rapport ni identité réelle de contrat établi ; candidat séparé
+   CANDIDATE_MNQ_NOT_LINKED. Aucun replay ni nouveau dataset pour combler cette absence de preuve.
 7. Paper local simulé borné, persistant, reproductible ; revue humaine avant intégration sensible.
 8. Documentation, preuves de CI/tests/replay et rapport final sans revendication de rentabilité
    non démontrée. V1_READY_FOR_HUMAN_GATE puis V1_VALIDATED_OFFLINE_PAPER seulement sur preuves.
@@ -36,7 +40,10 @@ AGICORE_DECISIONS.md et AGICORE_RUN_LOG.md à chaque reprise, puis vérifier Git
 ## Continuité
 
 Exécuter automatiquement les tâches non bloquées. Mettre à jour l'état et le journal après
-chaque tâche. Aucun passage automatique d'une gate architecturale ou fusion sensible.
+chaque tâche. Autorisation Git permanente du 2026-09-15 : commits, branches, push, PR et fusion
+après revue du diff exact, tests concernés, diff-check, CI verte et contrôle des conflits/secrets/périmètre.
+Arrêt seulement à une vraie gate métier : données, OOS, stratégie, Risk Engine ou trading réel ;
+aucune validation V1 sans preuves complètes. Aucun force-push ni réécriture d'historique.
 Les tests de composants verts ne constituent pas une preuve de reprise de tout le runtime.
 
 La stratégie personnelle EMA pullback (pente, croisement MACD, sortie à clôture sous EMA20)

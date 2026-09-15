@@ -1,9 +1,9 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-13 UTC.
-Statut : BLOCKED_HUMAN_GATE — Gate 5 validée pour le profil offline D001 ; contrat de provenance Gate 6 absent.
-Branche de vérification : feature/gate5-global-offline-replay-v1.
-Base GitHub vérifiée et récupérée : d41103265f3afc5e324a01d45dd66b14bea0d148.
+Date : 2026-09-15 UTC.
+Statut : BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED.
+Branche de vérification : docs/d003-nq-mnq-lineage-readonly-v1.
+Base GitHub vérifiée et récupérée : 111c23657a4614c38c73d6bbbd51605c4fec80af.
 
 ## Acquis vérifiés
 
@@ -51,8 +51,30 @@ garantie, conformément à D001 ; « Gate 5 validée » ne signifie pas runtime 
 
 ## Gate actuelle
 
-BLOCKED_HUMAN_GATE — G6_MNQ_PROVENANCE_CONTRACT. Avant toute lecture de donnée, utilisation OOS
-ou intervention NinjaTrader, fournir un contrat traçable pour un jeu de développement permis :
+BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED. L'audit D003_NQ_MNQ_LINEAGE_READONLY est autorisé ;
+les opérations Git documentaires sont couvertes par l'autorisation permanente du 2026-09-15.
+La Gate 5 est intégrée par PR #243 sur la base ci-dessus ; D002, SINK-B3 et Gate 5 ne sont pas recommencés.
+
+L'archive existante autorisée a un SHA-256 recalculé conforme à la déclaration et contient neuf fichiers.
+Elle et ses membres restent EXPOSED_DEVELOPMENT, sans admissibilité comme holdout OOS ou preuve indépendante.
+Le disque Windows de rapports n'est pas accessible dans cet environnement. Une extraction assainie
+conservée contient les 83 entrées historiques ; leurs originaux n'ont pas été relus. Les doublons sont
+conservés. Les 145 manifestes locaux supplémentaires ont été lus séparément et ne remplacent pas ces 83.
+Aucun hash des neuf membres ne correspond directement aux input_sha256 de ces deux ensembles.
+Aucun des 228 enregistrements ne fournit source_raw_sha256, parent_dataset_sha256 ou commande de transformation.
+Cette absence de lien direct ne prouve pas une différence de contenu économique après transformation.
+
+Les entrées NQ_* restent LEGACY_NQ_UNVERIFIED et ne deviennent pas des preuves MNQ.
+L'identité réelle des contrats reste UNKNOWN : nom, étiquette et coût ne sont pas des preuves.
+Le candidat séparé reste CANDIDATE_MNQ_NOT_LINKED ; le registre historique le classe déjà comme exposé.
+Son hash est documentaire, non recalculé dans cet audit ; aucun fichier de données du candidat/OOS n'a été ouvert.
+Le manifeste privé assaini contient uniquement les douze champs autorisés, sans prix ni ligne OHLCV.
+Les exports, le registre privé et le manifeste détaillé ne sont pas versionnés dans ce dépôt public.
+
+Action unique pour débloquer D003 : joindre une preuve d'export/transformation existante, assainie,
+reliant un membre de l'archive par SHA-256 à un input_sha256 de rapport, avec identité de contrat attestée.
+Ne pas reconstruire une preuve à partir des noms, ni créer un dataset ou relancer une expérience.
+Le contrat G6 de provenance reste également requis avant tout protocole quantitatif :
 sémantique des timestamps de barres et fuseau/DST ; règle de rollover et identité des contrats ;
 sémantique OHLCV/volume ; calendrier de sessions, jours fériés et clôtures anticipées ; hash,
 période et frontières garantissant que l'OOS reste réservé. Aucun de ces éléments ne peut être
