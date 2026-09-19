@@ -1,0 +1,52 @@
+{
+  "phase": "DATASET_LINEAGE_MANIFEST_V1",
+  "status": "BLOCKED_HUMAN_GATE",
+  "gate": "CLEAN_LINEAGE_SOURCE_EVIDENCE",
+  "source_filename": "MNQ 06-26.Last.txt",
+  "source_sha256": "46f2e42304573bd5e9a6c8c78a83a3cd655d493c9c1c0dc66fa2ed7406793b40",
+  "structural_validation": "PASS",
+  "contract_validation": "NOT_SUBMITTED_FAIL_CLOSED",
+  "missing_field": [
+    "contract_identity_evidence",
+    "source_provider",
+    "source_software_version",
+    "acquisition_timestamp_utc",
+    "timestamp_semantics",
+    "timezone_name",
+    "dst_policy",
+    "session_calendar",
+    "holiday_calendar",
+    "rollover_policy",
+    "ohlcv_semantics",
+    "volume_semantics",
+    "transformation_command_or_verified_raw_root"
+  ],
+  "required_evidence": "One sanitized, hashable NinjaTrader source-evidence bundle linked to this exact RAW SHA-256.",
+  "why_current_evidence_is_insufficient": "The source has no header, instrument identifier, timezone or provenance metadata. Its filename and supplied governance declaration cannot attest contract identity, provider, exporter version, export settings or untouched-RAW status.",
+  "exact_human_action_required": "Upload one sanitized bundle containing the original NinjaTrader Historical Data export screen for MNQ 06-26 Minute Last, Help/About version, actual data-provider connection, platform/export timezone, instrument DoNotMerge and Trading Hours settings; in the same bundle include a receipt binding the screens to this RAW SHA-256 and recording UTC export time, bar timestamp semantics, exported-file IANA timezone/DST policy, holiday calendar, OHLC/volume semantics and whether the file was rewritten; mask accounts and prices.",
+  "repository_validation": {
+    "dataset_lineage_targeted_tests": "17 passed in 0.06s",
+    "full_test_suite": "5909 passed, 6 warnings in 88.83s",
+    "ruff_lineage_scope": "PASS",
+    "ruff_whole_repository": "BASELINE_FAIL_1494_EXISTING_FINDINGS",
+    "changed_python_files": 0,
+    "py_compile": "PASS",
+    "json_csv_validation": "PASS",
+    "market_row_scan": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "privacy": {
+    "market_rows_published": 0,
+    "prices_published": 0,
+    "oos_accessed": false,
+    "raw_file_added_to_git": false
+  },
+  "non_claims": [
+    "PROVENANCE_CONFIRMED",
+    "TICK_VALIDATED",
+    "REPLAY_VALIDATED",
+    "EXECUTION_VALIDATED",
+    "STRATEGY_VALIDATED",
+    "V1_VALIDATED_OFFLINE_PAPER"
+  ]
+}

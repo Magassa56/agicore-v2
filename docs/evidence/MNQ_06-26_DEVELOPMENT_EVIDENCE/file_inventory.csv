@@ -1,0 +1,2 @@
+logical_role,filename,sha256,size_bytes,row_count,contains_market_data,git_tracked,authorized_role,exposure_state
+SOURCE_RAW,MNQ 06-26.Last.txt,46f2e42304573bd5e9a6c8c78a83a3cd655d493c9c1c0dc66fa2ed7406793b40,2265516,42541,true,false,DEVELOPMENT,EXPOSED_DEVELOPMENT
