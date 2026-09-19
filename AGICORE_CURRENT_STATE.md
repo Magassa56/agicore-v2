@@ -1,9 +1,9 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-19 UTC.
-Statut : EXPERIMENTAL — lignées NQ et MNQ indépendantes ; D003 legacy = BLOCKED_PROVENANCE.
-Branche de vérification : feature/nq-mnq-independent-lineages-v1.
-Base GitHub vérifiée et récupérée : 61643be37ba70f18286e9be8baefc168eba713f3.
+Statut : BLOCKED_HUMAN_GATE — CLEAN_LINEAGE_SOURCE_EVIDENCE ; D003 legacy = BLOCKED_PROVENANCE.
+Branche de vérification : feature/post-dataset-lineage-checkpoint-v1.
+Base GitHub vérifiée et récupérée : 17c747d005e2b6699b04bc19fe70267dfe5a2557.
 
 ## Acquis vérifiés
 
@@ -25,6 +25,13 @@ Base GitHub vérifiée et récupérée : 61643be37ba70f18286e9be8baefc168eba713f
 - Audit de filiation D003 intégré par PR #244 : head c5654d7d39bf67ecafb2a26c01d86d2ae783b3d3,
   CI #169 (run 34995972384) success, merge 61643be37ba70f18286e9be8baefc168eba713f3,
   arbre 1e1ede4b6517b01f1b521ffadbdf7188a3fe1368.
+- Séparation NQ/MNQ intégrée par PR #245 : head 674065adde62e35f3430b24d77105d68e4fd252b,
+  CI #171 (run 35435261872) success, merge a2a64fd921a0f288796788c3837bbab7c6df63f6,
+  arbre 385264bd09aa9e18a91f9330f4638c00d51dd89a.
+- Contrat DATASET_LINEAGE_MANIFEST_V1 intégré par PR #246 : head
+  93b7fc22ea86b8f7befe3ab015f51339ec90f9b4, CI #173 (run 35436126126) success,
+  merge 17c747d005e2b6699b04bc19fe70267dfe5a2557,
+  arbre 7944221d3b263c44282bbbe0351c35c520a24483.
 
 ## Gate 5 auditée
 
@@ -97,7 +104,7 @@ EMA_PULLBACK_V1 sera ensuite formalisée puis validée séparément comme EMA_PU
 EMA_PULLBACK_V1_MNQ. Toute règle métier ambiguë impose une gate stratégie avant implémentation.
 V1_VALIDATED_OFFLINE_PAPER n'est pas atteint.
 
-## Contrat de nouvelle lignée préparé
+## Contrat de nouvelle lignée intégré
 
 La tranche DATASET_LINEAGE_MANIFEST_V1 ajoute un contrat de métadonnées déterministe et fail-closed.
 Elle exige instrument explicite, preuve d'identité du contrat hashée, source/exporteur/version/date,
@@ -109,13 +116,16 @@ OOS_TEST exige une source UNEXPOSED, un accès SEALED et une frontière dédiée
 alimenter à la fois OOS et développement. Le validateur ne lit aucun dataset : son PASS structurel
 n'est ni une preuve d'instrument, ni PROVENANCE_CONFIRMED, ni une validation de stratégie.
 
-Preuves locales sur la branche feature/dataset-lineage-manifest-v1 : 17 tests ciblés PASS ;
-suite complète 5909 passed, 6 warnings in 110.62s ; Ruff, py_compile et git diff --check PASS.
-La fusion de cette tranche reste conditionnée à la CI du head publié.
+Preuves locales : 17 tests ciblés PASS en 0.10s ; suite complète 5909 passed, 6 warnings
+in 110.62s ; Ruff, py_compile et git diff --check PASS. CI #173 sur le head exact :
+5909 passed, 6 warnings in 132.04s ; contrôle whitespace PASS. L'arbre fusionné est identique
+à l'arbre local testé et à l'arbre publié.
 
-Prochaine gate métier : BLOCKED_HUMAN_GATE — CLEAN_LINEAGE_SOURCE_EVIDENCE. Fournir pour une
-nouvelle lignée NQ ou MNQ une preuve technique assainie et vérifiable qui renseigne réellement les
-champs obligatoires ; les valeurs UNKNOWN ne sont pas acceptées. Ne pas ouvrir ni reclasser l'OOS.
+Action unique de la gate CLEAN_LINEAGE_SOURCE_EVIDENCE : fournir le dossier technique assaini
+d'un nouvel export MNQ destiné à DEVELOPMENT — source/fournisseur, logiciel/version, date UTC,
+contract_id et preuve d'identité hashée, intervalle, timestamp/fuseau/DST, rollover, OHLCV/volume,
+sessions/jours fériés, nom/hash source et transformation/parent. Les octets de marché restent privés ;
+les valeurs UNKNOWN ne sont pas acceptées. Ne pas ouvrir, déplacer ni reclasser l'OOS.
 
 ## Limites du produit
 
