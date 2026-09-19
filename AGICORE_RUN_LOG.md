@@ -200,3 +200,26 @@
   aucun accès OOS, acquisition de données, replay, modification de stratégie ou du Risk Engine.
 - Prochaine tranche autorisée sans gate métier : contrat de manifeste et validation technique des
   nouvelles lignées. La formalisation des règles ambiguës EMA_PULLBACK_V1 restera une gate stratégie.
+
+## 2026-09-19 — DATASET_LINEAGE_MANIFEST_V1
+
+- Reprise depuis main a2a64fd921a0f288796788c3837bbab7c6df63f6, merge PR #245 ; arbre
+  385264bd09aa9e18a91f9330f4638c00d51dd89a. Nouvelle branche dédiée et état initial propre.
+- Audit du code : de nombreux manifestes de résultats existent, mais aucun contrat central ne lie
+  source, instrument, preuve du contrat, transformation, parent, rôle et règles d'exposition OOS.
+- Ajout d'un contrat immutable et canonique de métadonnées. Il ne lit ni fichier, ni ligne OHLCV,
+  et ne transforme pas une assertion instrument en preuve. Les champs requis UNKNOWN sont refusés.
+- Séparation fail-closed : un même hash source ne peut être NQ et MNQ ; parents et lignées croisés,
+  réutilisation d'un dataset enregistré comme source brute de l'autre instrument, doublons,
+  parents absents, cycles et manifests préparés forgés sont refusés.
+- Protection OOS : rôle OOS_TEST limité à UNEXPOSED + SEALED + frontière explicite ; mélange d'une
+  même source entre OOS et rôle non-OOS refusé. Archive historique inchangée EXPOSED_DEVELOPMENT.
+- Revue intermédiaire : reproduction puis fermeture d'un contournement où le hash d'un dataset MNQ
+  enregistré pouvait être redéclaré comme source brute NQ sans passer par le contrôle parent.
+- Tests ciblés : 17 passed in 0.10s. Suite complète : 5909 passed, 6 warnings in 110.62s.
+  Warnings connus : dépréciations Starlette/httpx/anyio et adaptateur datetime SQLite.
+- Ruff : All checks passed. py_compile et git diff --check : PASS.
+- Aucun dataset acquis/ouvert, aucun OOS lu/reclassé, aucun replay, prix, stratégie, Risk Engine,
+  NinjaTrader, broker, compte ou ordre réel utilisé ou modifié.
+- Prochaine gate métier après intégration : CLEAN_LINEAGE_SOURCE_EVIDENCE ; obtenir une preuve
+  technique assainie et vérifiable pour renseigner un premier manifeste NQ ou MNQ sans UNKNOWN.
