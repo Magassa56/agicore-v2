@@ -223,3 +223,20 @@
   NinjaTrader, broker, compte ou ordre réel utilisé ou modifié.
 - Prochaine gate métier après intégration : CLEAN_LINEAGE_SOURCE_EVIDENCE ; obtenir une preuve
   technique assainie et vérifiable pour renseigner un premier manifeste NQ ou MNQ sans UNKNOWN.
+
+## 2026-09-19 — Intégration DATASET_LINEAGE_MANIFEST_V1
+
+- Publication par objets GitHub, le push HTTPS ayant déjà été vérifié indisponible sans identifiant
+  local dans cette session. Les cinq blobs distants correspondent exactement aux blobs locaux ;
+  arbre publié/testé
+  7944221d3b263c44282bbbe0351c35c520a24483.
+- Commit distant 93b7fc22ea86b8f7befe3ab015f51339ec90f9b4, parent
+  a2a64fd921a0f288796788c3837bbab7c6df63f6 ; PR #246 créée en brouillon puis passée Ready.
+- CI AGIcore #173 (run 35436126126) completed/success sur le head exact :
+  5909 passed, 6 warnings in 132.04s ; contrôle git diff --check PASS.
+- Revue pré-fusion : mergeable=true, base et head inchangés, exactement cinq fichiers attendus.
+  Fusion protégée par expected_head_sha ; merge 17c747d005e2b6699b04bc19fe70267dfe5a2557.
+- Main récupéré et vérifié : arbre 7944221d3b263c44282bbbe0351c35c520a24483,
+  identique à l'arbre local testé et à la PR ; parents a2a64fd9 et 93b7fc22.
+- Aucun dataset, OOS, prix, stratégie, Risk Engine, NinjaTrader, broker, compte ou ordre réel touché.
+- Arrêt à une vraie gate métier : BLOCKED_HUMAN_GATE — CLEAN_LINEAGE_SOURCE_EVIDENCE.
