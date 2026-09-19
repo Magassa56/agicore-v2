@@ -97,6 +97,26 @@ EMA_PULLBACK_V1 sera ensuite formalisée puis validée séparément comme EMA_PU
 EMA_PULLBACK_V1_MNQ. Toute règle métier ambiguë impose une gate stratégie avant implémentation.
 V1_VALIDATED_OFFLINE_PAPER n'est pas atteint.
 
+## Contrat de nouvelle lignée préparé
+
+La tranche DATASET_LINEAGE_MANIFEST_V1 ajoute un contrat de métadonnées déterministe et fail-closed.
+Elle exige instrument explicite, preuve d'identité du contrat hashée, source/exporteur/version/date,
+hashes source/dataset/parent, transformation, intervalle, timestamp/fuseau/DST, rollover, OHLCV/volume,
+sessions/calendrier et rôle. Elle sépare NQ de MNQ, refuse les parents croisés, doublons, cycles,
+parents absents et réutilisations inter-instruments d'un hash déjà enregistré.
+
+OOS_TEST exige une source UNEXPOSED, un accès SEALED et une frontière dédiée ; une source ne peut
+alimenter à la fois OOS et développement. Le validateur ne lit aucun dataset : son PASS structurel
+n'est ni une preuve d'instrument, ni PROVENANCE_CONFIRMED, ni une validation de stratégie.
+
+Preuves locales sur la branche feature/dataset-lineage-manifest-v1 : 17 tests ciblés PASS ;
+suite complète 5909 passed, 6 warnings in 110.62s ; Ruff, py_compile et git diff --check PASS.
+La fusion de cette tranche reste conditionnée à la CI du head publié.
+
+Prochaine gate métier : BLOCKED_HUMAN_GATE — CLEAN_LINEAGE_SOURCE_EVIDENCE. Fournir pour une
+nouvelle lignée NQ ou MNQ une preuve technique assainie et vérifiable qui renseigne réellement les
+champs obligatoires ; les valeurs UNKNOWN ne sont pas acceptées. Ne pas ouvrir ni reclasser l'OOS.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
