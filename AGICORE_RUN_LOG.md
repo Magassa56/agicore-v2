@@ -182,3 +182,21 @@
   Périmètre Git : quatre checkpoints uniquement ; aucun export, rapport privé, prix, secret ou chemin
   personnel publié. Revue du diff et CI de PR obligatoires avant fusion selon le mandat permanent.
 - Verdict D003 : BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED. Action unique consignée dans CURRENT_STATE.
+
+## 2026-09-19 — Reprise SRE et séparation des lignées NQ/MNQ
+
+- Deux exemplaires du nouveau mandat AGIcoreManager lus intégralement et comparés : contenus
+  octet pour octet identiques, SHA-256 ee96c539fa0971e57c1b9bf9f2a48454666c4ab67416f4592ec29a0c4f4f7f23.
+- GitHub vérifié avant modification : main = 61643be37ba70f18286e9be8baefc168eba713f3,
+  merge PR #244 ; arbre 1e1ede4b6517b01f1b521ffadbdf7188a3fe1368. Le commentaire final de
+  PR #244 confirme CI #169 success sur le head c5654d7d39bf67ecafb2a26c01d86d2ae783b3d3.
+- Branche dédiée feature/nq-mnq-independent-lineages-v1 créée depuis ce main ; état initial propre
+  et git diff --check PASS. SINK-B3, D002 et Gate 5 ne sont pas recommencés.
+- Décision explicite appliquée : NQ et MNQ deviennent deux filières de preuve indépendantes.
+  D003 demeure BLOCKED_PROVENANCE pour la lignée legacy MNQ mais ne bloque plus le projet entier.
+- Les faits de PR #244 sont immuables : aucun ancien résultat requalifié. Les noms NQ_* restent
+  insuffisants pour prouver NQ ; leur classification reste LEGACY_UNVERIFIED/UNKNOWN_INSTRUMENT.
+- L'archive connue conserve EXPOSED_DEVELOPMENT ; aucun changement de rôle, aucune lecture OHLCV,
+  aucun accès OOS, acquisition de données, replay, modification de stratégie ou du Risk Engine.
+- Prochaine tranche autorisée sans gate métier : contrat de manifeste et validation technique des
+  nouvelles lignées. La formalisation des règles ambiguës EMA_PULLBACK_V1 restera une gate stratégie.
