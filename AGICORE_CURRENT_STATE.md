@@ -1,9 +1,9 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-15 UTC.
-Statut : BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED.
-Branche de vérification : docs/d003-nq-mnq-lineage-readonly-v1.
-Base GitHub vérifiée et récupérée : 111c23657a4614c38c73d6bbbd51605c4fec80af.
+Date : 2026-09-19 UTC.
+Statut : EXPERIMENTAL — lignées NQ et MNQ indépendantes ; D003 legacy = BLOCKED_PROVENANCE.
+Branche de vérification : feature/nq-mnq-independent-lineages-v1.
+Base GitHub vérifiée et récupérée : 61643be37ba70f18286e9be8baefc168eba713f3.
 
 ## Acquis vérifiés
 
@@ -21,6 +21,10 @@ Base GitHub vérifiée et récupérée : 111c23657a4614c38c73d6bbbd51605c4fec80a
 - Checkpoint post-fusion intégré par PR #242 : head 0c8e895b6563ab4a790891d2d153738b85d8094e,
   CI #165 (run 34781880719) success, merge d41103265f3afc5e324a01d45dd66b14bea0d148,
   arbre d352e3daf60cae41bfe1935577f60b3b64fb8785.
+- Gate 5 intégrée par PR #243, merge 111c23657a4614c38c73d6bbbd51605c4fec80af.
+- Audit de filiation D003 intégré par PR #244 : head c5654d7d39bf67ecafb2a26c01d86d2ae783b3d3,
+  CI #169 (run 34995972384) success, merge 61643be37ba70f18286e9be8baefc168eba713f3,
+  arbre 1e1ede4b6517b01f1b521ffadbdf7188a3fe1368.
 
 ## Gate 5 auditée
 
@@ -49,11 +53,12 @@ garantie, conformément à D001 ; « Gate 5 validée » ne signifie pas runtime 
   impose un seul ordre, fill et effet mémoire, avec document L5 et effets identiques à une
   exécution indépendante de référence.
 
-## Gate actuelle
+## Portée actuelle de D003
 
-BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED. L'audit D003_NQ_MNQ_LINEAGE_READONLY est autorisé ;
-les opérations Git documentaires sont couvertes par l'autorisation permanente du 2026-09-15.
-La Gate 5 est intégrée par PR #243 sur la base ci-dessus ; D002, SINK-B3 et Gate 5 ne sont pas recommencés.
+L'audit D003_NQ_MNQ_LINEAGE_READONLY est terminé et intégré. Son verdict historique reste
+BLOCKED_PROVENANCE pour la filiation legacy MNQ : aucune nouvelle preuve ne l'annule.
+La décision de pilotage du 2026-09-19 retire cependant ce blocage du statut global du projet.
+D002, SINK-B3 et Gate 5 restent acquis et ne sont pas recommencés.
 
 L'archive existante autorisée a un SHA-256 recalculé conforme à la déclaration et contient neuf fichiers.
 Elle et ses membres restent EXPOSED_DEVELOPMENT, sans admissibilité comme holdout OOS ou preuve indépendante.
@@ -64,21 +69,33 @@ Aucun hash des neuf membres ne correspond directement aux input_sha256 de ces de
 Aucun des 228 enregistrements ne fournit source_raw_sha256, parent_dataset_sha256 ou commande de transformation.
 Cette absence de lien direct ne prouve pas une différence de contenu économique après transformation.
 
-Les entrées NQ_* restent LEGACY_NQ_UNVERIFIED et ne deviennent pas des preuves MNQ.
+Les entrées NQ_* restent LEGACY_UNVERIFIED et leur instrument réel reste UNKNOWN_INSTRUMENT :
+un nom de fichier seul ne suffit pas à établir NQ. Elles ne deviennent jamais des preuves MNQ.
 L'identité réelle des contrats reste UNKNOWN : nom, étiquette et coût ne sont pas des preuves.
 Le candidat séparé reste CANDIDATE_MNQ_NOT_LINKED ; le registre historique le classe déjà comme exposé.
 Son hash est documentaire, non recalculé dans cet audit ; aucun fichier de données du candidat/OOS n'a été ouvert.
 Le manifeste privé assaini contient uniquement les douze champs autorisés, sans prix ni ligne OHLCV.
 Les exports, le registre privé et le manifeste détaillé ne sont pas versionnés dans ce dépôt public.
 
-Action unique pour débloquer D003 : joindre une preuve d'export/transformation existante, assainie,
-reliant un membre de l'archive par SHA-256 à un input_sha256 de rapport, avec identité de contrat attestée.
-Ne pas reconstruire une preuve à partir des noms, ni créer un dataset ou relancer une expérience.
-Le contrat G6 de provenance reste également requis avant tout protocole quantitatif :
+Une preuve d'export/transformation existante, assainie, reliant un membre de l'archive par SHA-256
+à un input_sha256 de rapport avec identité de contrat attestée peut encore débloquer la filiation legacy.
+Elle n'est plus un prérequis à la création d'une nouvelle lignée MNQ propre. Ne jamais reconstruire
+une preuve à partir des noms ni requalifier rétrospectivement les anciens résultats.
+
+Deux chaînes de preuve sont désormais obligatoires et non substituables : NQ et MNQ conservent
+séparément source, dataset versionné, SHA-256, backtest, replay, validation du risque et résultats paper.
+Les résultats peuvent être comparés, jamais fusionnés. Pour toute nouvelle lignée, le contrat G6
+de provenance reste requis avant son protocole quantitatif :
 sémantique des timestamps de barres et fuseau/DST ; règle de rollover et identité des contrats ;
 sémantique OHLCV/volume ; calendrier de sessions, jours fériés et clôtures anticipées ; hash,
 période et frontières garantissant que l'OOS reste réservé. Aucun de ces éléments ne peut être
-inféré silencieusement. V1_VALIDATED_OFFLINE_PAPER n'est pas atteint.
+inféré silencieusement.
+
+Prochaine tranche technique non bloquée : figer et tester le contrat de manifeste d'une nouvelle
+lignée de données, sans acquérir de données, lire l'OOS, lancer de replay ou modifier stratégie/Risk Engine.
+EMA_PULLBACK_V1 sera ensuite formalisée puis validée séparément comme EMA_PULLBACK_V1_NQ et
+EMA_PULLBACK_V1_MNQ. Toute règle métier ambiguë impose une gate stratégie avant implémentation.
+V1_VALIDATED_OFFLINE_PAPER n'est pas atteint.
 
 ## Limites du produit
 

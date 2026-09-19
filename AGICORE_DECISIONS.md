@@ -205,3 +205,33 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
 - Verdict : BLOCKED — D003_NQ_MNQ_LINEAGE_REQUIRED ; V1_VALIDATED_OFFLINE_PAPER non atteint.
 - Action unique : joindre une preuve d'export/transformation existante, assainie, reliant un membre
   de l'archive par SHA-256 à un input_sha256 de rapport, avec identité de contrat attestée.
+
+## D003-B — Portée locale du blocage et lignées indépendantes (approuvée le 2026-09-19)
+
+1. **Faits conservés** : l'audit intégré par PR #244 reste valide. L'archive et ses neuf membres
+   sont EXPOSED_DEVELOPMENT ; aucun lien cryptographique source/transformation/rapport ni contract_id
+   attesté n'a été trouvé. Le nom d'un fichier ou une étiquette instrument ne prouve pas l'instrument.
+2. **Décision de portée** : D003 reste BLOCKED_PROVENANCE pour la validation de la lignée legacy MNQ,
+   mais ne bloque plus globalement AGIcore. Les travaux indépendants peuvent continuer sans modifier
+   ni masquer ce verdict historique.
+3. **Séparation obligatoire** : NQ et MNQ ont des chaînes de preuve distinctes, de la source aux
+   résultats paper. Aucun dataset, hash, backtest, replay, résultat ou validation de risque d'une
+   filière ne constitue une preuve pour l'autre. Les résultats peuvent être comparés, jamais fusionnés.
+4. **Classification** : utiliser NQ_PROVENANCE_CONFIRMED, NQ_PROVENANCE_PARTIAL,
+   MNQ_PROVENANCE_CONFIRMED, MNQ_PROVENANCE_PARTIAL, UNKNOWN_INSTRUMENT ou LEGACY_UNVERIFIED selon
+   les preuves disponibles. Les entrées historiques NQ_* restent LEGACY_UNVERIFIED/UNKNOWN_INSTRUMENT
+   tant que leur seul indice est le nom ; aucune requalification rétrospective n'est autorisée.
+5. **Nouvelle lignée** : si la provenance MNQ historique reste insuffisante, créer une lignée MNQ
+   propre avec source, nom original, date d'acquisition, contract_id, intervalle, transformations,
+   hashes source/dérivé, parent_dataset_sha256 et rôle. Les rôles de nouveaux datasets sont
+   DEVELOPMENT, VALIDATION, OOS_TEST ou PAPER_REFERENCE ; l'archive existante conserve son rôle
+   EXPOSED_DEVELOPMENT et ne peut devenir OOS.
+6. **Protection OOS** : aucun dataset OOS n'est lu, déplacé, reclassé ou utilisé pour optimisation.
+   Le choix et l'ouverture d'un OOS restent une gate métier humaine distincte.
+7. **Stratégie** : EMA_PULLBACK_V1 est la première stratégie prioritaire, avec validations séparées
+   EMA_PULLBACK_V1_NQ et EMA_PULLBACK_V1_MNQ. Les règles ambiguës ne sont jamais complétées
+   silencieusement ; une modification métier importante reste une gate humaine.
+8. **Tranche suivante** : figer et tester le contrat de manifeste des nouvelles lignées sans acquérir
+   de données, lancer de replay, toucher à l'OOS, à la stratégie ou au Risk Engine.
+9. **Verdict** : APPROUVÉE. Statut global EXPERIMENTAL ; legacy MNQ BLOCKED_PROVENANCE ;
+   V1_VALIDATED_OFFLINE_PAPER non atteint.
