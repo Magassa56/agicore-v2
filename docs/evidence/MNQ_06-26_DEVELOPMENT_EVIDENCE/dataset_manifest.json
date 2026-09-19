@@ -1,0 +1,142 @@
+{
+  "schema_version": "agicore.dataset-lineage.v1",
+  "record_type": "BLOCKED_CANDIDATE_EVIDENCE",
+  "validation_status": "BLOCKED_HUMAN_GATE",
+  "gate": "CLEAN_LINEAGE_SOURCE_EVIDENCE",
+  "contract_submission_ready": false,
+  "canonical_contract_payload": null,
+  "fields": {
+    "dataset_id": {
+      "value": "mnq-06-26-minute-last-development-46f2e423-v1",
+      "status": "PROVISIONAL_NOT_SUBMITTED"
+    },
+    "instrument": {
+      "value": "MNQ",
+      "status": "DECLARED_NOT_INDEPENDENTLY_ATTESTED"
+    },
+    "contract_id": {
+      "value": "MNQ 06-26",
+      "status": "DECLARED_NOT_INDEPENDENTLY_ATTESTED"
+    },
+    "role": {
+      "value": "DEVELOPMENT",
+      "status": "GOVERNANCE_CONFIRMED"
+    },
+    "exposure_state": {
+      "value": "EXPOSED_DEVELOPMENT",
+      "status": "GOVERNANCE_CONFIRMED"
+    },
+    "provider": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "software": {
+      "value": "NinjaTrader",
+      "status": "DECLARED_NOT_INDEPENDENTLY_ATTESTED"
+    },
+    "software_version": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "export_timestamp_utc": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "source_filename": {
+      "value": "MNQ 06-26.Last.txt",
+      "status": "LOCALLY_VERIFIED"
+    },
+    "source_sha256": {
+      "value": "46f2e42304573bd5e9a6c8c78a83a3cd655d493c9c1c0dc66fa2ed7406793b40",
+      "status": "LOCALLY_VERIFIED_TWICE"
+    },
+    "source_size_bytes": {
+      "value": 2265516,
+      "status": "LOCALLY_VERIFIED"
+    },
+    "row_count": {
+      "value": 42541,
+      "status": "LOCALLY_VERIFIED"
+    },
+    "interval": {
+      "value": "1 minute",
+      "status": "STRUCTURALLY_OBSERVED_AND_DECLARED"
+    },
+    "data_type": {
+      "value": "Last",
+      "status": "DECLARED_NOT_INDEPENDENTLY_ATTESTED"
+    },
+    "contains_ohlcv": {
+      "value": true,
+      "status": "STRUCTURALLY_OBSERVED"
+    },
+    "contains_volume": {
+      "value": true,
+      "status": "STRUCTURALLY_OBSERVED"
+    },
+    "timestamp_format": {
+      "value": "yyyyMMdd HHmmss",
+      "status": "LOCALLY_VERIFIED"
+    },
+    "first_timestamp": {
+      "value": "2026-04-29 22:01:00",
+      "status": "LOCALLY_VERIFIED_SOURCE_NAIVE"
+    },
+    "last_timestamp": {
+      "value": "2026-06-11 21:00:00",
+      "status": "LOCALLY_VERIFIED_SOURCE_NAIVE"
+    },
+    "timestamp_semantics": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "source_timezone": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "session_timezone": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "dst_policy": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "trading_hours_template": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "holiday_calendar": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "merge_policy": {
+      "value": "DoNotMerge",
+      "status": "DECLARED_NOT_PROVEN_APPLIED"
+    },
+    "rollover_policy": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "continuous_contract": {
+      "value": false,
+      "status": "DECLARED_NOT_PROVEN_APPLIED"
+    },
+    "transformation": {
+      "value": null,
+      "status": "DIRECT_EXPORT_NOT_YET_PROVEN"
+    },
+    "parent_dataset_sha256": {
+      "value": null,
+      "status": "ROOT_STATUS_NOT_YET_PROVEN"
+    },
+    "contract_identity_evidence": {
+      "value": null,
+      "status": "MISSING_REQUIRED_EVIDENCE"
+    },
+    "provenance_method": {
+      "value": "LOCAL_READ_ONLY_STRUCTURAL_AUDIT_PLUS_USER_DECLARATION",
+      "status": "RECORDED"
+    }
+  }
+}

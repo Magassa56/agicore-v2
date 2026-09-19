@@ -127,6 +127,33 @@ contract_id et preuve d'identité hashée, intervalle, timestamp/fuseau/DST, rol
 sessions/jours fériés, nom/hash source et transformation/parent. Les octets de marché restent privés ;
 les valeurs UNKNOWN ne sont pas acceptées. Ne pas ouvrir, déplacer ni reclasser l'OOS.
 
+## Audit du candidat MNQ 06-26 Minute/Last
+
+Le fichier privé `MNQ 06-26.Last.txt` a été audité localement sans publier de ligne OHLCV ni de
+prix. Son SHA-256, identique sur deux lectures, est
+`46f2e42304573bd5e9a6c8c78a83a3cd655d493c9c1c0dc66fa2ed7406793b40` ; il contient 42 541
+lignes pour 2 265 516 octets. Les six champs séparés par point-virgule, les timestamps source-naive
+du `2026-04-29 22:01:00` au `2026-06-11 21:00:00`, l'ordre strict, l'absence de doublon et les
+invariants structurels OHLC/volume passent. Le RAW reste privé et hors Git.
+
+Ces faits établissent seulement une structure `BAR_ONLY_DEVELOPMENT`. Le fichier n'embarque ni
+en-tête, ni instrument, ni fuseau, ni provenance. Le nom et la déclaration fournie ne prouvent donc
+pas l'identité `MNQ 06-26`, le fournisseur, la version exacte NinjaTrader, la date UTC d'export,
+la sémantique des timestamps, le template Trading Hours, le calendrier, l'application effective de
+`DoNotMerge` ou l'absence de réécriture. Aucun manifeste canonique n'a été préparé avec des valeurs
+inventées. Le dossier assaini est conservé sous
+`docs/evidence/MNQ_06-26_DEVELOPMENT_EVIDENCE/` avec statut `BLOCKED_HUMAN_GATE`.
+
+Preuves logicielles de cette tranche : 17 tests de filiation PASS ; suite complète 5909 passed,
+6 warnings in 88.83s ; Ruff passe sur le contrat de filiation et py_compile passe. Le contrôle Ruff
+global expose 1494 constats historiques hors périmètre sur `main` ; aucun fichier Python n'est modifié.
+
+Action humaine unique restante : fournir un seul bundle assaini et hashable, lié au SHA-256 ci-dessus,
+avec les écrans NinjaTrader originaux d'export, Help/About, fournisseur, fuseau, `DoNotMerge` et
+Trading Hours, plus un reçu indiquant date UTC, sémantique des timestamps, fuseau IANA/DST,
+calendrier, sémantique OHLC/volume et absence ou présence de réécriture. Les comptes et prix doivent
+être masqués. La gate `CLEAN_LINEAGE_SOURCE_EVIDENCE` reste bloquée jusqu'à cette pièce.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
