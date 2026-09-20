@@ -1,9 +1,10 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-19 UTC.
-Statut : BLOCKED_HUMAN_GATE — CLEAN_LINEAGE_SOURCE_EVIDENCE ; D003 legacy = BLOCKED_PROVENANCE.
-Branche de vérification : feature/post-dataset-lineage-checkpoint-v1.
-Base GitHub vérifiée et récupérée : 17c747d005e2b6699b04bc19fe70267dfe5a2557.
+Date : 2026-09-20 UTC.
+Statut : BLOCKED_HUMAN_GATE — CONTEMPORANEOUS_RAW_EXPORT_ATTESTATION_REQUIRED ;
+D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ; D003 legacy = BLOCKED_PROVENANCE.
+Branche de vérification : feature/mnq-06-26-provisional-development-v1.
+Base GitHub vérifiée et récupérée : 21335e95dc6be373c5a55577ddfc15f15d5f67e9.
 
 ## Acquis vérifiés
 
@@ -153,6 +154,39 @@ avec les écrans NinjaTrader originaux d'export, Help/About, fournisseur, fuseau
 Trading Hours, plus un reçu indiquant date UTC, sémantique des timestamps, fuseau IANA/DST,
 calendrier, sémantique OHLC/volume et absence ou présence de réécriture. Les comptes et prix doivent
 être masqués. La gate `CLEAN_LINEAGE_SOURCE_EVIDENCE` reste bloquée jusqu'à cette pièce.
+
+## Dérogation provisoire EXPOSED_DEVELOPMENT
+
+La décision humaine du 2026-09-20 autorise un profil provisoire strictement limité au développement
+exposé. Le bundle assaini `MNQ_06-26_NINJATRADER_SANITIZED_BUNDLE.zip`, SHA-256
+`853edb74f4439f4a0d984c91cab04a34d6880df7cf11cd17c8ef520360fc4d19`, contient sept captures
+et un reçu dont l'intégrité a été vérifiée. Les captures montrent `MNQ 06-26`, `Minute`,
+`Last / Dernier`, `DoNotMerge / Ne pas fusionner` et le début du fuseau Windows
+`(UTC+01:00) Bruxelles, Copenhague, Madrid, Paris`. Elles ne relient pas temporellement ces réglages
+à l'export original du RAW.
+
+Le manifeste `provisional_development_profile.json` sépare chaque fait en `VERIFIED_EVIDENCE`,
+`OWNER_DECLARED`, `WORKING_ASSUMPTION` ou `UNKNOWN_NOT_APPROXIMABLE`. `APEX` est seulement
+l'environnement commercial déclaré par le propriétaire et ne devient pas le fournisseur technique
+du flux. Les hypothèses NinjaTrader 8.x, Europe/Paris, DST européen, CME US Index Futures ETH,
+timestamp de fin de barre, `DoNotMerge` et barres Minute/Last portent toutes la restriction
+`NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS`.
+
+`D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS` autorise uniquement le test du parseur,
+du pipeline déterministe, des contrôles structurels, le développement des outils et des résultats
+exploratoires explicitement non indépendants. Il n'autorise aucune validation de stratégie,
+rentabilité, OOS, paper trading, décision Apex Eval/PA/réelle ou calibration définitive du Risk Engine.
+Le RAW, les captures et l'OOS restent hors Git.
+
+`CLEAN_LINEAGE_SOURCE_EVIDENCE` reste `BLOCKED_HUMAN_GATE`. La gate précise est
+`CONTEMPORANEOUS_RAW_EXPORT_ATTESTATION_REQUIRED` : version NinjaTrader exacte, fournisseur
+technique réel, date UTC, liaison contemporaine export/SHA-256, Trading Hours et calendrier
+effectivement appliqués, ainsi que preuve que les octets sont l'export intact restent non
+approximables.
+
+Validations de cette tranche : JSON et classifications PASS ; scan anti-fuite de lignes marché PASS ;
+17 tests de filiation PASS en 0.09s ; suite complète 5909 passed, 6 warnings in 123.49s ;
+`git diff --check` PASS. Aucun fichier Python n'est modifié.
 
 ## Limites du produit
 
