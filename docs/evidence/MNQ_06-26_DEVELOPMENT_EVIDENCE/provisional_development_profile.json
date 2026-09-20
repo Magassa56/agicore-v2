@@ -1,0 +1,236 @@
+{
+  "schema_version": "agicore.provisional-development-profile.v1",
+  "record_type": "PROVISIONAL_DEVELOPMENT_WAIVER",
+  "profile_status": "PASS_WITH_ASSUMPTIONS",
+  "profile_id": "mnq-06-26-minute-last-exposed-development-46f2e423-v1",
+  "canonical_lineage_status": "BLOCKED_HUMAN_GATE",
+  "canonical_lineage_gate": "CONTEMPORANEOUS_RAW_EXPORT_ATTESTATION_REQUIRED",
+  "canonical_contract_submission_ready": false,
+  "evidence_classifications": [
+    "VERIFIED_EVIDENCE",
+    "OWNER_DECLARED",
+    "WORKING_ASSUMPTION",
+    "UNKNOWN_NOT_APPROXIMABLE"
+  ],
+  "fields": {
+    "bundle_identity": {
+      "value": {
+        "filename": "MNQ_06-26_NINJATRADER_SANITIZED_BUNDLE.zip",
+        "sha256": "853edb74f4439f4a0d984c91cab04a34d6880df7cf11cd17c8ef520360fc4d19",
+        "size_bytes": 471231,
+        "member_count": 12
+      },
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "bundle_member_integrity": {
+      "value": [
+        {
+          "filename": "01_historical_export_MNQ_06-26_minute_last.png",
+          "size_bytes": 33168,
+          "sha256": "48d169631d16f4129c6f23dfc5801a651125bfb7e7b428c31d48b38efe760422"
+        },
+        {
+          "filename": "02_merge_policy_DoNotMerge_tickreplay_enabled.png",
+          "size_bytes": 94491,
+          "sha256": "794918d5d3322a343fc7db87b10bcf4dd2f898f17aac1d0b2a1eebcf59ec52e2"
+        },
+        {
+          "filename": "03_timezone_ninjatrader_general.png",
+          "size_bytes": 28369,
+          "sha256": "c79be885e152c9ff2deb5735370d8285e9d593dd5d9c6593c1dbd7f03763f9db"
+        },
+        {
+          "filename": "04_historical_download_layers.png",
+          "size_bytes": 44095,
+          "sha256": "6d96c8ad989dcc6ac8272a6b9a4cdc68f9ffafa26b51c8ae88bdb90bf79fb012"
+        },
+        {
+          "filename": "05_historical_download_contract_period.png",
+          "size_bytes": 85665,
+          "sha256": "a13183ab1f8f5ba0ba8e8a2931ab9577e818bde41bdef03e3e7897102151cbfb"
+        },
+        {
+          "filename": "06_merge_policy_dropdown.png",
+          "size_bytes": 97944,
+          "sha256": "1a073ded934dc2439d1098b5a2bad229ac31943711b07c6dbcd3fc76b32641de"
+        },
+        {
+          "filename": "07_export_no_local_data_message.png",
+          "size_bytes": 121927,
+          "sha256": "039b90dc466399a7c162f4e41971bffc30ac8877d4327d641672a28a832f723e"
+        },
+        {
+          "filename": "EVIDENCE_RECEIPT.json",
+          "size_bytes": 2011,
+          "sha256": "ef945927a1f3f71961045365c9df6bd43904487f915f10c182fd9a82fd325340"
+        }
+      ],
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "source_filename": {
+      "value": "MNQ 06-26.Last.txt",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "source_sha256": {
+      "value": "46f2e42304573bd5e9a6c8c78a83a3cd655d493c9c1c0dc66fa2ed7406793b40",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "source_size_bytes": {
+      "value": 2265516,
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "source_row_count": {
+      "value": 42541,
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "selected_instrument": {
+      "value": "MNQ",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "displayed_contract_id": {
+      "value": "MNQ 06-26",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "selected_interval": {
+      "value": "Minute",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "selected_data_type": {
+      "value": "Last / Dernier",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "visible_merge_policy": {
+      "value": "DoNotMerge / Ne pas fusionner",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "dataset_role": {
+      "value": "EXPOSED_DEVELOPMENT",
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "visible_application_timezone": {
+      "value": "(UTC+01:00) Bruxelles, Copenhague, Madrid, Paris",
+      "classification": "VERIFIED_EVIDENCE",
+      "note": "The screenshot text is truncated after the beginning of the Windows timezone label."
+    },
+    "bundle_contains_oos_data": {
+      "value": false,
+      "classification": "VERIFIED_EVIDENCE"
+    },
+    "visible_settings_temporally_linked_to_original_export": {
+      "value": false,
+      "classification": "VERIFIED_EVIDENCE",
+      "note": "The bundle contains no contemporaneous binding between the screenshots, the export action and the private RAW hash."
+    },
+    "commercial_account_environment": {
+      "value": "APEX",
+      "classification": "OWNER_DECLARED",
+      "note": "This is not the technical market-data provider."
+    },
+    "source_used_as_raw_development_export": {
+      "value": true,
+      "classification": "OWNER_DECLARED"
+    },
+    "voluntary_post_export_transformation": {
+      "value": "NONE_DECLARED",
+      "classification": "OWNER_DECLARED",
+      "note": "The owner declares no voluntary transformation after export."
+    },
+    "parent_dataset_sha256": {
+      "value": null,
+      "classification": "OWNER_DECLARED",
+      "note": "The owner declares that this is a root development source with no parent dataset."
+    },
+    "permanently_ineligible_for_oos": {
+      "value": true,
+      "classification": "OWNER_DECLARED"
+    },
+    "software_family": {
+      "value": "NinjaTrader 8.x",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "operational_timezone_candidate": {
+      "value": "Europe/Paris",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "dst_policy_candidate": {
+      "value": "European Union daylight-saving rules",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "trading_hours_candidate": {
+      "value": "CME US Index Futures ETH",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "bar_timestamp_semantics_candidate": {
+      "value": "bar end timestamp",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "rollover_candidate": {
+      "value": "DoNotMerge; individual contract MNQ 06-26",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "ohlcv_semantics_candidate": {
+      "value": "one-minute bars based on Last trades",
+      "classification": "WORKING_ASSUMPTION",
+      "restriction": "NOT_VALID_FOR_OOS_OR_PERFORMANCE_CLAIMS"
+    },
+    "exact_ninjatrader_version": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    },
+    "actual_technical_market_data_provider": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    },
+    "original_export_timestamp_utc": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    },
+    "contemporaneous_export_to_raw_hash_binding": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    },
+    "effective_trading_hours_template_at_export": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    },
+    "effective_session_and_holiday_calendar": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    },
+    "proof_current_bytes_are_untouched_export": {
+      "value": null,
+      "classification": "UNKNOWN_NOT_APPROXIMABLE"
+    }
+  },
+  "usage_policy": {
+    "allowed": [
+      "PARSER_TESTING",
+      "DETERMINISTIC_PIPELINE_TESTING",
+      "STRUCTURAL_VALIDATION",
+      "TOOL_DEVELOPMENT_AND_DEBUGGING",
+      "EXPLORATORY_NON_INDEPENDENT_RESULTS"
+    ],
+    "prohibited": [
+      "STRATEGY_VALIDATION",
+      "PROFITABILITY_CLAIM",
+      "OOS_EVIDENCE",
+      "PAPER_TRADING_VALIDATION",
+      "APEX_EVAL_OR_PA_DECISION",
+      "REAL_TRADING_DECISION",
+      "FINAL_RISK_ENGINE_CALIBRATION"
+    ]
+  },
+  "privacy": {
+    "raw_tracked_in_git": false,
+    "screenshots_tracked_in_git": false,
+    "contains_market_rows": false,
+    "contains_prices": false,
+    "contains_oos_data": false
+  }
+}
