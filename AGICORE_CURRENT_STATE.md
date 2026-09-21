@@ -1,10 +1,11 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-20 UTC.
-Statut : BLOCKED_HUMAN_GATE — CONTEMPORANEOUS_RAW_EXPORT_ATTESTATION_REQUIRED ;
-D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ; D003 legacy = BLOCKED_PROVENANCE.
-Branche de vérification : feature/mnq-06-26-provisional-development-v1.
-Base GitHub vérifiée et récupérée : 21335e95dc6be373c5a55577ddfc15f15d5f67e9.
+Date : 2026-09-21 UTC.
+Statut : BLOCKED_HUMAN_GATE — STRATEGY_RULE_AMBIGUITY ;
+CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
+le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
+Branche de vérification : feature/d003-preserved-export-lineage.
+Base GitHub vérifiée et récupérée : bc9e43b2a1a6126a1b1a40e8eae205a0770c5e5b.
 
 ## Acquis vérifiés
 
@@ -122,8 +123,9 @@ in 110.62s ; Ruff, py_compile et git diff --check PASS. CI #173 sur le head exac
 5909 passed, 6 warnings in 132.04s ; contrôle whitespace PASS. L'arbre fusionné est identique
 à l'arbre local testé et à l'arbre publié.
 
-Action unique de la gate CLEAN_LINEAGE_SOURCE_EVIDENCE : fournir le dossier technique assaini
-d'un nouvel export MNQ destiné à DEVELOPMENT — source/fournisseur, logiciel/version, date UTC,
+Action unique qui restait alors pour la gate CLEAN_LINEAGE_SOURCE_EVIDENCE : fournir le dossier
+technique assaini d'un nouvel export MNQ destiné à DEVELOPMENT — source/fournisseur,
+logiciel/version, date UTC,
 contract_id et preuve d'identité hashée, intervalle, timestamp/fuseau/DST, rollover, OHLCV/volume,
 sessions/jours fériés, nom/hash source et transformation/parent. Les octets de marché restent privés ;
 les valeurs UNKNOWN ne sont pas acceptées. Ne pas ouvrir, déplacer ni reclasser l'OOS.
@@ -149,11 +151,11 @@ Preuves logicielles de cette tranche : 17 tests de filiation PASS ; suite compl�
 6 warnings in 88.83s ; Ruff passe sur le contrat de filiation et py_compile passe. Le contrôle Ruff
 global expose 1494 constats historiques hors périmètre sur `main` ; aucun fichier Python n'est modifié.
 
-Action humaine unique restante : fournir un seul bundle assaini et hashable, lié au SHA-256 ci-dessus,
+Action humaine qui restait alors requise : fournir un seul bundle assaini et hashable, lié au SHA-256 ci-dessus,
 avec les écrans NinjaTrader originaux d'export, Help/About, fournisseur, fuseau, `DoNotMerge` et
 Trading Hours, plus un reçu indiquant date UTC, sémantique des timestamps, fuseau IANA/DST,
 calendrier, sémantique OHLC/volume et absence ou présence de réécriture. Les comptes et prix doivent
-être masqués. La gate `CLEAN_LINEAGE_SOURCE_EVIDENCE` reste bloquée jusqu'à cette pièce.
+être masqués. La gate `CLEAN_LINEAGE_SOURCE_EVIDENCE` était bloquée jusqu'à cette pièce.
 
 ## Dérogation provisoire EXPOSED_DEVELOPMENT
 
@@ -178,7 +180,8 @@ exploratoires explicitement non indépendants. Il n'autorise aucune validation d
 rentabilité, OOS, paper trading, décision Apex Eval/PA/réelle ou calibration définitive du Risk Engine.
 Le RAW, les captures et l'OOS restent hors Git.
 
-`CLEAN_LINEAGE_SOURCE_EVIDENCE` reste `BLOCKED_HUMAN_GATE`. La gate précise est
+À l'issue de cette tranche provisoire, `CLEAN_LINEAGE_SOURCE_EVIDENCE` restait
+`BLOCKED_HUMAN_GATE`. La gate précise était
 `CONTEMPORANEOUS_RAW_EXPORT_ATTESTATION_REQUIRED` : version NinjaTrader exacte, fournisseur
 technique réel, date UTC, liaison contemporaine export/SHA-256, Trading Hours et calendrier
 effectivement appliqués, ainsi que preuve que les octets sont l'export intact restent non
@@ -187,6 +190,43 @@ approximables.
 Validations de cette tranche : JSON et classifications PASS ; scan anti-fuite de lignes marché PASS ;
 17 tests de filiation PASS en 0.09s ; suite complète 5909 passed, 6 warnings in 123.49s ;
 `git diff --check` PASS. Aucun fichier Python n'est modifié.
+
+## D003 — nouvelle lignée MNQ 06-26 propre
+
+La preuve complémentaire `PRESERVED_EXPORT_ATTESTATION.txt`, SHA-256
+`043a4467a26c9494f61526a6a2d4cb0f5187837bf2fd1cc311677c729debbf59`, a été vérifiée sur ses
+octets exacts. Elle enregistre les noms, `CreationTime`, `LastWriteTime`, fuseau/offset NTFS,
+tailles et SHA-256 des exports Ask, Bid et Last. Les trois tailles et empreintes correspondent aux
+RAW privés déjà audités. Leur création est strictement successive entre 19:36:06Z et 19:36:52Z.
+
+La combinaison acceptée par le contrat fail-closed est : captures NinjaTrader pré-export hashées,
+version `8.0.28.0 64-bit`, chaîne Apex/Rithmic/NinjaTrader, `DoNotMerge`, template
+`CME US Index Futures ETH`, règle documentée UTC/fin de barre, métadonnées système exactes, hashes
+des trois RAW et attestation de conservation post-export. L'attestation ne prétend pas prouver à
+elle seule la sémantique des timestamps ; cette propriété reste sourcée séparément par la règle
+documentée du format d'export NinjaTrader.
+
+La racine canonique `DEVELOPMENT` / `EXPOSED_DEVELOPMENT` est désormais
+`MNQ 06-26.Last.txt`, SHA-256
+`3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a`. Elle est un root sans
+transformation ni parent. Ask `604964a5...e0e6d51` et Bid `2437ecf0...be960b` sont des preuves
+associées, pas des parents. Le manifeste canonique price-free est conservé sous
+`docs/evidence/MNQ_06-26_CLEAN_LINEAGE/`.
+
+Le RAW antérieur `46f2e423...793b40` reste explicitement `PROVISIONAL`; il n'est ni reclassé,
+ni parent de la nouvelle lignée. `CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS` ferme D003 uniquement pour
+la nouvelle racine exposée de développement. Cela ne valide ni OOS, ni performance, ni replay,
+ni paper trading, ni trading réel, et ne permet aucune calibration définitive du Risk Engine.
+
+Validations de clôture D003 : 20 tests ciblés manifeste/filiation PASS ; 108 tests ciblés incluant
+séparation NQ/MNQ, scellement OOS et déterminisme/replay PASS ; suite complète 5 912 passed,
+6 warnings in 79.70s. JSON, Ruff ciblé, format Ruff, `py_compile`, scan anti-fuite et
+`git diff --check` passent.
+
+La phase officielle suivante est `EMA_PULLBACK_V1_MNQ_FORMALIZATION`. Les règles déjà acquises
+(MNQ 1 minute, EMA20, pente, pullback, clôture confirmée, croisement MACD et exécution au plus tôt
+sur la bougie suivante) sont conservées. La formalisation reste `BLOCKED_HUMAN_GATE —
+STRATEGY_RULE_AMBIGUITY` tant que le prédicat machine exact du pullback vers l'EMA20 n'est pas choisi.
 
 ## Limites du produit
 

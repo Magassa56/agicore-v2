@@ -1,0 +1,52 @@
+{
+  "record_type": "CANONICAL_DATASET_LINEAGE_MANIFEST",
+  "phase": "D003 — CLEAN_LINEAGE_SOURCE_EVIDENCE",
+  "gate_status": "PASS",
+  "validation_status": "PASS",
+  "manifest_sha256": "fe730dc0a9ac020f394c4e8ccccdcc42e5c310327bcea3c993f49b62b150a84f",
+  "canonical_contract_payload": {
+    "acquisition_timestamp_utc": "2026-09-21T19:36:52Z",
+    "bar_interval": "1 minute",
+    "contract_id": "MNQ 06-26",
+    "contract_identity_evidence": {
+      "evidence_reference": "preserved-export-attestation-20260921",
+      "evidence_sha256": "043a4467a26c9494f61526a6a2d4cb0f5187837bf2fd1cc311677c729debbf59",
+      "evidence_type": "PRESERVED_EXPORT_ATTESTATION"
+    },
+    "dataset_filename": "MNQ 06-26.Last.txt",
+    "dataset_id": "mnq-06-26-minute-last-development-3bd8c078-v1",
+    "dataset_sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+    "dst_policy": "UTC export timestamps encode no DST offset; the CME US Index Futures ETH session calendar follows America/Chicago DST rules",
+    "holiday_calendar": "NinjaTrader 8.0.28.0 built-in CME US Index Futures ETH template holiday and early-close calendar",
+    "instrument": "MNQ",
+    "lineage_id": "mnq-06-26-clean-development-v1",
+    "ohlcv_semantics": "NinjaTrader one-minute Last bars: timestamp, open, high, low, close and volume",
+    "oos_access_state": "NOT_APPLICABLE",
+    "oos_boundary_id": null,
+    "parent_dataset_sha256": null,
+    "role": "DEVELOPMENT",
+    "rollover_policy": "single contract MNQ 06-26; DoNotMerge; no continuous-contract rollover or adjustment",
+    "schema_version": "agicore.dataset-lineage.v1",
+    "session_calendar": "CME US Index Futures ETH; America/Chicago; Sunday-Thursday 17:00 to following day 16:00",
+    "source_exposure": "EXPOSED_DEVELOPMENT",
+    "source_provider": "Rithmic",
+    "source_raw_filename": "MNQ 06-26.Last.txt",
+    "source_raw_sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+    "source_software": "NinjaTrader",
+    "source_software_version": "8.0.28.0 64-bit",
+    "timestamp_semantics": "BAR_CLOSE",
+    "timezone_name": "UTC",
+    "transformation_command": "NONE",
+    "volume_semantics": "NinjaTrader Last-bar volume reported in contracts"
+  },
+  "supplemental_source_facts": {
+    "data_type": "Last",
+    "source_size_bytes": 2791485,
+    "source_row_count": 52431,
+    "root_dataset": true,
+    "continuous_contract": false,
+    "market_rows_committed": 0,
+    "prices_committed": 0,
+    "oos_data_accessed": false
+  }
+}

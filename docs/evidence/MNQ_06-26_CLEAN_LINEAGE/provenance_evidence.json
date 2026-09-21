@@ -1,0 +1,130 @@
+{
+  "audit_id": "mnq-06-26-preserved-export-lineage-20260921",
+  "audit_timestamp_utc": "2026-09-21T21:51:09Z",
+  "phase": "D003 — CLEAN_LINEAGE_SOURCE_EVIDENCE",
+  "status": "PASS",
+  "evidence_acceptance": {
+    "decision": "ACCEPTED_FOR_EXPOSED_DEVELOPMENT_LINEAGE",
+    "basis": "The fail-closed contract accepts a sanitized hashed contract-identity reference. Exact raw hashes and sizes, attested NTFS creation/write metadata with timezone and offset, pre-export NinjaTrader screenshots, documented NinjaTrader export semantics, and post-export preservation are coherent and independently cross-checked.",
+    "limitation": "This is documentary chain-of-custody evidence for an exposed development root. It is not OOS evidence, an independent performance claim, paper-trading validation or authorization for real trading."
+  },
+  "contract_identity_evidence": {
+    "filename": "PRESERVED_EXPORT_ATTESTATION.txt",
+    "sha256": "043a4467a26c9494f61526a6a2d4cb0f5187837bf2fd1cc311677c729debbf59",
+    "size_bytes": 1484,
+    "encoding": "UTF-8 with BOM",
+    "attestation_created_utc": "2026-09-21T21:22:14.464Z",
+    "required_raw_metadata_fields_present": true,
+    "owner_supplied_sha256_matches_audited_bytes": true,
+    "note": "The attestation deliberately leaves source timestamp timezone, DST policy and timestamp semantics unverified; those fields are sourced separately from the documented NinjaTrader export format and are not reclassified as attestation facts."
+  },
+  "raw_sources": {
+    "ask": {
+      "filename": "MNQ 06-26.Ask.txt",
+      "role": "ASSOCIATED_REFERENCE_ONLY",
+      "creation_time_local": "2026-09-21T21:36:06",
+      "last_write_time_local": "2026-09-21T21:36:07",
+      "creation_time_utc": "2026-09-21T19:36:06Z",
+      "last_write_time_utc": "2026-09-21T19:36:07Z",
+      "size_bytes": 3432017,
+      "row_count": 63057,
+      "sha256": "604964a556d169b083fe302a055a37790241f68564a0200966c14b98da0e6d51",
+      "bytes_hash_and_size_verified": true
+    },
+    "bid": {
+      "filename": "MNQ 06-26.Bid.txt",
+      "role": "ASSOCIATED_REFERENCE_ONLY",
+      "creation_time_local": "2026-09-21T21:36:30",
+      "last_write_time_local": "2026-09-21T21:36:32",
+      "creation_time_utc": "2026-09-21T19:36:30Z",
+      "last_write_time_utc": "2026-09-21T19:36:32Z",
+      "size_bytes": 4159148,
+      "row_count": 76407,
+      "sha256": "2437ecf0950a79fd524a06d36dd8accc58a457c1faf0037da56bfa838cbe960b",
+      "bytes_hash_and_size_verified": true
+    },
+    "last": {
+      "filename": "MNQ 06-26.Last.txt",
+      "audit_copy_filename": "MNQ 06-26.Last(1).txt",
+      "audit_copy_note": "The persistent-file service added (1) to avoid a name collision; the verified bytes retain the attested export hash.",
+      "role": "CANONICAL_DEVELOPMENT_ROOT",
+      "creation_time_local": "2026-09-21T21:36:50",
+      "last_write_time_local": "2026-09-21T21:36:52",
+      "creation_time_utc": "2026-09-21T19:36:50Z",
+      "last_write_time_utc": "2026-09-21T19:36:52Z",
+      "size_bytes": 2791485,
+      "row_count": 52431,
+      "sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+      "bytes_hash_and_size_verified": true
+    },
+    "ntfs_timestamp_timezone": "Europe/Paris",
+    "ntfs_utc_offset_at_export": "+02:00",
+    "metadata_matches_prior_read_only_audit": true,
+    "strict_creation_sequence_verified": true,
+    "post_export_rewrite_declared": false
+  },
+  "corroborating_evidence": {
+    "provider_chain": {
+      "account_provider": "Apex Trader Funding",
+      "market_data_provider_or_routing": "Rithmic",
+      "platform": "NinjaTrader"
+    },
+    "clean_lineage_bundle": {
+      "filename": "MNQ_06-26_D003_CLEAN_LINEAGE_EVIDENCE_V2.zip",
+      "sha256": "315069a8d4e8495e90b2de15d1c03da968a620373b061657d07f320f513e57e5",
+      "member_integrity": "PASS"
+    },
+    "ninjatrader_bundle": {
+      "filename": "MNQ_06-26_NINJATRADER_SANITIZED_BUNDLE_v2.zip",
+      "sha256": "10f6aa8f653b7ca1b026239bd221958801503a22986a2dcd601ac8f561b97d25",
+      "member_integrity": "PASS"
+    },
+    "field_sources": {
+      "instrument_contract_interval_data_type": "NinjaTrader export screenshot plus preserved-export attestation",
+      "provider_chain": "Apex/Rithmic/NinjaTrader screenshots plus preserved-export attestation",
+      "software_version": "NinjaTrader Help/About screenshot plus preserved-export attestation",
+      "export_completion_utc": "Last RAW NTFS LastWriteTime converted with the attested Europe/Paris +02:00 offset",
+      "timestamp_semantics_and_source_timezone": "documented NinjaTrader Minute export rule: UTC end-of-bar timestamps",
+      "merge_and_rollover": "DoNotMerge screenshot plus preserved-export attestation",
+      "trading_hours_and_session": "CME US Index Futures ETH screenshot; America/Chicago is a derived IANA mapping",
+      "transformation_and_parent": "preservation attestation declares no post-export rewrite, transformation or parent"
+    }
+  },
+  "legacy_provisional_source": {
+    "filename": "MNQ 06-26.Last.txt",
+    "sha256": "46f2e42304573bd5e9a6c8c78a83a3cd655d493c9c1c0dc66fa2ed7406793b40",
+    "size_bytes": 2265516,
+    "row_count": 42541,
+    "status": "PROVISIONAL",
+    "relationship_to_clean_root": "BYTE_IDENTICAL_SUBSET_ON_ALL_SHARED_TIMESTAMPS",
+    "is_parent_of_clean_root": false,
+    "reclassified_as_clean": false
+  },
+  "governance": {
+    "dataset_role": "DEVELOPMENT",
+    "exposure_state": "EXPOSED_DEVELOPMENT",
+    "oos": false,
+    "allowed_uses": [
+      "PARSER_TESTING",
+      "DETERMINISTIC_PIPELINE_TESTING",
+      "STRUCTURAL_VALIDATION",
+      "STRATEGY_DEVELOPMENT_WITH_EXPLICIT_NON_INDEPENDENCE"
+    ],
+    "prohibited_claims": [
+      "OOS_EVIDENCE",
+      "INDEPENDENT_PERFORMANCE",
+      "PAPER_TRADING_VALIDATED",
+      "REAL_TRADING_READY",
+      "FINAL_RISK_ENGINE_CALIBRATION"
+    ]
+  },
+  "privacy": {
+    "raw_files_committed": false,
+    "screenshots_committed": false,
+    "market_rows_committed": 0,
+    "prices_committed": 0,
+    "account_identifiers_committed": false,
+    "credentials_committed": false,
+    "oos_accessed": false
+  }
+}
