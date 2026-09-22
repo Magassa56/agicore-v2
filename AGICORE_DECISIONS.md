@@ -235,3 +235,24 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    de données, lancer de replay, toucher à l'OOS, à la stratégie ou au Risk Engine.
 9. **Verdict** : APPROUVÉE. Statut global EXPERIMENTAL ; legacy MNQ BLOCKED_PROVENANCE ;
    V1_VALIDATED_OFFLINE_PAPER non atteint.
+
+## EMA_PULLBACK_V1_MNQ — prédicat pullback initial (approuvé le 2026-09-22)
+
+1. **Décision sans optimisation** : `N = 3`, `X = 8 ticks MNQ = 2,00 points`,
+   `wick_cross_ema20 = ALLOWED`, `confirmation_close_correct_side = REQUIRED`.
+2. **Fenêtre causale** : seules les trois bougies clôturées `t-3`, `t-2`, `t-1` sont inspectées ;
+   la bougie de confirmation `t` n'appartient pas à la fenêtre de pullback.
+3. **Distance** : pour chaque bougie, la distance est celle entre la plage fermée `Low..High` et
+   l'EMA20 de cette même bougie. Une intersection ou un contact vaut zéro ; la limite huit ticks
+   est inclusive. Une seule bougie admissible dans la fenêtre suffit.
+4. **Confirmation directionnelle** : LONG impose strictement `Close[t] > EMA20[t]` ; SHORT impose
+   strictement `Close[t] < EMA20[t]`. `Close[t] == EMA20[t]` ne confirme aucun côté.
+5. **Temporalité** : décision uniquement après clôture de `t`, sans lookahead ; exécution au plus
+   tôt sur `t+1`.
+6. **Fail-closed** : ce prédicat n'est pas un signal complet. La pente EMA20 et le croisement MACD
+   restent obligatoires ; leur définition machine ne peut pas être remplacée par une valeur par
+   défaut. Les sorties et filtres de session restent eux aussi à formaliser.
+7. **Frontières** : aucune donnée OOS, optimisation, métrique de performance, modification du Risk
+   Engine, connexion broker ou opération de trading n'est autorisée par cette décision.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS` ; formalisation globale arrêtée à
+   `BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED`.

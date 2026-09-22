@@ -1,11 +1,12 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-21 UTC.
-Statut : BLOCKED_HUMAN_GATE — STRATEGY_RULE_AMBIGUITY ;
+Date : 2026-09-22 UTC.
+Statut : BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
+EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/d003-preserved-export-lineage.
-Base GitHub vérifiée et récupérée : bc9e43b2a1a6126a1b1a40e8eae205a0770c5e5b.
+Branche de vérification : feature/ema-pullback-v1-mnq-predicate.
+Base GitHub vérifiée et récupérée : 3e155113ac53e225629f3f7693a50cac8bea2957.
 
 ## Acquis vérifiés
 
@@ -223,10 +224,34 @@ séparation NQ/MNQ, scellement OOS et déterminisme/replay PASS ; suite complèt
 6 warnings in 79.70s. JSON, Ruff ciblé, format Ruff, `py_compile`, scan anti-fuite et
 `git diff --check` passent.
 
-La phase officielle suivante est `EMA_PULLBACK_V1_MNQ_FORMALIZATION`. Les règles déjà acquises
-(MNQ 1 minute, EMA20, pente, pullback, clôture confirmée, croisement MACD et exécution au plus tôt
-sur la bougie suivante) sont conservées. La formalisation reste `BLOCKED_HUMAN_GATE —
-STRATEGY_RULE_AMBIGUITY` tant que le prédicat machine exact du pullback vers l'EMA20 n'est pas choisi.
+## EMA_PULLBACK_V1_MNQ — prédicat pullback initial figé
+
+La décision métier du 2026-09-22 fixe sans optimisation la fenêtre de pullback aux trois bougies
+clôturées immédiatement antérieures à la confirmation. Au moins l'une d'elles doit toucher l'EMA20
+ou placer sa plage complète à une distance inférieure ou égale à huit ticks MNQ, soit 2,00 points.
+Une mèche peut traverser l'EMA20 : l'intersection de la plage `Low..High` avec l'EMA vaut distance
+zéro. La bougie de confirmation est exclue de cette recherche.
+
+La confirmation LONG exige `Close > EMA20` et la confirmation SHORT exige `Close < EMA20` ;
+l'égalité est refusée. Les trois indices antérieurs doivent être strictement `t-3`, `t-2`, `t-1`.
+Le contrat travaille exclusivement sur des bougies clôturées, décide à la clôture `t` et conserve
+l'exécution au plus tôt sur `t+1`. L'évaluation en `Decimal` protège la limite inclusive de huit ticks.
+
+Le module `ema_pullback_v1_mnq.py` évalue uniquement ce sous-prédicat et n'émet aucun signal de
+trading. La pente EMA20 et le croisement MACD restent obligatoires, mais aucune formule, fenêtre ou
+valeur par défaut n'est inventée. Stop-loss, take-profit et filtres de session restent également
+hors du contrat exécutable. Aucun dataset, OOS, PnL, replay, Risk Engine ou broker n'est utilisé.
+
+Preuves de cette tranche : 14 tests synthétiques PASS couvrent LONG, SHORT, distance exactement
+huit ticks, rejet à neuf ticks, mèche traversante, clôture égale refusée, exclusion de la confirmation
+et causalité stricte. Les 56 tests stratégie ciblés passent ; la suite complète passe avec
+5 926 tests et 6 warnings historiques en 255,75 s. Ruff ciblé, format Ruff, `py_compile` et
+`git diff --check` passent. Le prochain champ bloquant est la formule machine de pente EMA20.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED`.
+Action humaine unique : fournir la formule causale calculée à la clôture `t`, avec son lookback,
+son seuil minimal et le traitement exact de la valeur limite/zéro. Le MACD sera formalisé ensuite,
+sans ouvrir l'OOS ni optimiser un paramètre sur le PnL.
 
 ## Limites du produit
 
