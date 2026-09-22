@@ -240,3 +240,21 @@
   identique à l'arbre local testé et à la PR ; parents a2a64fd9 et 93b7fc22.
 - Aucun dataset, OOS, prix, stratégie, Risk Engine, NinjaTrader, broker, compte ou ordre réel touché.
 - Arrêt à une vraie gate métier : BLOCKED_HUMAN_GATE — CLEAN_LINEAGE_SOURCE_EVIDENCE.
+
+## 2026-09-22 — EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE
+
+- Reprise depuis `origin/main` au merge 3e155113ac53e225629f3f7693a50cac8bea2957 de la PR #250 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-predicate`, état initial propre et diff-check PASS.
+- Décision métier figée sans optimisation : fenêtre `t-3..t-1`, distance maximale inclusive de
+  huit ticks MNQ (2,00 points), mèche traversante autorisée, confirmation LONG strictement au-dessus
+  de l'EMA20 et SHORT strictement en dessous ; égalité refusée.
+- Nouveau sous-prédicat déterministe, à base de `Decimal`, qui exige exactement trois indices
+  causaux et exclut explicitement la bougie de confirmation de la recherche du pullback.
+- Ce sous-prédicat n'émet pas de signal de trading. Pente EMA20 et croisement MACD restent
+  obligatoires mais non implémentés tant que leurs règles machine ne sont pas autorisées.
+- Tests synthétiques : 14 passed in 0.24s. Régressions stratégie : 56 passed in 0.41s.
+- Suite complète : 5926 passed, 6 warnings in 255.75s. Ruff ciblé, Ruff format, `py_compile` et
+  `git diff --check` PASS.
+- Aucun accès dataset/OOS, replay, PnL, optimisation, Risk Engine, broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED`.

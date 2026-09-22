@@ -1,0 +1,255 @@
+"""Synthetic tests for the frozen EMA_PULLBACK_V1_MNQ pullback predicate."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+
+from agicore.trading.ema_pullback_v1_mnq import (
+    CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
+    EARLIEST_EXECUTION_BAR_OFFSET,
+    EMA_SLOPE_REQUIRED,
+    MACD_CROSS_REQUIRED,
+    MAX_PULLBACK_DISTANCE_POINTS,
+    MAX_PULLBACK_DISTANCE_TICKS,
+    PULLBACK_LOOKBACK_BARS,
+    SIGNAL_DECISION_ON_CLOSED_BAR,
+    WICK_CROSS_EMA20_ALLOWED,
+    ClosedBarEMA20,
+    PullbackContractError,
+    PullbackSide,
+    evaluate_pullback_confirmation,
+)
+
+
+def _bar(
+    sequence: int,
+    *,
+    low: str,
+    high: str,
+    close: str,
+    ema20: str = "100.00",
+) -> ClosedBarEMA20:
+    return ClosedBarEMA20(
+        sequence=sequence,
+        low=Decimal(low),
+        high=Decimal(high),
+        close=Decimal(close),
+        ema20=Decimal(ema20),
+    )
+
+
+def _far_preceding_bars() -> tuple[ClosedBarEMA20, ...]:
+    return (
+        _bar(7, low="103.00", high="104.00", close="103.50"),
+        _bar(8, low="103.25", high="104.25", close="103.75"),
+        _bar(9, low="103.50", high="104.50", close="104.00"),
+    )
+
+
+def test_contract_freezes_owner_declared_initial_parameters() -> None:
+    assert PULLBACK_LOOKBACK_BARS == 3
+    assert MAX_PULLBACK_DISTANCE_TICKS == 8
+    assert MAX_PULLBACK_DISTANCE_POINTS == Decimal("2.00")
+    assert EMA_SLOPE_REQUIRED is True
+    assert MACD_CROSS_REQUIRED is True
+    assert WICK_CROSS_EMA20_ALLOWED is True
+    assert CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED is True
+    assert SIGNAL_DECISION_ON_CLOSED_BAR is True
+    assert EARLIEST_EXECUTION_BAR_OFFSET == 1
+
+
+def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
+    preceding = (
+        _bar(7, low="103.00", high="104.00", close="103.50"),
+        _bar(8, low="101.50", high="103.00", close="102.50"),
+        _bar(9, low="103.00", high="104.00", close="103.50"),
+    )
+    confirmation = _bar(10, low="99.75", high="101.25", close="100.75")
+
+    result = evaluate_pullback_confirmation(
+        side=PullbackSide.LONG,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is True
+    assert result.pullback_found is True
+    assert result.confirmation_close_correct_side is True
+    assert result.qualifying_bar_sequence == 8
+
+
+def test_short_qualifies_after_prior_pullback_and_strict_close_below_ema20() -> None:
+    preceding = (
+        _bar(7, low="96.00", high="97.00", close="96.50"),
+        _bar(8, low="97.00", high="98.50", close="97.50"),
+        _bar(9, low="95.50", high="96.50", close="96.00"),
+    )
+    confirmation = _bar(10, low="98.75", high="100.25", close="99.25")
+
+    result = evaluate_pullback_confirmation(
+        side=PullbackSide.SHORT,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is True
+    assert result.pullback_found is True
+    assert result.confirmation_close_correct_side is True
+    assert result.qualifying_bar_sequence == 8
+
+
+@pytest.mark.parametrize(
+    ("side", "low", "high", "confirmation_close"),
+    [
+        (PullbackSide.LONG, "102.00", "103.00", "100.25"),
+        (PullbackSide.SHORT, "97.00", "98.00", "99.75"),
+    ],
+)
+def test_exact_eight_tick_distance_is_inclusive(
+    side: PullbackSide,
+    low: str,
+    high: str,
+    confirmation_close: str,
+) -> None:
+    preceding = list(_far_preceding_bars())
+    preceding[-1] = _bar(9, low=low, high=high, close=low)
+    confirmation = _bar(
+        10,
+        low="99.50",
+        high="100.50",
+        close=confirmation_close,
+    )
+
+    result = evaluate_pullback_confirmation(
+        side=side,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is True
+    assert result.minimum_distance_points == Decimal("2.00")
+    assert result.minimum_distance_ticks == Decimal(8)
+
+
+@pytest.mark.parametrize(
+    ("side", "low", "high", "close", "confirmation_close"),
+    [
+        (PullbackSide.LONG, "102.25", "103.25", "102.75", "100.25"),
+        (PullbackSide.SHORT, "96.75", "97.75", "97.25", "99.75"),
+    ],
+)
+def test_nine_tick_distance_is_rejected(
+    side: PullbackSide,
+    low: str,
+    high: str,
+    close: str,
+    confirmation_close: str,
+) -> None:
+    preceding = (
+        _bar(7, low=low, high=high, close=close),
+        _bar(8, low=low, high=high, close=close),
+        _bar(9, low=low, high=high, close=close),
+    )
+    confirmation = _bar(
+        10,
+        low="99.50",
+        high="100.50",
+        close=confirmation_close,
+    )
+
+    result = evaluate_pullback_confirmation(
+        side=side,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is False
+    assert result.pullback_found is False
+    assert result.minimum_distance_points == Decimal("2.25")
+    assert result.minimum_distance_ticks == Decimal(9)
+
+
+@pytest.mark.parametrize(
+    ("side", "confirmation_close"),
+    [
+        (PullbackSide.LONG, "100.25"),
+        (PullbackSide.SHORT, "99.75"),
+    ],
+)
+def test_wick_may_cross_ema20(side: PullbackSide, confirmation_close: str) -> None:
+    preceding = list(_far_preceding_bars())
+    preceding[0] = _bar(7, low="99.00", high="101.00", close="100.50")
+    confirmation = _bar(
+        10,
+        low="99.50",
+        high="100.50",
+        close=confirmation_close,
+    )
+
+    result = evaluate_pullback_confirmation(
+        side=side,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is True
+    assert result.minimum_distance_points == Decimal(0)
+    assert result.qualifying_bar_sequence == 7
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_confirmation_close_equal_to_ema20_is_rejected(side: PullbackSide) -> None:
+    preceding = list(_far_preceding_bars())
+    preceding[1] = _bar(8, low="99.75", high="101.00", close="100.50")
+    confirmation = _bar(10, low="99.50", high="100.50", close="100.00")
+
+    result = evaluate_pullback_confirmation(
+        side=side,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is False
+    assert result.pullback_found is True
+    assert result.confirmation_close_correct_side is False
+
+
+def test_confirmation_bar_is_not_counted_as_one_of_the_three_pullback_bars() -> None:
+    confirmation = _bar(10, low="99.00", high="101.00", close="100.25")
+
+    result = evaluate_pullback_confirmation(
+        side=PullbackSide.LONG,
+        preceding_bars=_far_preceding_bars(),
+        confirmation_bar=confirmation,
+    )
+
+    assert result.pullback_confirmation_qualifies is False
+    assert result.pullback_found is False
+
+
+def test_window_must_contain_exactly_three_immediately_preceding_closed_bars() -> None:
+    confirmation = _bar(10, low="99.50", high="100.50", close="100.25")
+
+    with pytest.raises(PullbackContractError, match="exactly 3"):
+        evaluate_pullback_confirmation(
+            side=PullbackSide.LONG,
+            preceding_bars=_far_preceding_bars()[:2],
+            confirmation_bar=confirmation,
+        )
+    with pytest.raises(PullbackContractError, match="three causal bars"):
+        evaluate_pullback_confirmation(
+            side=PullbackSide.LONG,
+            preceding_bars=(
+                _bar(7, low="99.00", high="101.00", close="100.50"),
+                _bar(8, low="103.00", high="104.00", close="103.50"),
+                _bar(11, low="103.00", high="104.00", close="103.50"),
+            ),
+            confirmation_bar=confirmation,
+        )
+
+
+def test_invalid_closed_bar_fails_closed() -> None:
+    with pytest.raises(PullbackContractError, match="close must be inside"):
+        _bar(1, low="99.00", high="101.00", close="102.00")
