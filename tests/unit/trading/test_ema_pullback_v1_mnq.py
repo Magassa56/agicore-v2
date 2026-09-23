@@ -1,4 +1,4 @@
-"""Synthetic tests for the frozen EMA_PULLBACK_V1_MNQ pullback predicate."""
+"""Synthetic tests for the frozen EMA_PULLBACK_V1_MNQ predicates."""
 
 from __future__ import annotations
 
@@ -9,16 +9,19 @@ import pytest
 from agicore.trading.ema_pullback_v1_mnq import (
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
     EARLIEST_EXECUTION_BAR_OFFSET,
+    EMA_SLOPE_LOOKBACK_BARS,
     EMA_SLOPE_REQUIRED,
     MACD_CROSS_REQUIRED,
     MAX_PULLBACK_DISTANCE_POINTS,
     MAX_PULLBACK_DISTANCE_TICKS,
+    MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
     PULLBACK_LOOKBACK_BARS,
     SIGNAL_DECISION_ON_CLOSED_BAR,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
     PullbackContractError,
     PullbackSide,
+    evaluate_ema20_slope,
     evaluate_pullback_confirmation,
 )
 
@@ -58,6 +61,8 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED is True
     assert SIGNAL_DECISION_ON_CLOSED_BAR is True
     assert EARLIEST_EXECUTION_BAR_OFFSET == 1
+    assert EMA_SLOPE_LOOKBACK_BARS == 3
+    assert MINIMUM_EMA_SLOPE_POINTS_PER_BAR == Decimal("0.0")
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -253,3 +258,134 @@ def test_window_must_contain_exactly_three_immediately_preceding_closed_bars() -
 def test_invalid_closed_bar_fails_closed() -> None:
     with pytest.raises(PullbackContractError, match="close must be inside"):
         _bar(1, low="99.00", high="101.00", close="102.00")
+
+
+def test_long_ema20_slope_uses_t_and_t_minus_three_closed_values() -> None:
+    result = evaluate_ema20_slope(
+        side=PullbackSide.LONG,
+        lookback_bar=_bar(7, low="99", high="101", close="100", ema20="99"),
+        confirmation_bar=_bar(10, low="99", high="101", close="100", ema20="102"),
+    )
+
+    assert result.ema20_slope_qualifies is True
+    assert result.slope_points_per_bar == Decimal(1)
+    assert result.lookback_bar_sequence == 7
+    assert result.confirmation_bar_sequence == 10
+
+
+def test_short_ema20_slope_uses_t_and_t_minus_three_closed_values() -> None:
+    result = evaluate_ema20_slope(
+        side=PullbackSide.SHORT,
+        lookback_bar=_bar(7, low="99", high="101", close="100", ema20="102"),
+        confirmation_bar=_bar(10, low="99", high="101", close="100", ema20="99"),
+    )
+
+    assert result.ema20_slope_qualifies is True
+    assert result.slope_points_per_bar == Decimal(-1)
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_zero_ema20_slope_is_rejected(side: PullbackSide) -> None:
+    result = evaluate_ema20_slope(
+        side=side,
+        lookback_bar=_bar(7, low="99", high="101", close="100"),
+        confirmation_bar=_bar(10, low="99", high="101", close="100"),
+    )
+
+    assert result.slope_points_per_bar == Decimal(0)
+    assert result.ema20_slope_qualifies is False
+
+
+def test_ema20_slope_equal_to_minimum_threshold_is_rejected() -> None:
+    result = evaluate_ema20_slope(
+        side=PullbackSide.LONG,
+        lookback_bar=_bar(7, low="99", high="101", close="100"),
+        confirmation_bar=_bar(10, low="99", high="101", close="100"),
+    )
+
+    assert result.slope_points_per_bar == MINIMUM_EMA_SLOPE_POINTS_PER_BAR
+    assert result.ema20_slope_qualifies is False
+
+
+def test_very_small_positive_ema20_slope_qualifies_long_only() -> None:
+    long_result = evaluate_ema20_slope(
+        side=PullbackSide.LONG,
+        lookback_bar=_bar(7, low="99", high="101", close="100", ema20="100"),
+        confirmation_bar=_bar(
+            10,
+            low="99",
+            high="101",
+            close="100",
+            ema20="100.000000000000000000000003",
+        ),
+    )
+    short_result = evaluate_ema20_slope(
+        side=PullbackSide.SHORT,
+        lookback_bar=_bar(7, low="99", high="101", close="100", ema20="100"),
+        confirmation_bar=_bar(
+            10,
+            low="99",
+            high="101",
+            close="100",
+            ema20="100.000000000000000000000003",
+        ),
+    )
+
+    assert long_result.slope_points_per_bar == Decimal("0.000000000000000000000001")
+    assert long_result.ema20_slope_qualifies is True
+    assert short_result.ema20_slope_qualifies is False
+
+
+def test_very_small_negative_ema20_slope_qualifies_short_only() -> None:
+    long_result = evaluate_ema20_slope(
+        side=PullbackSide.LONG,
+        lookback_bar=_bar(7, low="99", high="101", close="100", ema20="100"),
+        confirmation_bar=_bar(
+            10,
+            low="99",
+            high="101",
+            close="100",
+            ema20="99.999999999999999999999997",
+        ),
+    )
+    short_result = evaluate_ema20_slope(
+        side=PullbackSide.SHORT,
+        lookback_bar=_bar(7, low="99", high="101", close="100", ema20="100"),
+        confirmation_bar=_bar(
+            10,
+            low="99",
+            high="101",
+            close="100",
+            ema20="99.999999999999999999999997",
+        ),
+    )
+
+    assert short_result.slope_points_per_bar == Decimal("-0.000000000000000000000001")
+    assert short_result.ema20_slope_qualifies is True
+    assert long_result.ema20_slope_qualifies is False
+
+
+def test_ema20_slope_rejects_insufficient_warmup() -> None:
+    with pytest.raises(PullbackContractError, match="3 closed warmup bars"):
+        evaluate_ema20_slope(
+            side=PullbackSide.LONG,
+            lookback_bar=_bar(0, low="99", high="101", close="100"),
+            confirmation_bar=_bar(2, low="99", high="101", close="100"),
+        )
+
+
+@pytest.mark.parametrize("non_causal_sequence", [6, 8, 10, 11])
+def test_ema20_slope_rejects_any_bar_other_than_exact_t_minus_three(
+    non_causal_sequence: int,
+) -> None:
+    with pytest.raises(PullbackContractError, match="exactly t-3"):
+        evaluate_ema20_slope(
+            side=PullbackSide.LONG,
+            lookback_bar=_bar(
+                non_causal_sequence,
+                low="99",
+                high="101",
+                close="100",
+            ),
+            confirmation_bar=_bar(10, low="99", high="101", close="100"),
+        )

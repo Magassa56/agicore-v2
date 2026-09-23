@@ -1,12 +1,13 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-22 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED ;
+Date : 2026-09-23 UTC.
+Statut : BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
+EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-predicate.
-Base GitHub vérifiée et récupérée : 3e155113ac53e225629f3f7693a50cac8bea2957.
+Branche de vérification : feature/ema-pullback-v1-mnq-slope.
+Base GitHub vérifiée et récupérée : bc9508ddd05b3537438c7fa9fe48ba55902af5ec.
 
 ## Acquis vérifiés
 
@@ -237,21 +238,46 @@ l'égalité est refusée. Les trois indices antérieurs doivent être strictemen
 Le contrat travaille exclusivement sur des bougies clôturées, décide à la clôture `t` et conserve
 l'exécution au plus tôt sur `t+1`. L'évaluation en `Decimal` protège la limite inclusive de huit ticks.
 
-Le module `ema_pullback_v1_mnq.py` évalue uniquement ce sous-prédicat et n'émet aucun signal de
-trading. La pente EMA20 et le croisement MACD restent obligatoires, mais aucune formule, fenêtre ou
-valeur par défaut n'est inventée. Stop-loss, take-profit et filtres de session restent également
-hors du contrat exécutable. Aucun dataset, OOS, PnL, replay, Risk Engine ou broker n'est utilisé.
+Le module `ema_pullback_v1_mnq.py` évalue ce sous-prédicat sans émettre de signal de trading. Le
+croisement MACD reste obligatoire, sans valeur par défaut. Stop-loss, take-profit et filtres de
+session restent également hors du contrat exécutable. Aucun dataset, OOS, PnL, replay, Risk Engine
+ou broker n'est utilisé.
 
 Preuves de cette tranche : 14 tests synthétiques PASS couvrent LONG, SHORT, distance exactement
 huit ticks, rejet à neuf ticks, mèche traversante, clôture égale refusée, exclusion de la confirmation
 et causalité stricte. Les 56 tests stratégie ciblés passent ; la suite complète passe avec
 5 926 tests et 6 warnings historiques en 255,75 s. Ruff ciblé, format Ruff, `py_compile` et
-`git diff --check` passent. Le prochain champ bloquant est la formule machine de pente EMA20.
+`git diff --check` passent. Cette tranche a été intégrée par la PR #251, merge
+bc9508ddd05b3537438c7fa9fe48ba55902af5ec.
 
-`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED`.
-Action humaine unique : fournir la formule causale calculée à la clôture `t`, avec son lookback,
-son seuil minimal et le traitement exact de la valeur limite/zéro. Le MACD sera formalisé ensuite,
-sans ouvrir l'OOS ni optimiser un paramètre sur le PnL.
+## EMA_PULLBACK_V1_MNQ — pente EMA20 initiale figée
+
+La décision métier du 2026-09-23 fixe sans optimisation `K = 3` et la formule causale
+`(EMA20[t] - EMA20[t-3]) / 3`, en points par bougie. Le seuil minimal est exactement
+`0,0 point/bar`. LONG exige une pente strictement positive ; SHORT exige une pente strictement
+négative. Une pente nulle, y compris l'égalité exacte au seuil, est refusée. Aucune force minimale
+supplémentaire n'est ajoutée.
+
+L'évaluation accepte uniquement deux valeurs EMA20 fournies sur des bougies déjà clôturées : la
+confirmation `t` et la référence exactement `t-3`. Un warmup insuffisant ou tout autre écart
+d'indice échoue explicitement. Le calcul en `Decimal` conserve le signe de valeurs positives ou
+négatives arbitrairement faibles et n'utilise aucun point futur. Il ne calcule pas l'EMA20 et ne
+combine pas encore pullback, pente et MACD en signal exécutable.
+
+Preuves locales : les 12 nouveaux cas de pente portent le fichier synthétique à 26 tests PASS et
+couvrent LONG, SHORT, zéro, égalité au seuil, valeurs très faibles positives/négatives, warmup
+insuffisant et rejet des indices non causaux. Les 68 régressions stratégie passent ; la suite
+complète passe avec 5 938 tests et 6 warnings historiques en 86,03 s. Ruff ciblé et format Ruff
+passent, ainsi que `py_compile`, les 4 gardes de confidentialité, `git diff --check` et le scan
+anti-fuite des ajouts. Aucun fichier binaire ou ligne de marché n'est présent dans le diff.
+
+`EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED`.
+Action humaine unique : fournir le contrat déterministe MACD — périodes fast/slow/signal, formule
+et amorçage, inégalités exactes du croisement haussier/baissier, traitement de l'égalité et nombre
+de bougies clôturées pendant lesquelles un croisement reste valide. Aucun défaut 12/26/9 n'est
+présumé et aucun paramètre ne sera choisi sur le PnL ou l'OOS.
 
 ## Limites du produit
 
