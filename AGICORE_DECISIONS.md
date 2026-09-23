@@ -256,3 +256,23 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    Engine, connexion broker ou opération de trading n'est autorisée par cette décision.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS` ; formalisation globale arrêtée à
    `BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — pente EMA20 initiale (approuvée le 2026-09-23)
+
+1. **Décision sans optimisation** : `K = 3` et
+   `ema20_slope_points_per_bar = (EMA20[t] - EMA20[t-3]) / 3`.
+2. **Seuil** : `minimum_slope_threshold = 0,0 point/bar`. LONG exige strictement une pente
+   supérieure à zéro ; SHORT exige strictement une pente inférieure à zéro. Zéro et égalité au
+   seuil sont refusés.
+3. **Précision** : toute valeur strictement positive ou négative qualifie son seul côté, même de
+   très faible amplitude. Aucun filtre de force de pente n'est ajouté à V1.
+4. **Temporalité** : le calcul est effectué après la clôture de `t`, uniquement à partir de
+   `EMA20[t]` et `EMA20[t-3]`. Les deux indices doivent matérialiser exactement cet écart causal.
+5. **Fail-closed** : warmup inférieur à trois bougies clôturées, mauvais indice, côté implicite ou
+   valeur non finie sont refusés ; aucun point futur n'est accepté.
+6. **Portée** : le calcul consomme des valeurs EMA20 déjà établies. Il ne définit pas l'amorçage de
+   l'EMA20 et ne produit pas seul un signal ou une exécution.
+7. **Frontières** : aucune donnée, OOS, optimisation, replay, métrique de performance, modification
+   du Risk Engine, connexion broker ou opération de trading n'est autorisée par cette décision.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS` ; formalisation globale arrêtée à
+   `BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED`, sans présumer les paramètres MACD.

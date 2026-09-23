@@ -258,3 +258,22 @@
 - Aucun accès dataset/OOS, replay, PnL, optimisation, Risk Engine, broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — EMA20_SLOPE_FORMULA_REQUIRED`.
+
+## 2026-09-23 — EMA_PULLBACK_V1_MNQ_EMA20_SLOPE
+
+- Reprise depuis `origin/main` au merge bc9508ddd05b3537438c7fa9fe48ba55902af5ec de la PR #251 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-slope`, état initial propre.
+- Décision métier figée sans optimisation : `K = 3`, pente
+  `(EMA20[t] - EMA20[t-3]) / 3`, seuil `0,0 point/bar`, LONG strictement positif, SHORT strictement
+  négatif, zéro et égalité refusés.
+- Nouveau sous-prédicat `Decimal` limité aux bougies clôturées `t` et exactement `t-3`. Warmup
+  insuffisant et tout indice non causal échouent explicitement.
+- Douze nouveaux cas synthétiques couvrent LONG, SHORT, zéro, égalité, valeurs très faibles des deux
+  signes, warmup et causalité ; fichier ciblé : 26 passed in 0.08s. Régressions stratégie :
+  68 passed in 0.12s.
+- Suite complète : 5938 passed, 6 warnings in 86.03s. Ruff ciblé, format Ruff, `py_compile`, les
+  4 gardes de confidentialité, `git diff --check` et le scan anti-fuite des ajouts PASS ; aucun
+  binaire ou ligne de marché dans le diff.
+- Aucun accès dataset/OOS, replay, PnL, optimisation, Risk Engine, broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED`.

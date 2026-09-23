@@ -1,9 +1,10 @@
 """Deterministic pullback predicate for ``EMA_PULLBACK_V1_MNQ``.
 
 This module freezes only the strategy rules that the owner has explicitly defined.  It
-does not compute EMA20, EMA slope or MACD, does not emit an executable trading signal,
-and never reads market or OOS data.  A complete signal remains fail-closed until the
-remaining strategy rules are specified.
+does not compute EMA20 or MACD, does not emit an executable trading signal, and never
+reads market or OOS data.  The EMA20 slope is evaluated from caller-supplied closed-bar
+EMA20 values.  A complete signal remains fail-closed until the remaining strategy rules
+are specified.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ STRATEGY_ID = "EMA_PULLBACK_V1_MNQ"
 INSTRUMENT = "MNQ"
 TIMEFRAME_MINUTES = 1
 EMA_PERIOD = 20
+EMA_SLOPE_LOOKBACK_BARS = 3
+MINIMUM_EMA_SLOPE_POINTS_PER_BAR = Decimal("0.0")
 MNQ_TICK_SIZE_POINTS = Decimal("0.25")
 PULLBACK_LOOKBACK_BARS = 3
 MAX_PULLBACK_DISTANCE_TICKS = 8
@@ -82,6 +85,17 @@ class PullbackPredicateResult:
     minimum_distance_points: Decimal
     minimum_distance_ticks: Decimal
     qualifying_bar_sequence: int | None
+
+
+@dataclass(frozen=True)
+class EMA20SlopeResult:
+    """Result of the frozen causal EMA20 slope predicate only."""
+
+    side: PullbackSide
+    ema20_slope_qualifies: bool
+    slope_points_per_bar: Decimal
+    lookback_bar_sequence: int
+    confirmation_bar_sequence: int
 
 
 def distance_from_bar_range_to_ema20(bar: ClosedBarEMA20) -> Decimal:
@@ -160,15 +174,56 @@ def evaluate_pullback_confirmation(
     )
 
 
+def evaluate_ema20_slope(
+    *,
+    side: PullbackSide,
+    lookback_bar: ClosedBarEMA20,
+    confirmation_bar: ClosedBarEMA20,
+) -> EMA20SlopeResult:
+    """Evaluate the owner-defined EMA20 slope at a closed confirmation bar.
+
+    The fixed formula is ``(EMA20[t] - EMA20[t-3]) / 3``.  Only the two
+    caller-supplied, already-closed bars participate in the calculation.  Their sequence
+    indices must prove that exact causal relationship; missing warmup or any other gap
+    fails closed.  Zero/equality never qualifies either direction.
+    """
+    if not isinstance(side, PullbackSide):
+        raise PullbackContractError("side must be explicitly LONG or SHORT")
+    if confirmation_bar.sequence < EMA_SLOPE_LOOKBACK_BARS:
+        raise PullbackContractError(
+            f"at least {EMA_SLOPE_LOOKBACK_BARS} closed warmup bars are required"
+        )
+
+    expected_lookback_sequence = confirmation_bar.sequence - EMA_SLOPE_LOOKBACK_BARS
+    if lookback_bar.sequence != expected_lookback_sequence:
+        raise PullbackContractError("lookback bar must be the causal closed bar exactly t-3")
+
+    slope = (confirmation_bar.ema20 - lookback_bar.ema20) / Decimal(EMA_SLOPE_LOOKBACK_BARS)
+    qualifies = (
+        slope > MINIMUM_EMA_SLOPE_POINTS_PER_BAR
+        if side is PullbackSide.LONG
+        else slope < -MINIMUM_EMA_SLOPE_POINTS_PER_BAR
+    )
+    return EMA20SlopeResult(
+        side=side,
+        ema20_slope_qualifies=qualifies,
+        slope_points_per_bar=slope,
+        lookback_bar_sequence=lookback_bar.sequence,
+        confirmation_bar_sequence=confirmation_bar.sequence,
+    )
+
+
 __all__ = [
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
     "EARLIEST_EXECUTION_BAR_OFFSET",
     "EMA_PERIOD",
+    "EMA_SLOPE_LOOKBACK_BARS",
     "EMA_SLOPE_REQUIRED",
     "INSTRUMENT",
     "MACD_CROSS_REQUIRED",
     "MAX_PULLBACK_DISTANCE_POINTS",
     "MAX_PULLBACK_DISTANCE_TICKS",
+    "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
     "MNQ_TICK_SIZE_POINTS",
     "PULLBACK_LOOKBACK_BARS",
     "SIGNAL_DECISION_ON_CLOSED_BAR",
@@ -176,9 +231,11 @@ __all__ = [
     "TIMEFRAME_MINUTES",
     "WICK_CROSS_EMA20_ALLOWED",
     "ClosedBarEMA20",
+    "EMA20SlopeResult",
     "PullbackContractError",
     "PullbackPredicateResult",
     "PullbackSide",
     "distance_from_bar_range_to_ema20",
+    "evaluate_ema20_slope",
     "evaluate_pullback_confirmation",
 ]
