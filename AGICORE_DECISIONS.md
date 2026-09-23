@@ -276,3 +276,25 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    du Risk Engine, connexion broker ou opération de trading n'est autorisée par cette décision.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS` ; formalisation globale arrêtée à
    `BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED`, sans présumer les paramètres MACD.
+
+## EMA_PULLBACK_V1_MNQ — MACD initial et assemblage d'entrée (approuvés le 2026-09-23)
+
+1. **Décision sans optimisation** : MACD `fast = 12`, `slow = 26`, `signal = 9` ; ligne MACD
+   `EMA12(Close) - EMA26(Close)` et ligne signal `EMA9(MACD_LINE)`. Les deux moyennes sont des EMA.
+2. **Amorçage unique** : réutiliser directement la fonction publique déterministe du replay,
+   amorcée au premier close avec `alpha = 2 / (period + 1)`. Aucune autre méthode de seed n'est créée.
+3. **Croisement LONG** : `MACD[t-1] <= SIGNAL[t-1]` et `MACD[t] > SIGNAL[t]`.
+   **Croisement SHORT** : `MACD[t-1] >= SIGNAL[t-1]` et `MACD[t] < SIGNAL[t]`.
+4. **Égalité et validité** : l'égalité à `t-1` est admise ; l'égalité à `t` est refusée. Le croisement
+   est valide uniquement sur la bougie de confirmation clôturée `t` et n'est jamais réutilisé.
+5. **Warmup fail-closed** : 35 bougies causales et contiguës sont nécessaires pour EMA26, EMA9 du
+   MACD et les deux points du croisement. Sinon `INSUFFICIENT_WARMUP` et `NONE` sont obligatoires.
+6. **Assemblage** : un signal non exécutable LONG/SHORT existe seulement si pullback + clôture du bon
+   côté + pente EMA20 + croisement MACD qualifient tous le même côté et la même bougie `t`.
+7. **Temporalité** : seules les données clôturées jusqu'à `t` sont consommées ; toute valeur de `t+1`
+   est ignorée. Un signal formé à `t` ne permet une exécution qu'au plus tôt sur `t+1`.
+8. **Portée** : aucun PnL, dataset, OOS, replay de marché, optimisation, Risk Engine, broker ou ordre.
+   La sortie de position, les stops, objectifs et filtres de session restent hors de ce sous-contrat.
+9. **Verdict** : `EMA_PULLBACK_V1_MNQ_MACD = PASS` et
+   `EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED`.

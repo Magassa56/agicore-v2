@@ -1,13 +1,15 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-23 UTC.
-Statut : BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
+EMA_PULLBACK_V1_MNQ_MACD = PASS ;
+EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-slope.
-Base GitHub vérifiée et récupérée : bc9508ddd05b3537438c7fa9fe48ba55902af5ec.
+Branche de vérification : feature/ema-pullback-v1-mnq-macd.
+Base GitHub vérifiée et récupérée : 8c90ba79fb0492676cbb321c7c5ee41a46ca8f8b.
 
 ## Acquis vérifiés
 
@@ -261,8 +263,9 @@ supplémentaire n'est ajoutée.
 L'évaluation accepte uniquement deux valeurs EMA20 fournies sur des bougies déjà clôturées : la
 confirmation `t` et la référence exactement `t-3`. Un warmup insuffisant ou tout autre écart
 d'indice échoue explicitement. Le calcul en `Decimal` conserve le signe de valeurs positives ou
-négatives arbitrairement faibles et n'utilise aucun point futur. Il ne calcule pas l'EMA20 et ne
-combine pas encore pullback, pente et MACD en signal exécutable.
+négatives arbitrairement faibles et n'utilise aucun point futur. Il ne calcule pas l'EMA20.
+L'assemblage décrit ci-dessous combine désormais les trois prédicats en signal non exécutable ;
+il ne crée aucun ordre.
 
 Preuves locales : les 12 nouveaux cas de pente portent le fichier synthétique à 26 tests PASS et
 couvrent LONG, SHORT, zéro, égalité au seuil, valeurs très faibles positives/négatives, warmup
@@ -271,13 +274,43 @@ complète passe avec 5 938 tests et 6 warnings historiques en 86,03 s. Ruff cibl
 passent, ainsi que `py_compile`, les 4 gardes de confidentialité, `git diff --check` et le scan
 anti-fuite des ajouts. Aucun fichier binaire ou ligne de marché n'est présent dans le diff.
 
-`EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS`.
+Cette tranche a été intégrée par la PR #252, merge
+8c90ba79fb0492676cbb321c7c5ee41a46ca8f8b. `EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS`.
 
-`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED`.
-Action humaine unique : fournir le contrat déterministe MACD — périodes fast/slow/signal, formule
-et amorçage, inégalités exactes du croisement haussier/baissier, traitement de l'égalité et nombre
-de bougies clôturées pendant lesquelles un croisement reste valide. Aucun défaut 12/26/9 n'est
-présumé et aucun paramètre ne sera choisi sur le PnL ou l'OOS.
+## EMA_PULLBACK_V1_MNQ — MACD et signal d'entrée assemblé
+
+La décision métier du 2026-09-23 fixe sans optimisation le MACD `12/26/9`. La ligne MACD est
+`EMA12(Close) - EMA26(Close)` et sa ligne signal est `EMA9(MACD_LINE)`. Les deux calculs réutilisent
+directement `market_replay.calculate_ema`, convention déterministe existante avec amorçage au
+premier close et `alpha = 2 / (period + 1)` ; aucune seconde implémentation d'EMA n'est introduite.
+
+Le croisement haussier exige `MACD[t-1] <= SIGNAL[t-1]` puis `MACD[t] > SIGNAL[t]`. Le croisement
+baissier exige `MACD[t-1] >= SIGNAL[t-1]` puis `MACD[t] < SIGNAL[t]`. L'égalité est donc admise
+uniquement à `t-1` et refusée à `t`. La validité vaut exactement la bougie clôturée courante : un
+croisement antérieur n'est jamais réutilisé. Trente-cinq bougies clôturées causales et contiguës
+sont requises pour disposer du warmup EMA26, du warmup EMA9 et des deux points `t-1`/`t` ; sinon
+`macd_status = INSUFFICIENT_WARMUP` et `signal = NONE`.
+
+L'assembleur émet un signal non exécutable LONG ou SHORT seulement lorsque, sur la même confirmation
+`t`, le pullback et la clôture directionnelle, la pente EMA20 et le nouveau croisement MACD qualifient
+tous le même côté. Toute condition absente produit `NONE`. Les valeurs postérieures à `t` sont
+ignorées ; l'exécution reste au plus tôt sur `t+1`, sans prix ni politique d'ordre encore présumés.
+
+Preuves locales : 41 tests synthétiques ciblés PASS en 0,07 s, dont croisement haussier/baissier,
+égalité à `t-1`, égalité refusée à `t`, absence de nouveau croisement, warmup insuffisant, causalité,
+mutation de `t+1`, assemblages LONG/SHORT et refus si un prédicat manque. Les 90 régressions stratégie
+et replay ciblées passent en 0,23 s. La suite complète passe avec 5 953 tests et 6 warnings historiques
+en 85,88 s. Ruff ciblé et format Ruff, `py_compile`, les 4 gardes de confidentialité et
+`git diff --check` passent. Aucun dataset, OOS, PnL, replay de données, Risk Engine, broker ou ordre
+n'a été utilisé ; le diff ne contient aucun fichier ni ligne de marché.
+
+`EMA_PULLBACK_V1_MNQ_MACD = PASS` et `EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED`.
+Action humaine unique : confirmer ou corriger cette règle candidate de sortie principale : une position
+LONG sort si une bougie clôture strictement sous EMA20, une position SHORT sort si elle clôture strictement
+au-dessus, l'égalité ne sort pas, la décision est prise à la clôture `t` et l'exécution au plus tôt sur
+`t+1`. Aucune règle de stop, objectif ou priorité de sortie n'est déduite à ce stade.
 
 ## Limites du produit
 
