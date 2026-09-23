@@ -9,9 +9,17 @@ import pytest
 from agicore.trading.ema_pullback_v1_mnq import (
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
     EARLIEST_EXECUTION_BAR_OFFSET,
+    EMA_SEED_CONVENTION,
     EMA_SLOPE_LOOKBACK_BARS,
     EMA_SLOPE_REQUIRED,
     MACD_CROSS_REQUIRED,
+    MACD_CROSS_VALIDITY_BARS,
+    MACD_FAST_PERIOD,
+    MACD_LINE_MA_TYPE,
+    MACD_REQUIRED_CLOSED_BARS,
+    MACD_SIGNAL_LINE_MA_TYPE,
+    MACD_SIGNAL_PERIOD,
+    MACD_SLOW_PERIOD,
     MAX_PULLBACK_DISTANCE_POINTS,
     MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
@@ -19,9 +27,13 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SIGNAL_DECISION_ON_CLOSED_BAR,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
+    EntrySignal,
+    MACDStatus,
     PullbackContractError,
     PullbackSide,
     evaluate_ema20_slope,
+    evaluate_ema_pullback_entry_signal,
+    evaluate_macd_confirmation,
     evaluate_pullback_confirmation,
 )
 
@@ -51,6 +63,31 @@ def _far_preceding_bars() -> tuple[ClosedBarEMA20, ...]:
     )
 
 
+def _closed_price_bar(
+    sequence: int,
+    close: str,
+    *,
+    ema20: str = "100.00",
+) -> ClosedBarEMA20:
+    price = Decimal(close)
+    return _bar(
+        sequence,
+        low=str(price - Decimal("0.50")),
+        high=str(price + Decimal("0.50")),
+        close=close,
+        ema20=ema20,
+    )
+
+
+def _macd_history(
+    *,
+    confirmation_close: str,
+    previous_close: str = "100",
+) -> tuple[ClosedBarEMA20, ...]:
+    closes = ["100"] * 33 + [previous_close, confirmation_close]
+    return tuple(_closed_price_bar(sequence, close) for sequence, close in enumerate(closes))
+
+
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
     assert MAX_PULLBACK_DISTANCE_TICKS == 8
@@ -63,6 +100,14 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert EARLIEST_EXECUTION_BAR_OFFSET == 1
     assert EMA_SLOPE_LOOKBACK_BARS == 3
     assert MINIMUM_EMA_SLOPE_POINTS_PER_BAR == Decimal("0.0")
+    assert MACD_FAST_PERIOD == 12
+    assert MACD_SLOW_PERIOD == 26
+    assert MACD_SIGNAL_PERIOD == 9
+    assert MACD_LINE_MA_TYPE == "EMA"
+    assert MACD_SIGNAL_LINE_MA_TYPE == "EMA"
+    assert MACD_CROSS_VALIDITY_BARS == 1
+    assert MACD_REQUIRED_CLOSED_BARS == 35
+    assert EMA_SEED_CONVENTION == "FIRST_CLOSE_ALPHA_2_OVER_PERIOD_PLUS_1"
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -389,3 +434,225 @@ def test_ema20_slope_rejects_any_bar_other_than_exact_t_minus_three(
             ),
             confirmation_bar=_bar(10, low="99", high="101", close="100"),
         )
+
+
+def test_bullish_macd_cross_allows_equality_at_t_minus_one() -> None:
+    result = evaluate_macd_confirmation(
+        side=PullbackSide.LONG,
+        closed_bars=_macd_history(confirmation_close="101"),
+        confirmation_bar_sequence=34,
+    )
+
+    assert result.status is MACDStatus.READY
+    assert result.previous_macd_line == result.previous_signal_line
+    assert result.current_macd_line is not None
+    assert result.current_signal_line is not None
+    assert result.current_macd_line > result.current_signal_line
+    assert result.macd_cross_qualifies is True
+    assert result.signal is EntrySignal.LONG
+    assert result.previous_bar_sequence == 33
+
+
+def test_bearish_macd_cross_allows_equality_at_t_minus_one() -> None:
+    result = evaluate_macd_confirmation(
+        side=PullbackSide.SHORT,
+        closed_bars=_macd_history(confirmation_close="99"),
+        confirmation_bar_sequence=34,
+    )
+
+    assert result.status is MACDStatus.READY
+    assert result.previous_macd_line == result.previous_signal_line
+    assert result.current_macd_line is not None
+    assert result.current_signal_line is not None
+    assert result.current_macd_line < result.current_signal_line
+    assert result.macd_cross_qualifies is True
+    assert result.signal is EntrySignal.SHORT
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_macd_equality_at_confirmation_is_rejected(side: PullbackSide) -> None:
+    result = evaluate_macd_confirmation(
+        side=side,
+        closed_bars=_macd_history(confirmation_close="100"),
+        confirmation_bar_sequence=34,
+    )
+
+    assert result.status is MACDStatus.READY
+    assert result.current_macd_line == result.current_signal_line
+    assert result.macd_cross_qualifies is False
+    assert result.signal is EntrySignal.NONE
+
+
+@pytest.mark.parametrize(
+    ("side", "previous_close", "confirmation_close"),
+    [
+        (PullbackSide.LONG, "101", "102"),
+        (PullbackSide.SHORT, "99", "98"),
+    ],
+)
+def test_macd_requires_a_new_cross_on_current_closed_bar(
+    side: PullbackSide,
+    previous_close: str,
+    confirmation_close: str,
+) -> None:
+    result = evaluate_macd_confirmation(
+        side=side,
+        closed_bars=_macd_history(
+            previous_close=previous_close,
+            confirmation_close=confirmation_close,
+        ),
+        confirmation_bar_sequence=34,
+    )
+
+    assert result.status is MACDStatus.READY
+    assert result.macd_cross_qualifies is False
+    assert result.signal is EntrySignal.NONE
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_macd_insufficient_warmup_returns_none(side: PullbackSide) -> None:
+    history = _macd_history(confirmation_close="101")[:-1]
+
+    result = evaluate_macd_confirmation(
+        side=side,
+        closed_bars=history,
+        confirmation_bar_sequence=33,
+    )
+
+    assert result.status is MACDStatus.INSUFFICIENT_WARMUP
+    assert result.signal is EntrySignal.NONE
+    assert result.macd_cross_qualifies is False
+    assert result.observed_closed_bars == 34
+    assert result.required_closed_bars == 35
+    assert result.current_macd_line is None
+    assert result.current_signal_line is None
+
+
+def test_macd_rejects_non_contiguous_causal_history() -> None:
+    history = list(_macd_history(confirmation_close="101"))
+    del history[10]
+
+    with pytest.raises(PullbackContractError, match="ordered and contiguous"):
+        evaluate_macd_confirmation(
+            side=PullbackSide.LONG,
+            closed_bars=history,
+            confirmation_bar_sequence=34,
+        )
+
+
+def test_mutating_t_plus_one_has_no_effect_on_macd_confirmation() -> None:
+    causal_history = _macd_history(confirmation_close="101")
+    low_future = causal_history + (_closed_price_bar(35, "50"),)
+    high_future = causal_history + (_closed_price_bar(35, "500"),)
+
+    low_result = evaluate_macd_confirmation(
+        side=PullbackSide.LONG,
+        closed_bars=low_future,
+        confirmation_bar_sequence=34,
+    )
+    high_result = evaluate_macd_confirmation(
+        side=PullbackSide.LONG,
+        closed_bars=high_future,
+        confirmation_bar_sequence=34,
+    )
+
+    assert low_result == high_result
+    assert low_result.signal is EntrySignal.LONG
+
+
+@pytest.mark.parametrize(
+    ("side", "confirmation_close", "lookback_ema20", "confirmation_ema20", "signal"),
+    [
+        (PullbackSide.LONG, "101", "99.00", "100.50", EntrySignal.LONG),
+        (PullbackSide.SHORT, "99", "101.00", "99.50", EntrySignal.SHORT),
+    ],
+)
+def test_assembled_entry_requires_pullback_slope_and_same_bar_macd_cross(
+    side: PullbackSide,
+    confirmation_close: str,
+    lookback_ema20: str,
+    confirmation_ema20: str,
+    signal: EntrySignal,
+) -> None:
+    history = list(_macd_history(confirmation_close=confirmation_close))
+    history[31] = _closed_price_bar(31, "100", ema20=lookback_ema20)
+    history[34] = _closed_price_bar(
+        34,
+        confirmation_close,
+        ema20=confirmation_ema20,
+    )
+
+    result = evaluate_ema_pullback_entry_signal(
+        side=side,
+        closed_bars=history,
+        confirmation_bar_sequence=34,
+    )
+
+    assert result.entry_signal_qualifies is True
+    assert result.pullback_confirmation_qualifies is True
+    assert result.ema20_slope_qualifies is True
+    assert result.macd_cross_qualifies is True
+    assert result.macd_status is MACDStatus.READY
+    assert result.signal is signal
+    assert result.confirmation_bar_sequence == 34
+
+
+def test_assembled_entry_returns_none_when_one_mandatory_predicate_fails() -> None:
+    history = list(_macd_history(confirmation_close="101"))
+    history[31] = _closed_price_bar(31, "100", ema20="90")
+    history[32] = _closed_price_bar(32, "100", ema20="90")
+    history[33] = _closed_price_bar(33, "100", ema20="90")
+    history[34] = _closed_price_bar(34, "101", ema20="100.50")
+
+    result = evaluate_ema_pullback_entry_signal(
+        side=PullbackSide.LONG,
+        closed_bars=history,
+        confirmation_bar_sequence=34,
+    )
+
+    assert result.pullback_confirmation_qualifies is False
+    assert result.ema20_slope_qualifies is True
+    assert result.macd_cross_qualifies is True
+    assert result.entry_signal_qualifies is False
+    assert result.signal is EntrySignal.NONE
+
+
+def test_assembled_entry_preserves_insufficient_macd_warmup_status() -> None:
+    history = list(_macd_history(confirmation_close="101")[:-1])
+    history[30] = _closed_price_bar(30, "100", ema20="99.00")
+    history[33] = _closed_price_bar(33, "100", ema20="99.50")
+
+    result = evaluate_ema_pullback_entry_signal(
+        side=PullbackSide.LONG,
+        closed_bars=history,
+        confirmation_bar_sequence=33,
+    )
+
+    assert result.pullback_confirmation_qualifies is True
+    assert result.ema20_slope_qualifies is True
+    assert result.macd_status is MACDStatus.INSUFFICIENT_WARMUP
+    assert result.macd_cross_qualifies is False
+    assert result.entry_signal_qualifies is False
+    assert result.signal is EntrySignal.NONE
+
+
+def test_assembled_entry_ignores_t_plus_one_values() -> None:
+    history = list(_macd_history(confirmation_close="101"))
+    history[31] = _closed_price_bar(31, "100", ema20="99.00")
+    history[34] = _closed_price_bar(34, "101", ema20="100.50")
+
+    low_future = history + [_closed_price_bar(35, "50", ema20="50")]
+    high_future = history + [_closed_price_bar(35, "500", ema20="500")]
+    low_result = evaluate_ema_pullback_entry_signal(
+        side=PullbackSide.LONG,
+        closed_bars=low_future,
+        confirmation_bar_sequence=34,
+    )
+    high_result = evaluate_ema_pullback_entry_signal(
+        side=PullbackSide.LONG,
+        closed_bars=high_future,
+        confirmation_bar_sequence=34,
+    )
+
+    assert low_result == high_result
+    assert low_result.signal is EntrySignal.LONG

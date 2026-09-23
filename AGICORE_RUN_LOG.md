@@ -277,3 +277,24 @@
 - Aucun accès dataset/OOS, replay, PnL, optimisation, Risk Engine, broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — MACD_CROSS_DEFINITION_REQUIRED`.
+
+## 2026-09-23 — EMA_PULLBACK_V1_MNQ_MACD_AND_ENTRY_SIGNAL
+
+- Reprise depuis `origin/main` au merge 8c90ba79fb0492676cbb321c7c5ee41a46ca8f8b de la PR #252 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-macd`, état initial propre.
+- Décision métier figée sans optimisation : MACD `12/26/9`, EMA pour les deux lignes, formule
+  `EMA12(Close) - EMA26(Close)`, signal `EMA9(MACD_LINE)` et même amorçage déterministe que le
+  replay public (`first close`, `alpha = 2/(period+1)`).
+- Croisements exacts : égalité admise à `t-1`, inégalité stricte exigée à `t`, validité limitée à
+  la bougie de confirmation courante. Un croisement antérieur ne qualifie pas `t`.
+- Warmup fail-closed : moins de 35 barres clôturées causales donne `INSUFFICIENT_WARMUP` et `NONE`.
+  Les historiques non contigus sont refusés et les valeurs postérieures à `t` sont ignorées.
+- Assemblage ajouté : pullback/clôture + pente EMA20 + MACD doivent qualifier le même côté sur le
+  même `t`. Le résultat reste un signal non exécutable ; aucun ordre ou prix d'exécution n'est créé.
+- Quinze nouveaux cas portent le fichier ciblé à 41 tests PASS en 0,07 s. Les 90 tests stratégie/
+  replay ciblés passent en 0,23 s. Suite complète : 5 953 passed, 6 warnings in 85.88s.
+- Ruff ciblé et format Ruff, `py_compile`, les 4 gardes de confidentialité et `git diff --check`
+  passent. Le diff contient exactement cinq fichiers texte, aucun RAW, binaire ou ligne de marché.
+- Aucun accès dataset/OOS, PnL, optimisation, replay de données, Risk Engine, broker, compte ou ordre.
+- Verdict : `EMA_PULLBACK_V1_MNQ_MACD = PASS` et `EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS` ;
+  prochaine gate métier unique : `BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED`.
