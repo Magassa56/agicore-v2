@@ -328,3 +328,21 @@
   de données, Risk Engine, broker, compte ou ordre.
 - Verdict : `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
+
+## 2026-09-26 — EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION
+
+- Reprise depuis `origin/main` au merge eadd4f3df578c8fec252e91fe6850a7d8d882886 de la PR #255 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-next-bar-execution`, état initial propre.
+- Décision métier figée sans optimisation : signal/décision à `Close[t]`, ordre simulé `MARKET`,
+  fill exclusivement à `Open[t+1]` pour les entrées et les sorties principales EMA20.
+- Si `t+1` manque, le résultat est `EXPIRED_NO_EXECUTION`, sans prix inventé, sans ouverture de
+  position et sans fermeture artificielle. Same-bar, `Close[t]`, dernier prix connu et barre future
+  arbitraire sont interdits ; les mutations postérieures à `t+1` sont sans effet.
+- Le contrat fail-closed refuse décision non qualifiée, indice de décision incohérent et doublon de
+  `t+1`. Le modèle est explicitement bar-based, sans slippage, spread Bid/Ask, latence ou réalisme tick.
+- Douze nouveaux cas portent le fichier synthétique à 66 tests PASS en 0,26 s. Les 115 tests
+  stratégie/replay ciblés passent en 0,30 s. Suite complète : 5 978 passed, 6 warnings in 108.56s.
+- Ruff ciblé, format Ruff, `py_compile` et `git diff --check` PASS. Aucun accès dataset/OOS, PnL,
+  optimisation, replay de données, Risk Engine, broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED`.
