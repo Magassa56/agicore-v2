@@ -333,3 +333,23 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    Engine, connexion broker ou opération de trading.
 7. **Verdict** : `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — modèle d'exécution bar-based (approuvé le 2026-09-26)
+
+1. **Décision et ordre** : une entrée ou sortie EMA20 qualifiée à la clôture de `t` produit un
+   ordre simulé `MARKET`. Aucun ordre broker ou live n'est émis.
+2. **Prix et instant** : le seul fill admissible est `Open[t+1]`. Un fill sur la barre `t`, à
+   `Close[t]`, au dernier prix connu ou sur une barre future arbitraire est interdit.
+3. **Fin de série** : si la barre exacte `t+1` n'existe pas, le statut obligatoire est
+   `EXPIRED_NO_EXECUTION`, sans prix d'exécution. Une entrée n'ouvre pas de position et une sortie
+   ne ferme pas artificiellement la position.
+4. **Causalité** : seules la décision clôturée sur `t` et l'ouverture de `t+1` déterminent le
+   résultat. Toute mutation des barres après `t+1` est sans effet.
+5. **Fail-closed** : seules les décisions directionnelles qualifiées atteignent le modèle. La barre
+   de décision doit correspondre exactement au signal ; un doublon de `t+1` est refusé.
+6. **Limites explicites** : le modèle est bar-based et ne modélise ni slippage, ni spread Bid/Ask,
+   ni latence, ni fill tick-réaliste. Tick Replay, Market Replay et paper trading restent hors preuve.
+7. **Portée** : aucune donnée OOS, optimisation, métrique de performance, modification du Risk
+   Engine, connexion broker ou opération de trading réel n'est autorisée par cette décision.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED`.

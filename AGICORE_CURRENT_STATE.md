@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-26 UTC.
-Statut : BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -9,9 +9,10 @@ EMA_PULLBACK_V1_MNQ_MACD = PASS ;
 EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS ;
 EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS ;
+EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-t-minus-2-touch.
-Base GitHub vérifiée et récupérée : 0880da6fb2dd916ba53ed1caf069f66342130f67.
+Branche de vérification : feature/ema-pullback-v1-mnq-next-bar-execution.
+Base GitHub vérifiée et récupérée : eadd4f3df578c8fec252e91fe6850a7d8d882886.
 
 ## Acquis vérifiés
 
@@ -357,12 +358,40 @@ replay de données, Risk Engine, broker ou ordre n'a été utilisé.
 
 `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS`.
 
-`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
-Action humaine unique : confirmer ou corriger le modèle candidat suivant pour les entrées et sorties :
-un signal formé à la clôture `t` produit un ordre simulé MARKET rempli à `Open[t+1]`, et expire sans
-fill si la bougie `t+1` n'existe pas. Aucun type d'ordre, prix de fill ou comportement de fin de série
-n'est présumé avant cette décision. Stop-loss, take-profit, trailing stop, breakeven et priorité entre
-sorties restent volontairement non définis.
+Cette tranche a été intégrée par la PR #255, merge
+eadd4f3df578c8fec252e91fe6850a7d8d882886.
+
+## EMA_PULLBACK_V1_MNQ — modèle d'exécution bar-based figé
+
+La décision métier du 2026-09-26 fixe sans optimisation le modèle initial commun aux entrées et à
+la sortie principale EMA20. Une décision qualifiée à la clôture de `t` produit un ordre simulé
+`MARKET`, rempli exclusivement à `Open[t+1]`. L'exécution sur `t`, à `Close[t]`, au dernier prix
+connu ou sur une bougie ultérieure arbitraire est interdite.
+
+Si la bougie exacte `t+1` est absente, le résultat est `EXPIRED_NO_EXECUTION`, sans prix inventé.
+Une entrée expirée n'ouvre aucune position et une sortie expirée ne ferme pas artificiellement la
+position. Les bougies postérieures à `t+1` sont ignorées ; leur mutation ne peut modifier le fill.
+Une décision non qualifiée, un indice de décision incohérent ou un doublon de `t+1` échoue
+explicitement.
+
+Ce modèle est volontairement bar-based. Il ne modélise ni slippage, ni spread Bid/Ask, ni latence,
+ni fill tick-réaliste, et n'exécute aucune action broker ou live. Ces limites sont exposées dans le
+contrat plutôt que transformées en hypothèses silencieuses.
+
+Preuves locales : douze nouveaux cas portent le fichier synthétique à 66 tests PASS en 0,26 s. Ils
+couvrent les entrées LONG/SHORT, les sorties LONG/SHORT, l'absence de `t+1`, l'indépendance vis-à-vis
+des bougies postérieures, l'interdiction de `Close[t]` et du same-bar, la répétabilité, les doublons
+et les décisions non qualifiées. Les 115 régressions stratégie/replay ciblées passent en 0,30 s.
+La suite complète passe avec 5 978 tests et 6 warnings historiques en 108,56 s. Ruff ciblé, format
+Ruff, `py_compile` et `git diff --check` passent. Aucun dataset, OOS, PnL, replay de données, Risk
+Engine, broker ou ordre réel n'a été utilisé.
+
+`EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED`.
+Action humaine unique : définir la règle initiale exacte du stop-loss attaché à chaque entrée LONG
+et SHORT, notamment sa méthode de calcul et son niveau ou sa distance. Take-profit, trailing stop,
+breakeven et priorité entre sorties restent volontairement non définis et ne sont pas présumés.
 
 ## Limites du produit
 
@@ -373,6 +402,6 @@ Aucun ancien événement legacy migré implicitement. Aucun accès data/, secret
 Le CAS protège la publication des journaux, pas l'exécution concurrente d'un callback externe ;
 les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre conservée hors
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
-Les entrées et la sortie principale EMA20 de la stratégie personnelle sont désormais formalisées.
-Le modèle d'exécution et les sorties protectrices restent à définir avant son évaluation ; cette
+Les entrées, la sortie principale EMA20 et leur modèle d'exécution bar-based sont désormais formalisés.
+Les sorties protectrices restent à définir avant son évaluation ; cette
 stratégie demeure distincte de EMA19/50 V3 rejetée.

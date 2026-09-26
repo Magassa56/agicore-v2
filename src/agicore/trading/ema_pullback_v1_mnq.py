@@ -1,10 +1,11 @@
 """Deterministic pullback predicate for ``EMA_PULLBACK_V1_MNQ``.
 
 This module freezes only the strategy rules that the owner has explicitly defined.  It
-does not compute EMA20, does not emit an executable trading order, and never reads market
-or OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses
-the deterministic replay EMA implementation.  The primary EMA20 position exit is frozen;
-protective and profit-taking exits remain deliberately undefined.
+does not compute EMA20, does not emit a broker-executable order, and never reads market or
+OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses the
+deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions can be
+mapped to an offline bar-based simulated fill at ``Open[t+1]``.  Protective and
+profit-taking exits remain deliberately undefined.
 """
 
 from __future__ import annotations
@@ -47,6 +48,13 @@ SIGNAL_DECISION_ON_CLOSED_BAR = True
 EARLIEST_EXECUTION_BAR_OFFSET = 1
 POSITION_EXIT_EQUALITY_TRIGGERS_EXIT = False
 POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT = False
+EXECUTION_SIGNAL_TIME = "CLOSE_T"
+EXECUTION_PRICE_SOURCE = "OPEN_T_PLUS_1"
+BAR_BASED_EXECUTION_MODEL = True
+SLIPPAGE_MODELED = False
+BID_ASK_SPREAD_MODELED = False
+LATENCY_MODELED = False
+TICK_REALISTIC_FILL_MODELED = False
 
 
 class PullbackContractError(ValueError):
@@ -81,6 +89,26 @@ class PositionExitAction(StrEnum):
     EXIT_LONG = "EXIT_LONG"
     EXIT_SHORT = "EXIT_SHORT"
     HOLD = "HOLD"
+
+
+class SimulatedOrderPurpose(StrEnum):
+    """Purpose of an offline bar-based simulated order."""
+
+    ENTRY = "ENTRY"
+    EXIT = "EXIT"
+
+
+class SimulatedOrderType(StrEnum):
+    """Order type supported by the initial deterministic execution model."""
+
+    MARKET = "MARKET"
+
+
+class SimulatedExecutionStatus(StrEnum):
+    """Terminal status of one offline bar-based execution attempt."""
+
+    FILLED = "FILLED"
+    EXPIRED_NO_EXECUTION = "EXPIRED_NO_EXECUTION"
 
 
 @dataclass(frozen=True)
@@ -182,6 +210,40 @@ class EMA20PositionExitResult:
     exit_qualifies: bool
     decision_bar_sequence: int
     earliest_execution_bar_sequence: int
+    same_bar_execution_allowed: bool = False
+
+
+@dataclass(frozen=True)
+class NextBarOpen:
+    """Open price observed for one candidate execution bar."""
+
+    sequence: int
+    open: Decimal
+
+    def __post_init__(self) -> None:
+        if isinstance(self.sequence, bool) or not isinstance(self.sequence, int):
+            raise PullbackContractError("execution bar sequence must be an integer")
+        if self.sequence < 0:
+            raise PullbackContractError("execution bar sequence must be non-negative")
+        if not isinstance(self.open, Decimal) or not self.open.is_finite() or self.open < 0:
+            raise PullbackContractError("execution bar open must be a finite non-negative Decimal")
+
+
+@dataclass(frozen=True)
+class NextBarExecutionResult:
+    """Deterministic result of one offline next-bar MARKET execution attempt."""
+
+    purpose: SimulatedOrderPurpose
+    side: PullbackSide
+    order_type: SimulatedOrderType
+    status: SimulatedExecutionStatus
+    decision_bar_sequence: int
+    execution_bar_sequence: int | None
+    execution_price: Decimal | None
+    position_opened: bool
+    position_closed: bool
+    signal_time: str = EXECUTION_SIGNAL_TIME
+    execution_price_source: str = EXECUTION_PRICE_SOURCE
     same_bar_execution_allowed: bool = False
 
 
@@ -501,14 +563,90 @@ def evaluate_ema20_position_exit(
     )
 
 
+def simulate_next_bar_market_execution(
+    *,
+    decision: EMAPullbackEntrySignalResult | EMA20PositionExitResult,
+    decision_bar: ClosedBarEMA20,
+    available_bar_opens: Sequence[NextBarOpen],
+) -> NextBarExecutionResult:
+    """Apply the frozen offline MARKET-at-``Open[t+1]`` execution convention.
+
+    ``decision`` must already be a qualified entry or primary EMA20 exit formed on the
+    closed ``decision_bar``.  Exactly ``t+1`` may fill the simulated MARKET order.  If
+    that bar is absent, the attempt expires without inventing a price from ``Close[t]``,
+    the last known price, or a later bar.  Bars after ``t+1`` are intentionally ignored,
+    making their mutation irrelevant.  This function performs no broker or live action.
+    """
+    if isinstance(decision, EMAPullbackEntrySignalResult):
+        expected_signal = EntrySignal(decision.side.value)
+        if not decision.entry_signal_qualifies or decision.signal is not expected_signal:
+            raise PullbackContractError("entry execution requires a qualified directional signal")
+        purpose = SimulatedOrderPurpose.ENTRY
+        side = decision.side
+        decision_sequence = decision.confirmation_bar_sequence
+    elif isinstance(decision, EMA20PositionExitResult):
+        expected_action = PositionExitAction(f"EXIT_{decision.position_side.value}")
+        if not decision.exit_qualifies or decision.action is not expected_action:
+            raise PullbackContractError("exit execution requires a qualified directional exit")
+        purpose = SimulatedOrderPurpose.EXIT
+        side = decision.position_side
+        decision_sequence = decision.decision_bar_sequence
+    else:
+        raise PullbackContractError("decision must be a qualified entry or EMA20 exit result")
+
+    if decision_bar.sequence != decision_sequence:
+        raise PullbackContractError("decision bar must match the qualified decision sequence")
+
+    execution_bars = tuple(available_bar_opens)
+    if any(not isinstance(bar, NextBarOpen) for bar in execution_bars):
+        raise PullbackContractError("available execution bars must be NextBarOpen values")
+    expected_execution_sequence = decision_sequence + EARLIEST_EXECUTION_BAR_OFFSET
+    matching_bars = tuple(
+        bar for bar in execution_bars if bar.sequence == expected_execution_sequence
+    )
+    if len(matching_bars) > 1:
+        raise PullbackContractError("available execution bars contain duplicate t+1 values")
+
+    if not matching_bars:
+        return NextBarExecutionResult(
+            purpose=purpose,
+            side=side,
+            order_type=SimulatedOrderType.MARKET,
+            status=SimulatedExecutionStatus.EXPIRED_NO_EXECUTION,
+            decision_bar_sequence=decision_sequence,
+            execution_bar_sequence=None,
+            execution_price=None,
+            position_opened=False,
+            position_closed=False,
+        )
+
+    execution_bar = matching_bars[0]
+    return NextBarExecutionResult(
+        purpose=purpose,
+        side=side,
+        order_type=SimulatedOrderType.MARKET,
+        status=SimulatedExecutionStatus.FILLED,
+        decision_bar_sequence=decision_sequence,
+        execution_bar_sequence=execution_bar.sequence,
+        execution_price=execution_bar.open,
+        position_opened=purpose is SimulatedOrderPurpose.ENTRY,
+        position_closed=purpose is SimulatedOrderPurpose.EXIT,
+    )
+
+
 __all__ = [
+    "BAR_BASED_EXECUTION_MODEL",
+    "BID_ASK_SPREAD_MODELED",
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
     "EARLIEST_EXECUTION_BAR_OFFSET",
     "EMA_PERIOD",
     "EMA_SEED_CONVENTION",
     "EMA_SLOPE_LOOKBACK_BARS",
     "EMA_SLOPE_REQUIRED",
+    "EXECUTION_PRICE_SOURCE",
+    "EXECUTION_SIGNAL_TIME",
     "INSTRUMENT",
+    "LATENCY_MODELED",
     "MACD_CROSS_REQUIRED",
     "MACD_CROSS_VALIDITY_BARS",
     "MACD_FAST_PERIOD",
@@ -527,7 +665,9 @@ __all__ = [
     "PULLBACK_PROXIMITY_QUALIFIES",
     "PULLBACK_REQUIRED_TOUCH_BAR_OFFSET",
     "SIGNAL_DECISION_ON_CLOSED_BAR",
+    "SLIPPAGE_MODELED",
     "STRATEGY_ID",
+    "TICK_REALISTIC_FILL_MODELED",
     "TIMEFRAME_MINUTES",
     "WICK_CROSS_EMA20_ALLOWED",
     "ClosedBarEMA20",
@@ -537,10 +677,15 @@ __all__ = [
     "EntrySignal",
     "MACDCrossResult",
     "MACDStatus",
+    "NextBarExecutionResult",
+    "NextBarOpen",
     "PositionExitAction",
     "PullbackContractError",
     "PullbackPredicateResult",
     "PullbackSide",
+    "SimulatedExecutionStatus",
+    "SimulatedOrderPurpose",
+    "SimulatedOrderType",
     "assemble_ema_pullback_entry_signal",
     "distance_from_bar_range_to_ema20",
     "evaluate_ema20_position_exit",
@@ -548,4 +693,5 @@ __all__ = [
     "evaluate_ema_pullback_entry_signal",
     "evaluate_macd_confirmation",
     "evaluate_pullback_confirmation",
+    "simulate_next_bar_market_execution",
 ]

@@ -7,11 +7,16 @@ from decimal import Decimal
 import pytest
 
 from agicore.trading.ema_pullback_v1_mnq import (
+    BAR_BASED_EXECUTION_MODEL,
+    BID_ASK_SPREAD_MODELED,
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
     EARLIEST_EXECUTION_BAR_OFFSET,
     EMA_SEED_CONVENTION,
     EMA_SLOPE_LOOKBACK_BARS,
     EMA_SLOPE_REQUIRED,
+    EXECUTION_PRICE_SOURCE,
+    EXECUTION_SIGNAL_TIME,
+    LATENCY_MODELED,
     MACD_CROSS_REQUIRED,
     MACD_CROSS_VALIDITY_BARS,
     MACD_FAST_PERIOD,
@@ -29,18 +34,27 @@ from agicore.trading.ema_pullback_v1_mnq import (
     PULLBACK_PROXIMITY_QUALIFIES,
     PULLBACK_REQUIRED_TOUCH_BAR_OFFSET,
     SIGNAL_DECISION_ON_CLOSED_BAR,
+    SLIPPAGE_MODELED,
+    TICK_REALISTIC_FILL_MODELED,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
+    EMA20PositionExitResult,
+    EMAPullbackEntrySignalResult,
     EntrySignal,
     MACDStatus,
+    NextBarOpen,
     PositionExitAction,
     PullbackContractError,
     PullbackSide,
+    SimulatedExecutionStatus,
+    SimulatedOrderPurpose,
+    SimulatedOrderType,
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
     evaluate_macd_confirmation,
     evaluate_pullback_confirmation,
+    simulate_next_bar_market_execution,
 )
 
 
@@ -94,6 +108,37 @@ def _macd_history(
     return tuple(_closed_price_bar(sequence, close) for sequence, close in enumerate(closes))
 
 
+def _qualified_entry(
+    side: PullbackSide,
+    *,
+    sequence: int = 20,
+) -> EMAPullbackEntrySignalResult:
+    return EMAPullbackEntrySignalResult(
+        side=side,
+        signal=EntrySignal(side.value),
+        entry_signal_qualifies=True,
+        pullback_confirmation_qualifies=True,
+        ema20_slope_qualifies=True,
+        macd_cross_qualifies=True,
+        macd_status=MACDStatus.READY,
+        confirmation_bar_sequence=sequence,
+    )
+
+
+def _qualified_exit(
+    side: PullbackSide,
+    *,
+    sequence: int = 20,
+) -> EMA20PositionExitResult:
+    return EMA20PositionExitResult(
+        position_side=side,
+        action=PositionExitAction(f"EXIT_{side.value}"),
+        exit_qualifies=True,
+        decision_bar_sequence=sequence,
+        earliest_execution_bar_sequence=sequence + 1,
+    )
+
+
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
     assert PULLBACK_REQUIRED_TOUCH_BAR_OFFSET == 2
@@ -118,6 +163,13 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert EMA_SEED_CONVENTION == "FIRST_CLOSE_ALPHA_2_OVER_PERIOD_PLUS_1"
     assert POSITION_EXIT_EQUALITY_TRIGGERS_EXIT is False
     assert POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT is False
+    assert EXECUTION_SIGNAL_TIME == "CLOSE_T"
+    assert EXECUTION_PRICE_SOURCE == "OPEN_T_PLUS_1"
+    assert BAR_BASED_EXECUTION_MODEL is True
+    assert SLIPPAGE_MODELED is False
+    assert BID_ASK_SPREAD_MODELED is False
+    assert LATENCY_MODELED is False
+    assert TICK_REALISTIC_FILL_MODELED is False
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -830,4 +882,187 @@ def test_position_exit_fails_closed_when_decision_bar_is_duplicated() -> None:
             position_side=PullbackSide.SHORT,
             closed_bars=[decision_bar, decision_bar],
             decision_bar_sequence=20,
+        )
+
+
+def test_long_entry_fills_at_open_t_plus_one() -> None:
+    result = simulate_next_bar_market_execution(
+        decision=_qualified_entry(PullbackSide.LONG),
+        decision_bar=_bar(20, low="99", high="101", close="100.75"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("101.25"))],
+    )
+
+    assert result.purpose is SimulatedOrderPurpose.ENTRY
+    assert result.side is PullbackSide.LONG
+    assert result.order_type is SimulatedOrderType.MARKET
+    assert result.status is SimulatedExecutionStatus.FILLED
+    assert result.execution_bar_sequence == 21
+    assert result.execution_price == Decimal("101.25")
+    assert result.position_opened is True
+    assert result.position_closed is False
+    assert result.same_bar_execution_allowed is False
+
+
+def test_short_entry_fills_at_open_t_plus_one() -> None:
+    result = simulate_next_bar_market_execution(
+        decision=_qualified_entry(PullbackSide.SHORT),
+        decision_bar=_bar(20, low="99", high="101", close="99.25"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("98.75"))],
+    )
+
+    assert result.purpose is SimulatedOrderPurpose.ENTRY
+    assert result.side is PullbackSide.SHORT
+    assert result.status is SimulatedExecutionStatus.FILLED
+    assert result.execution_price == Decimal("98.75")
+    assert result.position_opened is True
+
+
+def test_long_exit_fills_at_open_t_plus_one() -> None:
+    result = simulate_next_bar_market_execution(
+        decision=_qualified_exit(PullbackSide.LONG),
+        decision_bar=_bar(20, low="98", high="100", close="99.25"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("99.00"))],
+    )
+
+    assert result.purpose is SimulatedOrderPurpose.EXIT
+    assert result.side is PullbackSide.LONG
+    assert result.order_type is SimulatedOrderType.MARKET
+    assert result.status is SimulatedExecutionStatus.FILLED
+    assert result.execution_price == Decimal("99.00")
+    assert result.position_opened is False
+    assert result.position_closed is True
+
+
+def test_short_exit_fills_at_open_t_plus_one() -> None:
+    result = simulate_next_bar_market_execution(
+        decision=_qualified_exit(PullbackSide.SHORT),
+        decision_bar=_bar(20, low="100", high="102", close="100.75"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("101.00"))],
+    )
+
+    assert result.purpose is SimulatedOrderPurpose.EXIT
+    assert result.side is PullbackSide.SHORT
+    assert result.status is SimulatedExecutionStatus.FILLED
+    assert result.execution_price == Decimal("101.00")
+    assert result.position_closed is True
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        _qualified_entry(PullbackSide.LONG),
+        _qualified_exit(PullbackSide.LONG),
+    ],
+)
+def test_missing_t_plus_one_expires_without_execution(
+    decision: EMAPullbackEntrySignalResult | EMA20PositionExitResult,
+) -> None:
+    result = simulate_next_bar_market_execution(
+        decision=decision,
+        decision_bar=_bar(20, low="99", high="101", close="100.25"),
+        available_bar_opens=[NextBarOpen(sequence=22, open=Decimal(500))],
+    )
+
+    assert result.status is SimulatedExecutionStatus.EXPIRED_NO_EXECUTION
+    assert result.execution_bar_sequence is None
+    assert result.execution_price is None
+    assert result.position_opened is False
+    assert result.position_closed is False
+
+
+def test_mutating_bars_after_t_plus_one_has_no_effect() -> None:
+    decision = _qualified_entry(PullbackSide.LONG)
+    decision_bar = _bar(20, low="99", high="101", close="100.25")
+    low_future = (
+        NextBarOpen(sequence=21, open=Decimal("101.25")),
+        NextBarOpen(sequence=22, open=Decimal(50)),
+    )
+    high_future = (
+        NextBarOpen(sequence=21, open=Decimal("101.25")),
+        NextBarOpen(sequence=22, open=Decimal(500)),
+    )
+
+    low_result = simulate_next_bar_market_execution(
+        decision=decision,
+        decision_bar=decision_bar,
+        available_bar_opens=low_future,
+    )
+    high_result = simulate_next_bar_market_execution(
+        decision=decision,
+        decision_bar=decision_bar,
+        available_bar_opens=high_future,
+    )
+
+    assert low_result == high_result
+    assert low_result.execution_price == Decimal("101.25")
+
+
+def test_execution_never_uses_close_t_as_fill_price() -> None:
+    decision_bar = _bar(20, low="99", high="101", close="99.75")
+    result = simulate_next_bar_market_execution(
+        decision=_qualified_entry(PullbackSide.LONG),
+        decision_bar=decision_bar,
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("101.25"))],
+    )
+
+    assert result.signal_time == "CLOSE_T"
+    assert result.execution_price_source == "OPEN_T_PLUS_1"
+    assert result.execution_price == Decimal("101.25")
+    assert result.execution_price != decision_bar.close
+
+
+def test_same_bar_open_cannot_fill_and_order_expires_without_t_plus_one() -> None:
+    result = simulate_next_bar_market_execution(
+        decision=_qualified_entry(PullbackSide.SHORT),
+        decision_bar=_bar(20, low="99", high="101", close="99.25"),
+        available_bar_opens=[NextBarOpen(sequence=20, open=Decimal("99.25"))],
+    )
+
+    assert result.status is SimulatedExecutionStatus.EXPIRED_NO_EXECUTION
+    assert result.same_bar_execution_allowed is False
+    assert result.execution_price is None
+
+
+def test_repeated_next_bar_execution_is_deterministic() -> None:
+    arguments = {
+        "decision": _qualified_exit(PullbackSide.SHORT),
+        "decision_bar": _bar(20, low="100", high="102", close="100.75"),
+        "available_bar_opens": (NextBarOpen(sequence=21, open=Decimal("101.00")),),
+    }
+
+    first = simulate_next_bar_market_execution(**arguments)
+    second = simulate_next_bar_market_execution(**arguments)
+
+    assert first == second
+    assert first.status is SimulatedExecutionStatus.FILLED
+
+
+def test_duplicate_t_plus_one_bars_fail_closed() -> None:
+    next_bar = NextBarOpen(sequence=21, open=Decimal("101.00"))
+
+    with pytest.raises(PullbackContractError, match=r"duplicate t\+1"):
+        simulate_next_bar_market_execution(
+            decision=_qualified_entry(PullbackSide.LONG),
+            decision_bar=_bar(20, low="99", high="101", close="100.25"),
+            available_bar_opens=[next_bar, next_bar],
+        )
+
+
+def test_unqualified_decision_cannot_reach_execution_model() -> None:
+    unqualified = EMAPullbackEntrySignalResult(
+        side=PullbackSide.LONG,
+        signal=EntrySignal.NONE,
+        entry_signal_qualifies=False,
+        pullback_confirmation_qualifies=False,
+        ema20_slope_qualifies=True,
+        macd_cross_qualifies=True,
+        macd_status=MACDStatus.READY,
+        confirmation_bar_sequence=20,
+    )
+
+    with pytest.raises(PullbackContractError, match="qualified directional signal"):
+        simulate_next_bar_market_execution(
+            decision=unqualified,
+            decision_bar=_bar(20, low="99", high="101", close="100.25"),
+            available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("101.00"))],
         )
