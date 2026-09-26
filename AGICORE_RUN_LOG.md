@@ -346,3 +346,20 @@
   optimisation, replay de données, Risk Engine, broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED`.
+
+## 2026-09-26 — EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP
+
+- Reprise depuis `origin/main` au merge f9cc8c835b538d7df1ad0a660cabb7da619f13db de la PR #256 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-structural-stop`, état initial propre.
+- Décision métier figée sans optimisation : LONG `Low[t-2] - 0,25 point`, SHORT
+  `High[t-2] + 0,25 point`, calcul à `Close[t]` depuis des barres clôturées et niveau immuable.
+- L'entrée à `Open[t+1]` est refusée si le stop n'est pas strictement sous le prix pour LONG ou
+  strictement au-dessus pour SHORT. Aucune position n'est ouverte avec un stop incohérent.
+- Déclenchement bar-based inclusif par `Low[k]`/`High[k]`. Un gap strict est rempli à `Open[k]` ;
+  sinon le fill simulé utilise le stop. Aucun slippage, déplacement automatique ou stop dynamique.
+- Dix-neuf nouveaux cas portent le fichier synthétique à 85 tests PASS en 0,25 s. Les 131 tests
+  stratégie/replay ciblés passent en 0,47 s. Suite complète : 5 997 passed, 6 warnings in 129.21s.
+- Ruff ciblé, format Ruff, `py_compile`, gardes de confidentialité, scan anti-fuite et
+  `git diff --check` PASS. Aucun accès dataset/OOS, PnL, optimisation, Risk Engine, broker ou ordre.
+- Verdict : `EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED`.

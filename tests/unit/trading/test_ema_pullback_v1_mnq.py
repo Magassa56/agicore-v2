@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from decimal import Decimal
 
 import pytest
@@ -16,6 +17,11 @@ from agicore.trading.ema_pullback_v1_mnq import (
     EMA_SLOPE_REQUIRED,
     EXECUTION_PRICE_SOURCE,
     EXECUTION_SIGNAL_TIME,
+    GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN,
+    INITIAL_STOP_BUFFER_POINTS,
+    INITIAL_STOP_BUFFER_TICKS,
+    INITIAL_STOP_IS_IMMUTABLE,
+    INITIAL_STOP_SOURCE_BAR_OFFSET,
     LATENCY_MODELED,
     MACD_CROSS_REQUIRED,
     MACD_CROSS_VALIDITY_BARS,
@@ -35,12 +41,15 @@ from agicore.trading.ema_pullback_v1_mnq import (
     PULLBACK_REQUIRED_TOUCH_BAR_OFFSET,
     SIGNAL_DECISION_ON_CLOSED_BAR,
     SLIPPAGE_MODELED,
+    STOP_INTRABAR_SLIPPAGE_MODELED,
     TICK_REALISTIC_FILL_MODELED,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
     EMA20PositionExitResult,
     EMAPullbackEntrySignalResult,
     EntrySignal,
+    InitialStopFillSource,
+    InitialStopTriggerStatus,
     MACDStatus,
     NextBarOpen,
     PositionExitAction,
@@ -49,11 +58,16 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SimulatedExecutionStatus,
     SimulatedOrderPurpose,
     SimulatedOrderType,
+    StopEvaluationBar,
+    construct_initial_structural_stop,
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
+    evaluate_initial_stop_on_bar,
     evaluate_macd_confirmation,
     evaluate_pullback_confirmation,
+    initial_stop_triggered_by_market_price,
+    simulate_entry_with_initial_structural_stop,
     simulate_next_bar_market_execution,
 )
 
@@ -139,6 +153,17 @@ def _qualified_exit(
     )
 
 
+def _protected_position(side: PullbackSide):
+    decision_close = "100.75" if side is PullbackSide.LONG else "99.25"
+    entry_open = Decimal("101.25") if side is PullbackSide.LONG else Decimal("98.75")
+    return simulate_entry_with_initial_structural_stop(
+        decision=_qualified_entry(side),
+        decision_bar=_bar(20, low="99", high="101", close=decision_close),
+        required_touch_bar=_bar(18, low="99", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=entry_open)],
+    )
+
+
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
     assert PULLBACK_REQUIRED_TOUCH_BAR_OFFSET == 2
@@ -170,6 +195,12 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert BID_ASK_SPREAD_MODELED is False
     assert LATENCY_MODELED is False
     assert TICK_REALISTIC_FILL_MODELED is False
+    assert INITIAL_STOP_SOURCE_BAR_OFFSET == 2
+    assert INITIAL_STOP_BUFFER_TICKS == 1
+    assert INITIAL_STOP_BUFFER_POINTS == Decimal("0.25")
+    assert INITIAL_STOP_IS_IMMUTABLE is True
+    assert GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN is True
+    assert STOP_INTRABAR_SLIPPAGE_MODELED is False
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -1065,4 +1096,263 @@ def test_unqualified_decision_cannot_reach_execution_model() -> None:
             decision=unqualified,
             decision_bar=_bar(20, low="99", high="101", close="100.25"),
             available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("101.00"))],
+        )
+
+
+@pytest.mark.parametrize(
+    ("side", "expected_stop"),
+    [
+        (PullbackSide.LONG, Decimal("98.75")),
+        (PullbackSide.SHORT, Decimal("101.25")),
+    ],
+)
+def test_initial_stop_uses_t_minus_two_extreme_plus_one_tick_buffer(
+    side: PullbackSide,
+    expected_stop: Decimal,
+) -> None:
+    stop = construct_initial_structural_stop(
+        decision=_qualified_entry(side),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        required_touch_bar=_bar(18, low="99", high="101", close="100"),
+    )
+
+    assert stop.stop_price == expected_stop
+    assert stop.source_bar_sequence == 18
+    assert stop.decision_bar_sequence == 20
+    assert stop.buffer_ticks == 1
+    assert stop.buffer_points == Decimal("0.25")
+    assert stop.immutable is True
+
+
+@pytest.mark.parametrize(
+    ("side", "market_price", "not_triggered_price"),
+    [
+        (PullbackSide.LONG, Decimal("98.75"), Decimal("99.00")),
+        (PullbackSide.SHORT, Decimal("101.25"), Decimal("101.00")),
+    ],
+)
+def test_initial_stop_market_price_trigger_is_inclusive(
+    side: PullbackSide,
+    market_price: Decimal,
+    not_triggered_price: Decimal,
+) -> None:
+    stop = _protected_position(side).initial_stop
+
+    assert initial_stop_triggered_by_market_price(
+        initial_stop=stop,
+        market_price=market_price,
+    )
+    assert not initial_stop_triggered_by_market_price(
+        initial_stop=stop,
+        market_price=not_triggered_price,
+    )
+
+
+@pytest.mark.parametrize(
+    ("side", "bar"),
+    [
+        (
+            PullbackSide.LONG,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("99.50"),
+                low=Decimal("98.75"),
+                high=Decimal("100.00"),
+            ),
+        ),
+        (
+            PullbackSide.SHORT,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("100.50"),
+                low=Decimal("100.00"),
+                high=Decimal("101.25"),
+            ),
+        ),
+    ],
+)
+def test_exact_stop_touch_fills_at_stop_price(
+    side: PullbackSide,
+    bar: StopEvaluationBar,
+) -> None:
+    result = evaluate_initial_stop_on_bar(position=_protected_position(side), bar=bar)
+
+    assert result.status is InitialStopTriggerStatus.STOP_TRIGGERED
+    assert result.fill_source is InitialStopFillSource.STOP_PRICE
+    assert result.fill_price == result.stop_price
+    assert result.position_closed is True
+
+
+@pytest.mark.parametrize(
+    ("side", "bar"),
+    [
+        (
+            PullbackSide.LONG,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("99.50"),
+                low=Decimal("99.00"),
+                high=Decimal("100.00"),
+            ),
+        ),
+        (
+            PullbackSide.SHORT,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("100.50"),
+                low=Decimal("100.00"),
+                high=Decimal("101.00"),
+            ),
+        ),
+    ],
+)
+def test_one_tick_before_initial_stop_does_not_trigger(
+    side: PullbackSide,
+    bar: StopEvaluationBar,
+) -> None:
+    result = evaluate_initial_stop_on_bar(position=_protected_position(side), bar=bar)
+
+    assert result.status is InitialStopTriggerStatus.NOT_TRIGGERED
+    assert result.fill_source is InitialStopFillSource.NONE
+    assert result.fill_price is None
+    assert result.position_closed is False
+
+
+@pytest.mark.parametrize(
+    ("side", "bar", "expected_fill"),
+    [
+        (
+            PullbackSide.LONG,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("98.50"),
+                low=Decimal("98.00"),
+                high=Decimal("99.00"),
+            ),
+            Decimal("98.50"),
+        ),
+        (
+            PullbackSide.SHORT,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("101.50"),
+                low=Decimal("101.00"),
+                high=Decimal("102.00"),
+            ),
+            Decimal("101.50"),
+        ),
+    ],
+)
+def test_gap_through_initial_stop_fills_at_bar_open(
+    side: PullbackSide,
+    bar: StopEvaluationBar,
+    expected_fill: Decimal,
+) -> None:
+    result = evaluate_initial_stop_on_bar(position=_protected_position(side), bar=bar)
+
+    assert result.status is InitialStopTriggerStatus.STOP_TRIGGERED
+    assert result.fill_source is InitialStopFillSource.BAR_OPEN_GAP
+    assert result.fill_price == expected_fill
+    assert result.fill_price != result.stop_price
+
+
+def test_initial_stop_is_immutable_after_position_creation() -> None:
+    position = _protected_position(PullbackSide.LONG)
+
+    with pytest.raises(FrozenInstanceError):
+        position.initial_stop.stop_price = Decimal(0)  # type: ignore[misc]
+
+    assert position.initial_stop.stop_price == Decimal("98.75")
+
+
+@pytest.mark.parametrize(
+    ("side", "touch_low", "touch_high", "candidate_entry"),
+    [
+        (PullbackSide.LONG, "100.00", "101.00", Decimal("99.75")),
+        (PullbackSide.LONG, "100.00", "101.00", Decimal("99.50")),
+        (PullbackSide.SHORT, "99.00", "100.00", Decimal("100.25")),
+        (PullbackSide.SHORT, "99.00", "100.00", Decimal("100.50")),
+    ],
+)
+def test_invalid_initial_stop_relative_to_entry_rejects_position(
+    side: PullbackSide,
+    touch_low: str,
+    touch_high: str,
+    candidate_entry: Decimal,
+) -> None:
+    result = simulate_entry_with_initial_structural_stop(
+        decision=_qualified_entry(side),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        required_touch_bar=_bar(
+            18,
+            low=touch_low,
+            high=touch_high,
+            close=touch_low,
+        ),
+        available_bar_opens=[NextBarOpen(sequence=21, open=candidate_entry)],
+    )
+
+    assert result.status is SimulatedExecutionStatus.REJECT_ENTRY
+    assert result.candidate_entry_price == candidate_entry
+    assert result.entry_price is None
+    assert result.position_opened is False
+
+
+def test_missing_t_plus_one_expires_protected_entry_without_position() -> None:
+    result = simulate_entry_with_initial_structural_stop(
+        decision=_qualified_entry(PullbackSide.LONG),
+        decision_bar=_bar(20, low="99", high="101", close="100.75"),
+        required_touch_bar=_bar(18, low="99", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=22, open=Decimal("101.25"))],
+    )
+
+    assert result.status is SimulatedExecutionStatus.EXPIRED_NO_EXECUTION
+    assert result.entry_price is None
+    assert result.position_opened is False
+    assert result.initial_stop.stop_price == Decimal("98.75")
+
+
+def test_later_bars_cannot_mutate_frozen_initial_stop() -> None:
+    position = _protected_position(PullbackSide.LONG)
+    original_stop = position.initial_stop
+
+    evaluate_initial_stop_on_bar(
+        position=position,
+        bar=StopEvaluationBar(
+            sequence=22,
+            open=Decimal(100),
+            low=Decimal(99),
+            high=Decimal(500),
+        ),
+    )
+    evaluate_initial_stop_on_bar(
+        position=position,
+        bar=StopEvaluationBar(
+            sequence=23,
+            open=Decimal("98.50"),
+            low=Decimal(50),
+            high=Decimal(99),
+        ),
+    )
+
+    assert position.initial_stop is original_stop
+    assert position.initial_stop.stop_price == Decimal("98.75")
+    assert position.initial_stop.source_bar_sequence == 18
+
+
+def test_initial_stop_rejects_noncausal_source_bar() -> None:
+    with pytest.raises(PullbackContractError, match="causal closed bar t-2"):
+        construct_initial_structural_stop(
+            decision=_qualified_entry(PullbackSide.LONG),
+            decision_bar=_bar(20, low="99", high="101", close="100.75"),
+            required_touch_bar=_bar(19, low="99", high="101", close="100"),
+        )
+
+
+def test_initial_stop_rejects_decision_bar_not_matching_signal() -> None:
+    with pytest.raises(PullbackContractError, match="must match the entry signal"):
+        construct_initial_structural_stop(
+            decision=_qualified_entry(PullbackSide.SHORT),
+            decision_bar=_bar(21, low="99", high="101", close="99.25"),
+            required_touch_bar=_bar(19, low="99", high="101", close="100"),
         )

@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-26 UTC.
-Statut : BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -10,9 +10,10 @@ EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS ;
 EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS ;
 EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS ;
+EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-next-bar-execution.
-Base GitHub vérifiée et récupérée : eadd4f3df578c8fec252e91fe6850a7d8d882886.
+Branche de vérification : feature/ema-pullback-v1-mnq-structural-stop.
+Base GitHub vérifiée et récupérée : f9cc8c835b538d7df1ad0a660cabb7da619f13db.
 
 ## Acquis vérifiés
 
@@ -388,10 +389,39 @@ Engine, broker ou ordre réel n'a été utilisé.
 
 `EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS`.
 
-`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED`.
-Action humaine unique : définir la règle initiale exacte du stop-loss attaché à chaque entrée LONG
-et SHORT, notamment sa méthode de calcul et son niveau ou sa distance. Take-profit, trailing stop,
-breakeven et priorité entre sorties restent volontairement non définis et ne sont pas présumés.
+Cette tranche a été intégrée par la PR #256, merge
+f9cc8c835b538d7df1ad0a660cabb7da619f13db.
+
+## EMA_PULLBACK_V1_MNQ — stop structurel initial figé
+
+La décision métier du 2026-09-26 fixe sans optimisation un stop structurel construit à la clôture
+de `t` depuis la bougie obligatoire `t-2`. LONG utilise `Low[t-2] - 0,25 point` et SHORT utilise
+`High[t-2] + 0,25 point`, soit exactement un tick MNQ de marge. Une décision d'entrée qualifiée,
+une barre de décision exactement `t` et une source exactement `t-2` sont obligatoires.
+
+Le stop est calculé avant l'ouverture éventuelle de la position à `Open[t+1]`, puis stocké dans un
+objet immuable. LONG refuse l'entrée si `stop >= entry_price` ; SHORT la refuse si
+`stop <= entry_price`. Une barre `t+1` absente conserve `EXPIRED_NO_EXECUTION` et n'ouvre aucune
+position.
+
+Pour une position ouverte, LONG déclenche lorsque `Low[k] <= stop` et SHORT lorsque
+`High[k] >= stop`. Un gap strict au-delà du stop est rempli à `Open[k]`; sinon une touche intrabar
+inclusive est remplie au niveau du stop. Cette convention est bar-based et ne prétend pas modéliser
+le slippage réel. Aucun recalcul automatique, breakeven, trailing stop, ATR, stop monétaire ou
+Risk Engine dynamique n'est introduit.
+
+Preuves locales : dix-neuf nouveaux cas portent le fichier synthétique à 85 tests PASS en 0,25 s.
+Ils couvrent LONG/SHORT, marge d'un tick, touche exacte, distance d'un tick sans déclenchement,
+gaps, immutabilité, quatre frontières de rejet d'entrée, expiration, causalité et absence de
+lookahead. Les 131 régressions stratégie/replay ciblées passent en 0,47 s. La suite complète passe
+avec 5 997 tests et 6 warnings historiques en 129,21 s. Ruff ciblé, format Ruff, `py_compile`,
+gardes de confidentialité, scan anti-fuite et `git diff --check` passent.
+
+`EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED`.
+Action humaine unique : définir la règle initiale exacte de prise de profit LONG et SHORT, sans
+l'optimiser sur les données. Breakeven, trailing stop et priorité entre sorties restent non définis.
 
 ## Limites du produit
 
@@ -402,6 +432,7 @@ Aucun ancien événement legacy migré implicitement. Aucun accès data/, secret
 Le CAS protège la publication des journaux, pas l'exécution concurrente d'un callback externe ;
 les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre conservée hors
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
-Les entrées, la sortie principale EMA20 et leur modèle d'exécution bar-based sont désormais formalisés.
-Les sorties protectrices restent à définir avant son évaluation ; cette
+Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based et le stop structurel
+initial sont désormais formalisés. La prise de profit et l'arbitrage entre sorties restent à définir
+avant l'évaluation ; cette
 stratégie demeure distincte de EMA19/50 V3 rejetée.
