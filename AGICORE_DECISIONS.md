@@ -317,19 +317,19 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
 
-## EMA_PULLBACK_V1_MNQ — amendement contact t-2 (approuvé le 2026-09-26)
+## EMA_PULLBACK_V1_MNQ — amendement toucher/proximité t-2 (approuvé le 2026-09-26)
 
 1. **Position obligatoire** : dans la fenêtre ordonnée `t-3`, `t-2`, `t-1`, la « deuxième
    bougie » est exactement `t-2`.
-2. **Contact exact** : `Low[t-2] <= EMA20[t-2] <= High[t-2]` est obligatoire. Le contact par une
-   extrémité et la mèche traversante sont admis.
-3. **Proximité refusée** : toute distance strictement positive échoue, y compris exactement huit
-   ticks. Le seuil antérieur de huit ticks est supersédé par cet amendement.
-4. **Non-substitution** : un contact sur `t-3`, sur `t-1` ou sur la bougie de confirmation `t` ne
-   remplace pas le contact obligatoire de `t-2`.
+2. **Distance inclusive** : la plage de `t-2` doit toucher/croiser son EMA20 ou s'en approcher à
+   `<= 8 ticks MNQ`, soit `<= 2,00 points`. Une extrémité ou une mèche traversante vaut zéro.
+3. **Limite** : exactement huit ticks qualifie ; toute distance supérieure, notamment neuf ticks,
+   échoue.
+4. **Non-substitution** : une condition admissible sur `t-3`, sur `t-1` ou sur la bougie de
+   confirmation `t` ne remplace pas la condition obligatoire de `t-2`.
 5. **Règles inchangées** : clôture directionnelle stricte en `t`, pente EMA20 et croisement MACD
    restent tous obligatoires ; décision sur bougie clôturée et aucun lookahead.
 6. **Portée** : aucune optimisation, donnée OOS, métrique de performance, modification du Risk
    Engine, connexion broker ou opération de trading.
-7. **Verdict** : `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH = PASS` ; prochaine gate métier unique :
+7. **Verdict** : `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.

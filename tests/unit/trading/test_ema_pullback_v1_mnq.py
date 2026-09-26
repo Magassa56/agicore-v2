@@ -20,6 +20,8 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MACD_SIGNAL_LINE_MA_TYPE,
     MACD_SIGNAL_PERIOD,
     MACD_SLOW_PERIOD,
+    MAX_PULLBACK_DISTANCE_POINTS,
+    MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
     POSITION_EXIT_EQUALITY_TRIGGERS_EXIT,
     POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT,
@@ -95,7 +97,9 @@ def _macd_history(
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
     assert PULLBACK_REQUIRED_TOUCH_BAR_OFFSET == 2
-    assert PULLBACK_PROXIMITY_QUALIFIES is False
+    assert MAX_PULLBACK_DISTANCE_TICKS == 8
+    assert MAX_PULLBACK_DISTANCE_POINTS == Decimal("2.00")
+    assert PULLBACK_PROXIMITY_QUALIFIES is True
     assert EMA_SLOPE_REQUIRED is True
     assert MACD_CROSS_REQUIRED is True
     assert WICK_CROSS_EMA20_ALLOWED is True
@@ -163,7 +167,7 @@ def test_short_qualifies_after_prior_pullback_and_strict_close_below_ema20() -> 
         (PullbackSide.SHORT, "97.00", "98.00", "99.75"),
     ],
 )
-def test_exact_eight_tick_proximity_on_required_t_minus_two_is_rejected(
+def test_exact_eight_tick_proximity_on_required_t_minus_two_qualifies(
     side: PullbackSide,
     low: str,
     high: str,
@@ -184,13 +188,13 @@ def test_exact_eight_tick_proximity_on_required_t_minus_two_is_rejected(
         confirmation_bar=confirmation,
     )
 
-    assert result.pullback_confirmation_qualifies is False
-    assert result.pullback_found is False
+    assert result.pullback_confirmation_qualifies is True
+    assert result.pullback_found is True
     assert result.minimum_distance_points == Decimal("2.00")
     assert result.minimum_distance_ticks == Decimal(8)
     assert result.required_touch_distance_points == Decimal("2.00")
     assert result.required_touch_distance_ticks == Decimal(8)
-    assert result.qualifying_bar_sequence is None
+    assert result.qualifying_bar_sequence == 8
 
 
 @pytest.mark.parametrize(

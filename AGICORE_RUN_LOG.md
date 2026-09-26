@@ -313,17 +313,18 @@
 - Verdict : `EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
 
-## 2026-09-26 — EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH
+## 2026-09-26 — EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY
 
 - Reprise depuis `origin/main` au merge 0880da6fb2dd916ba53ed1caf069f66342130f67 de la PR #254 ;
   branche dédiée `feature/ema-pullback-v1-mnq-t-minus-2-touch`, état initial propre et diff-check PASS.
 - Décision métier figée sans optimisation : dans `t-3`, `t-2`, `t-1`, seule la deuxième bougie
-  `t-2` peut satisfaire le pullback et sa plage fermée doit réellement toucher/croiser son EMA20.
-- Toute proximité non nulle, même exactement huit ticks, est refusée. Un contact sur `t-3` ou `t-1`
-  ne se substitue pas à `t-2`. Le seuil huit ticks est supersédé par cet amendement.
-- Quatre nouveaux cas portent le fichier ciblé à 54 tests PASS en 0,11 s. Les 103 tests stratégie/
-  replay ciblés passent en 0,32 s. Suite complète : 5 966 passed, 6 warnings in 101.18s.
+  `t-2` peut satisfaire le pullback ; sa plage doit toucher/croiser son EMA20 ou rester à une
+  distance maximale inclusive de huit ticks MNQ (2,00 points).
+- Exactement huit ticks qualifie et neuf ticks échoue. Une condition satisfaite sur `t-3` ou `t-1`
+  ne se substitue pas à `t-2`.
+- Quatre nouveaux cas portent le fichier ciblé à 54 tests PASS en 0,18 s. Les 103 tests stratégie/
+  replay ciblés passent en 0,30 s. Suite complète : 5 966 passed, 6 warnings in 106.30s.
 - Ruff ciblé, format Ruff et `py_compile` PASS. Aucun accès dataset/OOS, PnL, optimisation, replay
   de données, Risk Engine, broker, compte ou ordre.
-- Verdict : `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH = PASS` ; prochaine gate métier unique :
+- Verdict : `EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.

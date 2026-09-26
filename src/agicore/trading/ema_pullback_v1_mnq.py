@@ -34,9 +34,11 @@ EMA_SEED_CONVENTION = "FIRST_CLOSE_ALPHA_2_OVER_PERIOD_PLUS_1"
 MNQ_TICK_SIZE_POINTS = Decimal("0.25")
 PULLBACK_LOOKBACK_BARS = 3
 # The three-bar window is ordered ``t-3, t-2, t-1``.  The owner requires the
-# second bar in that window, exactly ``t-2``, to touch/cross its own EMA20.
+# second bar in that window, exactly ``t-2``, to meet the distance boundary.
 PULLBACK_REQUIRED_TOUCH_BAR_OFFSET = 2
-PULLBACK_PROXIMITY_QUALIFIES = False
+MAX_PULLBACK_DISTANCE_TICKS = 8
+MAX_PULLBACK_DISTANCE_POINTS = Decimal("2.00")
+PULLBACK_PROXIMITY_QUALIFIES = True
 WICK_CROSS_EMA20_ALLOWED = True
 CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED = True
 EMA_SLOPE_REQUIRED = True
@@ -85,8 +87,8 @@ class PositionExitAction(StrEnum):
 class ClosedBarEMA20:
     """Closed-bar values available at one causal sequence index.
 
-    ``ema20`` is the EMA20 value computed at this bar's close.  Decimal values make
-    the exact closed-range contact test deterministic and free from float drift.
+    ``ema20`` is the EMA20 value computed at this bar's close.  Decimal values keep
+    the inclusive eight-tick boundary deterministic and free from float drift.
     """
 
     sequence: int
@@ -203,10 +205,10 @@ def evaluate_pullback_confirmation(
     """Evaluate the owner-defined pullback window and strict confirmation close.
 
     Exactly the three immediately preceding closed bars are accepted.  The second one,
-    exactly ``t-2``, must touch or cross its own EMA20; proximity without intersection
-    does not qualify.  The confirmation bar is excluded from the pullback search.  No
-    future bar is accepted by the sequence check, and this function does not expose
-    execution at the confirmation close.
+    exactly ``t-2``, must touch/cross its own EMA20 or place its closed range no more
+    than eight MNQ ticks away.  The confirmation bar is excluded from the pullback
+    search.  No future bar is accepted by the sequence check, and this function does
+    not expose execution at the confirmation close.
 
     This function deliberately evaluates only its own component.  The assembled entry
     evaluator separately requires the frozen EMA20 slope and MACD predicates.
@@ -236,7 +238,7 @@ def evaluate_pullback_confirmation(
     required_touch_sequence = confirmation_bar.sequence - PULLBACK_REQUIRED_TOUCH_BAR_OFFSET
     required_touch_index = actual_sequences.index(required_touch_sequence)
     required_touch_distance = distances[required_touch_index]
-    pullback_found = required_touch_distance == Decimal(0)
+    pullback_found = required_touch_distance <= MAX_PULLBACK_DISTANCE_POINTS
     close_correct = (
         confirmation_bar.close > confirmation_bar.ema20
         if side is PullbackSide.LONG
@@ -515,6 +517,8 @@ __all__ = [
     "MACD_SIGNAL_LINE_MA_TYPE",
     "MACD_SIGNAL_PERIOD",
     "MACD_SLOW_PERIOD",
+    "MAX_PULLBACK_DISTANCE_POINTS",
+    "MAX_PULLBACK_DISTANCE_TICKS",
     "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
     "MNQ_TICK_SIZE_POINTS",
     "POSITION_EXIT_EQUALITY_TRIGGERS_EXIT",
