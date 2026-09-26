@@ -353,3 +353,25 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    Engine, connexion broker ou opération de trading réel n'est autorisée par cette décision.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — INITIAL_STOP_LOSS_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — stop structurel initial (approuvé le 2026-09-26)
+
+1. **Source et marge** : le stop est calculé à `Close[t]` depuis la bougie obligatoire `t-2`, avec
+   `tick_size = 0,25 point` et `stop_buffer = 1 tick`. LONG : `Low[t-2] - 0,25`. SHORT :
+   `High[t-2] + 0,25`.
+2. **Causalité** : seules une décision d'entrée qualifiée sur `t`, la barre clôturée `t` et la barre
+   clôturée exactement `t-2` sont admises. Aucune donnée future ne participe à la construction.
+3. **Immutabilité** : le niveau est attaché à la création de la position et ne peut plus être
+   recalculé ou déplacé depuis de nouvelles bougies.
+4. **Validation d'entrée** : LONG refuse si `stop >= entry_price`; SHORT refuse si
+   `stop <= entry_price`. Le statut est `REJECT_ENTRY` et aucune position n'est ouverte.
+5. **Déclenchement inclusif** : LONG déclenche à `market_price <= stop` et, en bar-based, à
+   `Low[k] <= stop`. SHORT déclenche à `market_price >= stop` et à `High[k] >= stop`.
+6. **Fill de gap** : un `Open[k]` strictement au-delà du stop est rempli à l'ouverture. Hors gap,
+   une touche intrabar est remplie au niveau du stop. Aucun slippage supplémentaire n'est simulé.
+7. **Exclusions** : aucun breakeven, trailing stop, ATR, stop monétaire, Risk Engine dynamique ou
+   recalcul automatique. Take-profit et priorité entre sorties restent non définis.
+8. **Frontières** : aucune donnée OOS, optimisation, preuve de performance, connexion broker ou
+   opération de trading réel n'est autorisée par cette décision.
+9. **Verdict** : `EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED`.

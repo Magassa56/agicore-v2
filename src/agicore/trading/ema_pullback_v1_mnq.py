@@ -4,8 +4,9 @@ This module freezes only the strategy rules that the owner has explicitly define
 does not compute EMA20, does not emit a broker-executable order, and never reads market or
 OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses the
 deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions can be
-mapped to an offline bar-based simulated fill at ``Open[t+1]``.  Protective and
-profit-taking exits remain deliberately undefined.
+mapped to an offline bar-based simulated fill at ``Open[t+1]``.  The initial structural
+stop is frozen from the required ``t-2`` bar; profit-taking exits remain deliberately
+undefined.
 """
 
 from __future__ import annotations
@@ -55,6 +56,12 @@ SLIPPAGE_MODELED = False
 BID_ASK_SPREAD_MODELED = False
 LATENCY_MODELED = False
 TICK_REALISTIC_FILL_MODELED = False
+INITIAL_STOP_SOURCE_BAR_OFFSET = 2
+INITIAL_STOP_BUFFER_TICKS = 1
+INITIAL_STOP_BUFFER_POINTS = MNQ_TICK_SIZE_POINTS * INITIAL_STOP_BUFFER_TICKS
+INITIAL_STOP_IS_IMMUTABLE = True
+GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN = True
+STOP_INTRABAR_SLIPPAGE_MODELED = False
 
 
 class PullbackContractError(ValueError):
@@ -109,6 +116,22 @@ class SimulatedExecutionStatus(StrEnum):
 
     FILLED = "FILLED"
     EXPIRED_NO_EXECUTION = "EXPIRED_NO_EXECUTION"
+    REJECT_ENTRY = "REJECT_ENTRY"
+
+
+class InitialStopTriggerStatus(StrEnum):
+    """State of the immutable structural stop after one bar evaluation."""
+
+    NOT_TRIGGERED = "NOT_TRIGGERED"
+    STOP_TRIGGERED = "STOP_TRIGGERED"
+
+
+class InitialStopFillSource(StrEnum):
+    """Price source used by the deterministic bar-based stop convention."""
+
+    NONE = "NONE"
+    STOP_PRICE = "STOP_PRICE"
+    BAR_OPEN_GAP = "BAR_OPEN_GAP"
 
 
 @dataclass(frozen=True)
@@ -245,6 +268,98 @@ class NextBarExecutionResult:
     signal_time: str = EXECUTION_SIGNAL_TIME
     execution_price_source: str = EXECUTION_PRICE_SOURCE
     same_bar_execution_allowed: bool = False
+
+
+@dataclass(frozen=True)
+class InitialStructuralStop:
+    """Immutable stop derived causally from the required closed ``t-2`` bar."""
+
+    side: PullbackSide
+    stop_price: Decimal
+    source_bar_sequence: int
+    decision_bar_sequence: int
+    buffer_ticks: int = INITIAL_STOP_BUFFER_TICKS
+    buffer_points: Decimal = INITIAL_STOP_BUFFER_POINTS
+    immutable: bool = INITIAL_STOP_IS_IMMUTABLE
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.side, PullbackSide):
+            raise PullbackContractError("initial stop side must be explicitly LONG or SHORT")
+        if any(
+            isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0
+            for sequence in (self.source_bar_sequence, self.decision_bar_sequence)
+        ):
+            raise PullbackContractError("initial stop sequences must be non-negative integers")
+        if self.source_bar_sequence != self.decision_bar_sequence - INITIAL_STOP_SOURCE_BAR_OFFSET:
+            raise PullbackContractError("initial stop source must be the causal closed bar t-2")
+        if (
+            not isinstance(self.stop_price, Decimal)
+            or not self.stop_price.is_finite()
+            or self.stop_price < 0
+        ):
+            raise PullbackContractError("initial stop price must be a finite non-negative Decimal")
+        if self.buffer_ticks != INITIAL_STOP_BUFFER_TICKS:
+            raise PullbackContractError("initial stop buffer must remain exactly one tick")
+        if self.buffer_points != INITIAL_STOP_BUFFER_POINTS:
+            raise PullbackContractError("initial stop buffer must remain exactly 0.25 point")
+        if self.immutable is not True:
+            raise PullbackContractError("initial structural stop must be immutable")
+
+
+@dataclass(frozen=True)
+class ProtectedEntryExecutionResult:
+    """Final position-creation result after validating the precomputed initial stop."""
+
+    side: PullbackSide
+    order_type: SimulatedOrderType
+    status: SimulatedExecutionStatus
+    decision_bar_sequence: int
+    execution_bar_sequence: int | None
+    candidate_entry_price: Decimal | None
+    entry_price: Decimal | None
+    initial_stop: InitialStructuralStop
+    position_opened: bool
+
+
+@dataclass(frozen=True)
+class StopEvaluationBar:
+    """OHLC subset needed to simulate an immutable stop on one bar."""
+
+    sequence: int
+    open: Decimal
+    low: Decimal
+    high: Decimal
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.sequence, bool)
+            or not isinstance(self.sequence, int)
+            or self.sequence < 0
+        ):
+            raise PullbackContractError("stop evaluation sequence must be a non-negative integer")
+        for field_name in ("open", "low", "high"):
+            value = getattr(self, field_name)
+            if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+                raise PullbackContractError(
+                    f"stop evaluation {field_name} must be a finite non-negative Decimal"
+                )
+        if self.low > self.high:
+            raise PullbackContractError("stop evaluation low must not exceed high")
+        if not self.low <= self.open <= self.high:
+            raise PullbackContractError("stop evaluation open must be inside the bar range")
+
+
+@dataclass(frozen=True)
+class InitialStopBarExecutionResult:
+    """Deterministic outcome of evaluating the immutable stop on one bar."""
+
+    side: PullbackSide
+    status: InitialStopTriggerStatus
+    fill_source: InitialStopFillSource
+    stop_price: Decimal
+    evaluated_bar_sequence: int
+    fill_price: Decimal | None
+    position_closed: bool
 
 
 def distance_from_bar_range_to_ema20(bar: ClosedBarEMA20) -> Decimal:
@@ -563,6 +678,198 @@ def evaluate_ema20_position_exit(
     )
 
 
+def construct_initial_structural_stop(
+    *,
+    decision: EMAPullbackEntrySignalResult,
+    decision_bar: ClosedBarEMA20,
+    required_touch_bar: ClosedBarEMA20,
+) -> InitialStructuralStop:
+    """Freeze the one-tick-buffered structural stop at the closed confirmation bar.
+
+    The source must be exactly the already-closed ``t-2`` bar associated with a qualified
+    entry signal on ``t``.  No value after ``t`` is accepted or needed.
+    """
+    if not isinstance(decision, EMAPullbackEntrySignalResult):
+        raise PullbackContractError("initial stop requires an EMA pullback entry decision")
+    expected_signal = EntrySignal(decision.side.value)
+    if not decision.entry_signal_qualifies or decision.signal is not expected_signal:
+        raise PullbackContractError("initial stop requires a qualified directional entry signal")
+    if not isinstance(decision_bar, ClosedBarEMA20) or not isinstance(
+        required_touch_bar, ClosedBarEMA20
+    ):
+        raise PullbackContractError("initial stop requires closed decision and t-2 bars")
+    if decision_bar.sequence != decision.confirmation_bar_sequence:
+        raise PullbackContractError("initial stop decision bar must match the entry signal")
+    expected_source_sequence = decision_bar.sequence - INITIAL_STOP_SOURCE_BAR_OFFSET
+    if required_touch_bar.sequence != expected_source_sequence:
+        raise PullbackContractError("initial stop source must be the causal closed bar t-2")
+
+    stop_price = (
+        required_touch_bar.low - INITIAL_STOP_BUFFER_POINTS
+        if decision.side is PullbackSide.LONG
+        else required_touch_bar.high + INITIAL_STOP_BUFFER_POINTS
+    )
+    if stop_price < 0:
+        raise PullbackContractError("initial structural stop cannot be negative")
+    return InitialStructuralStop(
+        side=decision.side,
+        stop_price=stop_price,
+        source_bar_sequence=required_touch_bar.sequence,
+        decision_bar_sequence=decision_bar.sequence,
+    )
+
+
+def _select_exact_next_bar(
+    *,
+    decision_sequence: int,
+    available_bar_opens: Sequence[NextBarOpen],
+) -> NextBarOpen | None:
+    execution_bars = tuple(available_bar_opens)
+    if any(not isinstance(bar, NextBarOpen) for bar in execution_bars):
+        raise PullbackContractError("available execution bars must be NextBarOpen values")
+    expected_execution_sequence = decision_sequence + EARLIEST_EXECUTION_BAR_OFFSET
+    matching_bars = tuple(
+        bar for bar in execution_bars if bar.sequence == expected_execution_sequence
+    )
+    if len(matching_bars) > 1:
+        raise PullbackContractError("available execution bars contain duplicate t+1 values")
+    return matching_bars[0] if matching_bars else None
+
+
+def simulate_entry_with_initial_structural_stop(
+    *,
+    decision: EMAPullbackEntrySignalResult,
+    decision_bar: ClosedBarEMA20,
+    required_touch_bar: ClosedBarEMA20,
+    available_bar_opens: Sequence[NextBarOpen],
+) -> ProtectedEntryExecutionResult:
+    """Create a position only when ``Open[t+1]`` is valid relative to the frozen stop.
+
+    The stop is constructed before inspecting the candidate entry open.  A missing
+    ``t+1`` expires without execution.  A LONG stop at or above the candidate entry, or
+    a SHORT stop at or below it, rejects the entry rather than opening an invalid position.
+    """
+    initial_stop = construct_initial_structural_stop(
+        decision=decision,
+        decision_bar=decision_bar,
+        required_touch_bar=required_touch_bar,
+    )
+    execution_bar = _select_exact_next_bar(
+        decision_sequence=decision.confirmation_bar_sequence,
+        available_bar_opens=available_bar_opens,
+    )
+    if execution_bar is None:
+        return ProtectedEntryExecutionResult(
+            side=decision.side,
+            order_type=SimulatedOrderType.MARKET,
+            status=SimulatedExecutionStatus.EXPIRED_NO_EXECUTION,
+            decision_bar_sequence=decision.confirmation_bar_sequence,
+            execution_bar_sequence=None,
+            candidate_entry_price=None,
+            entry_price=None,
+            initial_stop=initial_stop,
+            position_opened=False,
+        )
+
+    invalid_stop = (
+        initial_stop.stop_price >= execution_bar.open
+        if decision.side is PullbackSide.LONG
+        else initial_stop.stop_price <= execution_bar.open
+    )
+    return ProtectedEntryExecutionResult(
+        side=decision.side,
+        order_type=SimulatedOrderType.MARKET,
+        status=(
+            SimulatedExecutionStatus.REJECT_ENTRY
+            if invalid_stop
+            else SimulatedExecutionStatus.FILLED
+        ),
+        decision_bar_sequence=decision.confirmation_bar_sequence,
+        execution_bar_sequence=execution_bar.sequence,
+        candidate_entry_price=execution_bar.open,
+        entry_price=None if invalid_stop else execution_bar.open,
+        initial_stop=initial_stop,
+        position_opened=not invalid_stop,
+    )
+
+
+def initial_stop_triggered_by_market_price(
+    *,
+    initial_stop: InitialStructuralStop,
+    market_price: Decimal,
+) -> bool:
+    """Evaluate the owner-defined inclusive stop trigger at one observed market price."""
+    if not isinstance(initial_stop, InitialStructuralStop):
+        raise PullbackContractError("initial_stop must be an InitialStructuralStop")
+    if not isinstance(market_price, Decimal) or not market_price.is_finite() or market_price < 0:
+        raise PullbackContractError("market_price must be a finite non-negative Decimal")
+    return (
+        market_price <= initial_stop.stop_price
+        if initial_stop.side is PullbackSide.LONG
+        else market_price >= initial_stop.stop_price
+    )
+
+
+def evaluate_initial_stop_on_bar(
+    *,
+    position: ProtectedEntryExecutionResult,
+    bar: StopEvaluationBar,
+) -> InitialStopBarExecutionResult:
+    """Evaluate one active immutable stop with the frozen bar-based fill convention.
+
+    A strict gap through the stop fills at the bar open.  Otherwise an inclusive intrabar
+    touch fills at the stop price.  This deterministic baseline does not model slippage.
+    """
+    if not isinstance(position, ProtectedEntryExecutionResult):
+        raise PullbackContractError("stop evaluation requires a protected entry result")
+    if position.status is not SimulatedExecutionStatus.FILLED or not position.position_opened:
+        raise PullbackContractError("stop evaluation requires an opened protected position")
+    if not isinstance(bar, StopEvaluationBar):
+        raise PullbackContractError("bar must be a StopEvaluationBar")
+    if position.execution_bar_sequence is None or bar.sequence < position.execution_bar_sequence:
+        raise PullbackContractError("stop evaluation bar cannot precede position creation")
+
+    stop = position.initial_stop
+    gap_through = (
+        bar.open < stop.stop_price if stop.side is PullbackSide.LONG else bar.open > stop.stop_price
+    )
+    if gap_through:
+        return InitialStopBarExecutionResult(
+            side=stop.side,
+            status=InitialStopTriggerStatus.STOP_TRIGGERED,
+            fill_source=InitialStopFillSource.BAR_OPEN_GAP,
+            stop_price=stop.stop_price,
+            evaluated_bar_sequence=bar.sequence,
+            fill_price=bar.open,
+            position_closed=True,
+        )
+
+    trigger_price = bar.low if stop.side is PullbackSide.LONG else bar.high
+    if initial_stop_triggered_by_market_price(
+        initial_stop=stop,
+        market_price=trigger_price,
+    ):
+        return InitialStopBarExecutionResult(
+            side=stop.side,
+            status=InitialStopTriggerStatus.STOP_TRIGGERED,
+            fill_source=InitialStopFillSource.STOP_PRICE,
+            stop_price=stop.stop_price,
+            evaluated_bar_sequence=bar.sequence,
+            fill_price=stop.stop_price,
+            position_closed=True,
+        )
+
+    return InitialStopBarExecutionResult(
+        side=stop.side,
+        status=InitialStopTriggerStatus.NOT_TRIGGERED,
+        fill_source=InitialStopFillSource.NONE,
+        stop_price=stop.stop_price,
+        evaluated_bar_sequence=bar.sequence,
+        fill_price=None,
+        position_closed=False,
+    )
+
+
 def simulate_next_bar_market_execution(
     *,
     decision: EMAPullbackEntrySignalResult | EMA20PositionExitResult,
@@ -597,17 +904,11 @@ def simulate_next_bar_market_execution(
     if decision_bar.sequence != decision_sequence:
         raise PullbackContractError("decision bar must match the qualified decision sequence")
 
-    execution_bars = tuple(available_bar_opens)
-    if any(not isinstance(bar, NextBarOpen) for bar in execution_bars):
-        raise PullbackContractError("available execution bars must be NextBarOpen values")
-    expected_execution_sequence = decision_sequence + EARLIEST_EXECUTION_BAR_OFFSET
-    matching_bars = tuple(
-        bar for bar in execution_bars if bar.sequence == expected_execution_sequence
+    execution_bar = _select_exact_next_bar(
+        decision_sequence=decision_sequence,
+        available_bar_opens=available_bar_opens,
     )
-    if len(matching_bars) > 1:
-        raise PullbackContractError("available execution bars contain duplicate t+1 values")
-
-    if not matching_bars:
+    if execution_bar is None:
         return NextBarExecutionResult(
             purpose=purpose,
             side=side,
@@ -620,7 +921,6 @@ def simulate_next_bar_market_execution(
             position_closed=False,
         )
 
-    execution_bar = matching_bars[0]
     return NextBarExecutionResult(
         purpose=purpose,
         side=side,
@@ -645,6 +945,11 @@ __all__ = [
     "EMA_SLOPE_REQUIRED",
     "EXECUTION_PRICE_SOURCE",
     "EXECUTION_SIGNAL_TIME",
+    "GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN",
+    "INITIAL_STOP_BUFFER_POINTS",
+    "INITIAL_STOP_BUFFER_TICKS",
+    "INITIAL_STOP_IS_IMMUTABLE",
+    "INITIAL_STOP_SOURCE_BAR_OFFSET",
     "INSTRUMENT",
     "LATENCY_MODELED",
     "MACD_CROSS_REQUIRED",
@@ -666,6 +971,7 @@ __all__ = [
     "PULLBACK_REQUIRED_TOUCH_BAR_OFFSET",
     "SIGNAL_DECISION_ON_CLOSED_BAR",
     "SLIPPAGE_MODELED",
+    "STOP_INTRABAR_SLIPPAGE_MODELED",
     "STRATEGY_ID",
     "TICK_REALISTIC_FILL_MODELED",
     "TIMEFRAME_MINUTES",
@@ -675,23 +981,33 @@ __all__ = [
     "EMA20SlopeResult",
     "EMAPullbackEntrySignalResult",
     "EntrySignal",
+    "InitialStopBarExecutionResult",
+    "InitialStopFillSource",
+    "InitialStopTriggerStatus",
+    "InitialStructuralStop",
     "MACDCrossResult",
     "MACDStatus",
     "NextBarExecutionResult",
     "NextBarOpen",
     "PositionExitAction",
+    "ProtectedEntryExecutionResult",
     "PullbackContractError",
     "PullbackPredicateResult",
     "PullbackSide",
     "SimulatedExecutionStatus",
     "SimulatedOrderPurpose",
     "SimulatedOrderType",
+    "StopEvaluationBar",
     "assemble_ema_pullback_entry_signal",
+    "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",
     "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",
     "evaluate_ema_pullback_entry_signal",
+    "evaluate_initial_stop_on_bar",
     "evaluate_macd_confirmation",
     "evaluate_pullback_confirmation",
+    "initial_stop_triggered_by_market_price",
+    "simulate_entry_with_initial_structural_stop",
     "simulate_next_bar_market_execution",
 ]
