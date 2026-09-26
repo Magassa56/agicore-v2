@@ -23,14 +23,18 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MAX_PULLBACK_DISTANCE_POINTS,
     MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
+    POSITION_EXIT_EQUALITY_TRIGGERS_EXIT,
+    POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT,
     PULLBACK_LOOKBACK_BARS,
     SIGNAL_DECISION_ON_CLOSED_BAR,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
     EntrySignal,
     MACDStatus,
+    PositionExitAction,
     PullbackContractError,
     PullbackSide,
+    evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
     evaluate_macd_confirmation,
@@ -108,6 +112,8 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert MACD_CROSS_VALIDITY_BARS == 1
     assert MACD_REQUIRED_CLOSED_BARS == 35
     assert EMA_SEED_CONVENTION == "FIRST_CLOSE_ALPHA_2_OVER_PERIOD_PLUS_1"
+    assert POSITION_EXIT_EQUALITY_TRIGGERS_EXIT is False
+    assert POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT is False
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -656,3 +662,109 @@ def test_assembled_entry_ignores_t_plus_one_values() -> None:
 
     assert low_result == high_result
     assert low_result.signal is EntrySignal.LONG
+
+
+def test_long_position_exits_only_after_strict_close_below_ema20() -> None:
+    result = evaluate_ema20_position_exit(
+        position_side=PullbackSide.LONG,
+        closed_bars=[_bar(20, low="98.50", high="100.50", close="99.75")],
+        decision_bar_sequence=20,
+    )
+
+    assert result.exit_qualifies is True
+    assert result.action is PositionExitAction.EXIT_LONG
+    assert result.decision_bar_sequence == 20
+    assert result.earliest_execution_bar_sequence == 21
+    assert result.same_bar_execution_allowed is False
+
+
+def test_short_position_exits_only_after_strict_close_above_ema20() -> None:
+    result = evaluate_ema20_position_exit(
+        position_side=PullbackSide.SHORT,
+        closed_bars=[_bar(20, low="99.50", high="101.50", close="100.25")],
+        decision_bar_sequence=20,
+    )
+
+    assert result.exit_qualifies is True
+    assert result.action is PositionExitAction.EXIT_SHORT
+    assert result.earliest_execution_bar_sequence == 21
+    assert result.same_bar_execution_allowed is False
+
+
+@pytest.mark.parametrize("position_side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_position_exit_equality_at_close_holds(position_side: PullbackSide) -> None:
+    result = evaluate_ema20_position_exit(
+        position_side=position_side,
+        closed_bars=[_bar(20, low="99.50", high="100.50", close="100.00")],
+        decision_bar_sequence=20,
+    )
+
+    assert result.exit_qualifies is False
+    assert result.action is PositionExitAction.HOLD
+
+
+@pytest.mark.parametrize(
+    ("position_side", "low", "high", "close"),
+    [
+        (PullbackSide.LONG, "99.00", "101.00", "100.25"),
+        (PullbackSide.SHORT, "99.00", "101.00", "99.75"),
+    ],
+)
+def test_wick_crossing_ema20_without_wrong_side_close_holds(
+    position_side: PullbackSide,
+    low: str,
+    high: str,
+    close: str,
+) -> None:
+    result = evaluate_ema20_position_exit(
+        position_side=position_side,
+        closed_bars=[_bar(20, low=low, high=high, close=close)],
+        decision_bar_sequence=20,
+    )
+
+    assert result.exit_qualifies is False
+    assert result.action is PositionExitAction.HOLD
+
+
+def test_position_exit_uses_only_closed_decision_bar_and_ignores_t_plus_one() -> None:
+    history = (
+        _bar(19, low="99.00", high="101.00", close="100.50"),
+        _bar(20, low="98.50", high="100.50", close="99.75"),
+    )
+    future_above = history + (_bar(21, low="499", high="501", close="500", ema20="400"),)
+    future_below = history + (_bar(21, low="49", high="51", close="50", ema20="100"),)
+
+    above_result = evaluate_ema20_position_exit(
+        position_side=PullbackSide.LONG,
+        closed_bars=future_above,
+        decision_bar_sequence=20,
+    )
+    below_result = evaluate_ema20_position_exit(
+        position_side=PullbackSide.LONG,
+        closed_bars=future_below,
+        decision_bar_sequence=20,
+    )
+
+    assert above_result == below_result
+    assert above_result.action is PositionExitAction.EXIT_LONG
+    assert above_result.earliest_execution_bar_sequence == 21
+
+
+def test_position_exit_fails_closed_when_decision_bar_is_missing() -> None:
+    with pytest.raises(PullbackContractError, match="exactly one decision bar"):
+        evaluate_ema20_position_exit(
+            position_side=PullbackSide.LONG,
+            closed_bars=[_bar(19, low="99", high="101", close="100")],
+            decision_bar_sequence=20,
+        )
+
+
+def test_position_exit_fails_closed_when_decision_bar_is_duplicated() -> None:
+    decision_bar = _bar(20, low="99", high="101", close="100")
+
+    with pytest.raises(PullbackContractError, match="exactly one decision bar"):
+        evaluate_ema20_position_exit(
+            position_side=PullbackSide.SHORT,
+            closed_bars=[decision_bar, decision_bar],
+            decision_bar_sequence=20,
+        )

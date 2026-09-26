@@ -1,15 +1,16 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-23 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
 EMA_PULLBACK_V1_MNQ_MACD = PASS ;
 EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS ;
+EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-macd.
-Base GitHub vérifiée et récupérée : 8c90ba79fb0492676cbb321c7c5ee41a46ca8f8b.
+Branche de vérification : feature/ema-pullback-v1-mnq-ema20-exit.
+Base GitHub vérifiée et récupérée : b4573f3b7525dff4e1af33541e5ccec6e1c662f0.
 
 ## Acquis vérifiés
 
@@ -306,11 +307,36 @@ n'a été utilisé ; le diff ne contient aucun fichier ni ligne de marché.
 
 `EMA_PULLBACK_V1_MNQ_MACD = PASS` et `EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS`.
 
-`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED`.
-Action humaine unique : confirmer ou corriger cette règle candidate de sortie principale : une position
-LONG sort si une bougie clôture strictement sous EMA20, une position SHORT sort si elle clôture strictement
-au-dessus, l'égalité ne sort pas, la décision est prise à la clôture `t` et l'exécution au plus tôt sur
-`t+1`. Aucune règle de stop, objectif ou priorité de sortie n'est déduite à ce stade.
+Cette tranche a été intégrée par la PR #253, merge
+b4573f3b7525dff4e1af33541e5ccec6e1c662f0.
+
+## EMA_PULLBACK_V1_MNQ — sortie principale EMA20 figée
+
+La décision métier du 2026-09-23 fixe sans optimisation la sortie principale d'une position. Une
+position LONG qualifie une sortie uniquement si `Close[t] < EMA20[t]`. Une position SHORT qualifie
+une sortie uniquement si `Close[t] > EMA20[t]`. L'égalité exacte produit `HOLD` pour les deux côtés.
+
+Seule la clôture de la bougie `t` est évaluée. Une mèche sous EMA20 pour LONG, ou au-dessus pour
+SHORT, ne déclenche aucune sortie lorsque la clôture reste du bon côté ou égale à EMA20. Le résultat
+est un prédicat non exécutable `EXIT_LONG`, `EXIT_SHORT` ou `HOLD` ; il ne contient ni ordre ni prix
+de fill. L'exécution sur `t` est explicitement interdite et le premier indice admissible exposé est
+`t+1`. La sélection exacte de la bougie `t` rend toute mutation de `t+1` sans effet.
+
+Preuves locales : neuf nouveaux cas portent le fichier synthétique à 50 tests PASS en 0,14 s. Ils
+couvrent sorties LONG/SHORT, égalité des deux côtés, mèches traversantes sans clôture adverse,
+causalité, mutations opposées de `t+1`, premier indice d'exécution, bougie `t` absente et doublonnée.
+Les 99 régressions stratégie/replay ciblées passent en 0,20 s. La suite complète passe avec
+5 962 tests et 6 warnings historiques en 85,10 s. Aucun dataset, OOS, PnL, replay de données,
+Risk Engine, broker ou ordre n'a été utilisé.
+
+`EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
+Action humaine unique : confirmer ou corriger le modèle candidat suivant pour les entrées et sorties :
+un signal formé à la clôture `t` produit un ordre simulé MARKET rempli à `Open[t+1]`, et expire sans
+fill si la bougie `t+1` n'existe pas. Aucun type d'ordre, prix de fill ou comportement de fin de série
+n'est présumé avant cette décision. Stop-loss, take-profit, trailing stop, breakeven et priorité entre
+sorties restent volontairement non définis.
 
 ## Limites du produit
 
@@ -321,5 +347,6 @@ Aucun ancien événement legacy migré implicitement. Aucun accès data/, secret
 Le CAS protège la publication des journaux, pas l'exécution concurrente d'un callback externe ;
 les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre conservée hors
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
-La stratégie EMA pullback personnelle (pente, MACD, sortie clôture sous EMA20) reste
-à formaliser puis évaluer ; elle est distincte de EMA19/50 V3 rejetée.
+Les entrées et la sortie principale EMA20 de la stratégie personnelle sont désormais formalisées.
+Le modèle d'exécution et les sorties protectrices restent à définir avant son évaluation ; cette
+stratégie demeure distincte de EMA19/50 V3 rejetée.

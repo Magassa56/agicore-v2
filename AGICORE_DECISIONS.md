@@ -298,3 +298,21 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
 9. **Verdict** : `EMA_PULLBACK_V1_MNQ_MACD = PASS` et
    `EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — sortie principale EMA20 (approuvée le 2026-09-23)
+
+1. **Décision sans optimisation** : LONG sort uniquement si `Close[t] < EMA20[t]` ; SHORT sort
+   uniquement si `Close[t] > EMA20[t]`.
+2. **Égalité** : `Close[t] == EMA20[t]` produit `HOLD` quel que soit le côté de la position.
+3. **Mèches** : une mèche traversant EMA20 ne suffit jamais. LONG conserve la position si
+   `Close[t] >= EMA20[t]` ; SHORT la conserve si `Close[t] <= EMA20[t]`.
+4. **Temporalité** : la décision utilise uniquement la bougie clôturée `t`. Toute donnée postérieure
+   est ignorée et la mutation de `t+1` ne peut changer le résultat.
+5. **Exécution** : aucune exécution n'est permise sur `t`. Le résultat indique seulement que le
+   premier indice possible est `t+1`, sans fixer type d'ordre, prix ou fill.
+6. **Fail-closed** : la bougie `t` doit être présente exactement une fois ; absence, doublon, côté
+   implicite ou indice invalide sont refusés.
+7. **Portée** : `stop_loss`, `take_profit`, `trailing_stop`, `breakeven` et priorité entre sorties
+   restent explicitement non définis. Aucun OOS, PnL, replay de données ou Risk Engine n'est touché.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.

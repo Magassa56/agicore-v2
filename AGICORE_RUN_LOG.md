@@ -298,3 +298,17 @@
 - Aucun accès dataset/OOS, PnL, optimisation, replay de données, Risk Engine, broker, compte ou ordre.
 - Verdict : `EMA_PULLBACK_V1_MNQ_MACD = PASS` et `EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS` ;
   prochaine gate métier unique : `BLOCKED_HUMAN_GATE — EMA20_POSITION_EXIT_RULE_REQUIRED`.
+
+## 2026-09-23 — EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT
+
+- Reprise depuis `origin/main` au merge b4573f3b7525dff4e1af33541e5ccec6e1c662f0 de la PR #253 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-ema20-exit`, état initial propre.
+- Décision métier figée sans optimisation : sortie LONG strictement sous EMA20, sortie SHORT
+  strictement au-dessus, égalité `HOLD` et décision uniquement après clôture de `t`.
+- Les mèches traversantes seules ne déclenchent rien. L'évaluateur sélectionne exactement `t`, ignore
+  toute valeur future, n'émet aucun ordre/prix et expose seulement le premier indice admissible `t+1`.
+- Neuf nouveaux cas portent le fichier ciblé à 50 tests PASS en 0,14 s. Les 99 tests stratégie/replay
+  ciblés passent en 0,20 s. Suite complète : 5 962 passed, 6 warnings in 85.10s.
+- Aucun accès dataset/OOS, PnL, optimisation, replay de données, Risk Engine, broker, compte ou ordre.
+- Verdict : `EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
