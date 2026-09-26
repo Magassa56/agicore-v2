@@ -20,12 +20,12 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MACD_SIGNAL_LINE_MA_TYPE,
     MACD_SIGNAL_PERIOD,
     MACD_SLOW_PERIOD,
-    MAX_PULLBACK_DISTANCE_POINTS,
-    MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
     POSITION_EXIT_EQUALITY_TRIGGERS_EXIT,
     POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT,
     PULLBACK_LOOKBACK_BARS,
+    PULLBACK_PROXIMITY_QUALIFIES,
+    PULLBACK_REQUIRED_TOUCH_BAR_OFFSET,
     SIGNAL_DECISION_ON_CLOSED_BAR,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
@@ -94,8 +94,8 @@ def _macd_history(
 
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
-    assert MAX_PULLBACK_DISTANCE_TICKS == 8
-    assert MAX_PULLBACK_DISTANCE_POINTS == Decimal("2.00")
+    assert PULLBACK_REQUIRED_TOUCH_BAR_OFFSET == 2
+    assert PULLBACK_PROXIMITY_QUALIFIES is False
     assert EMA_SLOPE_REQUIRED is True
     assert MACD_CROSS_REQUIRED is True
     assert WICK_CROSS_EMA20_ALLOWED is True
@@ -119,7 +119,7 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
     preceding = (
         _bar(7, low="103.00", high="104.00", close="103.50"),
-        _bar(8, low="101.50", high="103.00", close="102.50"),
+        _bar(8, low="99.75", high="101.00", close="100.50"),
         _bar(9, low="103.00", high="104.00", close="103.50"),
     )
     confirmation = _bar(10, low="99.75", high="101.25", close="100.75")
@@ -139,7 +139,7 @@ def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> N
 def test_short_qualifies_after_prior_pullback_and_strict_close_below_ema20() -> None:
     preceding = (
         _bar(7, low="96.00", high="97.00", close="96.50"),
-        _bar(8, low="97.00", high="98.50", close="97.50"),
+        _bar(8, low="99.00", high="100.25", close="99.50"),
         _bar(9, low="95.50", high="96.50", close="96.00"),
     )
     confirmation = _bar(10, low="98.75", high="100.25", close="99.25")
@@ -163,14 +163,14 @@ def test_short_qualifies_after_prior_pullback_and_strict_close_below_ema20() -> 
         (PullbackSide.SHORT, "97.00", "98.00", "99.75"),
     ],
 )
-def test_exact_eight_tick_distance_is_inclusive(
+def test_exact_eight_tick_proximity_on_required_t_minus_two_is_rejected(
     side: PullbackSide,
     low: str,
     high: str,
     confirmation_close: str,
 ) -> None:
     preceding = list(_far_preceding_bars())
-    preceding[-1] = _bar(9, low=low, high=high, close=low)
+    preceding[1] = _bar(8, low=low, high=high, close=low)
     confirmation = _bar(
         10,
         low="99.50",
@@ -184,9 +184,13 @@ def test_exact_eight_tick_distance_is_inclusive(
         confirmation_bar=confirmation,
     )
 
-    assert result.pullback_confirmation_qualifies is True
+    assert result.pullback_confirmation_qualifies is False
+    assert result.pullback_found is False
     assert result.minimum_distance_points == Decimal("2.00")
     assert result.minimum_distance_ticks == Decimal(8)
+    assert result.required_touch_distance_points == Decimal("2.00")
+    assert result.required_touch_distance_ticks == Decimal(8)
+    assert result.qualifying_bar_sequence is None
 
 
 @pytest.mark.parametrize(
@@ -236,7 +240,7 @@ def test_nine_tick_distance_is_rejected(
 )
 def test_wick_may_cross_ema20(side: PullbackSide, confirmation_close: str) -> None:
     preceding = list(_far_preceding_bars())
-    preceding[0] = _bar(7, low="99.00", high="101.00", close="100.50")
+    preceding[1] = _bar(8, low="99.00", high="101.00", close="100.50")
     confirmation = _bar(
         10,
         low="99.50",
@@ -252,7 +256,62 @@ def test_wick_may_cross_ema20(side: PullbackSide, confirmation_close: str) -> No
 
     assert result.pullback_confirmation_qualifies is True
     assert result.minimum_distance_points == Decimal(0)
-    assert result.qualifying_bar_sequence == 7
+    assert result.required_touch_distance_points == Decimal(0)
+    assert result.qualifying_bar_sequence == 8
+
+
+@pytest.mark.parametrize("touch_sequence", [7, 9])
+def test_touch_on_another_preceding_bar_does_not_replace_t_minus_two(
+    touch_sequence: int,
+) -> None:
+    preceding = list(_far_preceding_bars())
+    touch_index = touch_sequence - 7
+    preceding[touch_index] = _bar(
+        touch_sequence,
+        low="99.00",
+        high="101.00",
+        close="100.50",
+    )
+    confirmation = _bar(10, low="99.50", high="100.50", close="100.25")
+
+    result = evaluate_pullback_confirmation(
+        side=PullbackSide.LONG,
+        preceding_bars=preceding,
+        confirmation_bar=confirmation,
+    )
+
+    assert result.minimum_distance_points == Decimal(0)
+    assert result.required_touch_distance_points == Decimal("3.25")
+    assert result.pullback_found is False
+    assert result.pullback_confirmation_qualifies is False
+    assert result.qualifying_bar_sequence is None
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "close"),
+    [
+        ("100.00", "101.00", "100.50"),
+        ("99.00", "100.00", "99.50"),
+    ],
+)
+def test_required_t_minus_two_endpoint_contact_qualifies(
+    low: str,
+    high: str,
+    close: str,
+) -> None:
+    preceding = list(_far_preceding_bars())
+    preceding[1] = _bar(8, low=low, high=high, close=close)
+
+    result = evaluate_pullback_confirmation(
+        side=PullbackSide.LONG,
+        preceding_bars=preceding,
+        confirmation_bar=_bar(10, low="99.50", high="100.50", close="100.25"),
+    )
+
+    assert result.pullback_found is True
+    assert result.pullback_confirmation_qualifies is True
+    assert result.required_touch_distance_points == Decimal(0)
+    assert result.qualifying_bar_sequence == 8
 
 
 @pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])

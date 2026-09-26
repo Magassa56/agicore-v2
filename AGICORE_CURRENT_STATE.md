@@ -1,6 +1,6 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-23 UTC.
+Date : 2026-09-26 UTC.
 Statut : BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
@@ -8,9 +8,10 @@ EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
 EMA_PULLBACK_V1_MNQ_MACD = PASS ;
 EMA_PULLBACK_V1_MNQ_ENTRY_SIGNAL = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS ;
+EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-ema20-exit.
-Base GitHub vérifiée et récupérée : b4573f3b7525dff4e1af33541e5ccec6e1c662f0.
+Branche de vérification : feature/ema-pullback-v1-mnq-t-minus-2-touch.
+Base GitHub vérifiée et récupérée : 0880da6fb2dd916ba53ed1caf069f66342130f67.
 
 ## Acquis vérifiés
 
@@ -330,6 +331,31 @@ Les 99 régressions stratégie/replay ciblées passent en 0,20 s. La suite compl
 Risk Engine, broker ou ordre n'a été utilisé.
 
 `EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS`.
+
+Cette tranche a été intégrée par la PR #254, merge
+0880da6fb2dd916ba53ed1caf069f66342130f67.
+
+## EMA_PULLBACK_V1_MNQ — contact EMA20 obligatoire sur la deuxième bougie
+
+La décision métier du 2026-09-26 renforce, sans optimisation, le prédicat de pullback. Dans la
+fenêtre ordonnée `t-3`, `t-2`, `t-1`, la deuxième bougie est exactement `t-2`. Sa plage fermée
+`Low[t-2]..High[t-2]` doit contenir `EMA20[t-2]`. Un contact par une extrémité ou une mèche
+traversante qualifie ; toute distance strictement positive est refusée.
+
+Le seuil historique de huit ticks est supersédé et ne participe plus à la qualification
+(`PULLBACK_PROXIMITY_QUALIFIES = False`). Un contact sur `t-3` ou `t-1` ne remplace jamais le
+contact obligatoire sur `t-2`. La confirmation directionnelle,
+la pente EMA20, le croisement MACD, la causalité à la clôture `t` et l'exécution au plus tôt sur
+`t+1` restent inchangés.
+
+Preuves locales : le fichier synthétique passe avec 54 tests en 0,11 s. Il couvre LONG/SHORT,
+contact par mèche, contacts aux deux extrémités, rejet d'une proximité exacte de huit ticks,
+rejet lorsque seul `t-3` ou `t-1` touche, clôture directionnelle et causalité. Les 103 régressions
+stratégie/replay ciblées passent en 0,32 s. La suite complète passe avec 5 966 tests et 6 warnings
+historiques en 101,18 s. Ruff ciblé, format Ruff et `py_compile` passent. Aucun dataset, OOS, PnL,
+replay de données, Risk Engine, broker ou ordre n'a été utilisé.
+
+`EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH = PASS`.
 
 `EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — NEXT_BAR_EXECUTION_MODEL_REQUIRED`.
 Action humaine unique : confirmer ou corriger le modèle candidat suivant pour les entrées et sorties :
