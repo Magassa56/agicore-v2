@@ -3,8 +3,8 @@
 This module freezes only the strategy rules that the owner has explicitly defined.  It
 does not compute EMA20, does not emit an executable trading order, and never reads market
 or OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses
-the deterministic replay EMA implementation.  Position exits remain fail-closed until
-their strategy rules are specified.
+the deterministic replay EMA implementation.  The primary EMA20 position exit is frozen;
+protective and profit-taking exits remain deliberately undefined.
 """
 
 from __future__ import annotations
@@ -41,6 +41,8 @@ EMA_SLOPE_REQUIRED = True
 MACD_CROSS_REQUIRED = True
 SIGNAL_DECISION_ON_CLOSED_BAR = True
 EARLIEST_EXECUTION_BAR_OFFSET = 1
+POSITION_EXIT_EQUALITY_TRIGGERS_EXIT = False
+POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT = False
 
 
 class PullbackContractError(ValueError):
@@ -67,6 +69,14 @@ class EntrySignal(StrEnum):
     LONG = "LONG"
     SHORT = "SHORT"
     NONE = "NONE"
+
+
+class PositionExitAction(StrEnum):
+    """Non-executable action produced by the primary EMA20 exit predicate."""
+
+    EXIT_LONG = "EXIT_LONG"
+    EXIT_SHORT = "EXIT_SHORT"
+    HOLD = "HOLD"
 
 
 @dataclass(frozen=True)
@@ -155,6 +165,18 @@ class EMAPullbackEntrySignalResult:
     macd_cross_qualifies: bool
     macd_status: MACDStatus
     confirmation_bar_sequence: int
+
+
+@dataclass(frozen=True)
+class EMA20PositionExitResult:
+    """Result of the strict close-relative-to-EMA20 position exit predicate."""
+
+    position_side: PullbackSide
+    action: PositionExitAction
+    exit_qualifies: bool
+    decision_bar_sequence: int
+    earliest_execution_bar_sequence: int
+    same_bar_execution_allowed: bool = False
 
 
 def distance_from_bar_range_to_ema20(bar: ClosedBarEMA20) -> Decimal:
@@ -429,6 +451,53 @@ def evaluate_ema_pullback_entry_signal(
     )
 
 
+def evaluate_ema20_position_exit(
+    *,
+    position_side: PullbackSide,
+    closed_bars: Sequence[ClosedBarEMA20],
+    decision_bar_sequence: int,
+) -> EMA20PositionExitResult:
+    """Evaluate the frozen primary exit on one explicit closed bar.
+
+    A LONG exits only when ``Close[t] < EMA20[t]``; a SHORT exits only when
+    ``Close[t] > EMA20[t]``.  Equality and wick-only crossings hold the position.
+    Only the bar whose sequence is exactly ``decision_bar_sequence`` is inspected, so
+    future values cannot affect the decision.  This function emits no order or price;
+    execution is forbidden on ``t`` and becomes eligible no earlier than ``t+1``.
+    """
+    if not isinstance(position_side, PullbackSide):
+        raise PullbackContractError("position_side must be explicitly LONG or SHORT")
+    if (
+        isinstance(decision_bar_sequence, bool)
+        or not isinstance(decision_bar_sequence, int)
+        or decision_bar_sequence < 0
+    ):
+        raise PullbackContractError("decision_bar_sequence must be a non-negative integer")
+
+    matching_bars = tuple(bar for bar in closed_bars if bar.sequence == decision_bar_sequence)
+    if len(matching_bars) != 1:
+        raise PullbackContractError("closed bars must contain exactly one decision bar")
+    decision_bar = matching_bars[0]
+
+    exit_qualifies = (
+        decision_bar.close < decision_bar.ema20
+        if position_side is PullbackSide.LONG
+        else decision_bar.close > decision_bar.ema20
+    )
+    action = (
+        PositionExitAction(f"EXIT_{position_side.value}")
+        if exit_qualifies
+        else PositionExitAction.HOLD
+    )
+    return EMA20PositionExitResult(
+        position_side=position_side,
+        action=action,
+        exit_qualifies=exit_qualifies,
+        decision_bar_sequence=decision_bar_sequence,
+        earliest_execution_bar_sequence=(decision_bar_sequence + EARLIEST_EXECUTION_BAR_OFFSET),
+    )
+
+
 __all__ = [
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
     "EARLIEST_EXECUTION_BAR_OFFSET",
@@ -449,22 +518,27 @@ __all__ = [
     "MAX_PULLBACK_DISTANCE_TICKS",
     "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
     "MNQ_TICK_SIZE_POINTS",
+    "POSITION_EXIT_EQUALITY_TRIGGERS_EXIT",
+    "POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT",
     "PULLBACK_LOOKBACK_BARS",
     "SIGNAL_DECISION_ON_CLOSED_BAR",
     "STRATEGY_ID",
     "TIMEFRAME_MINUTES",
     "WICK_CROSS_EMA20_ALLOWED",
     "ClosedBarEMA20",
+    "EMA20PositionExitResult",
     "EMA20SlopeResult",
     "EMAPullbackEntrySignalResult",
     "EntrySignal",
     "MACDCrossResult",
     "MACDStatus",
+    "PositionExitAction",
     "PullbackContractError",
     "PullbackPredicateResult",
     "PullbackSide",
     "assemble_ema_pullback_entry_signal",
     "distance_from_bar_range_to_ema20",
+    "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",
     "evaluate_ema_pullback_entry_signal",
     "evaluate_macd_confirmation",
