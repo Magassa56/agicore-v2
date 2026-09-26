@@ -17,6 +17,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     EMA_SLOPE_REQUIRED,
     EXECUTION_PRICE_SOURCE,
     EXECUTION_SIGNAL_TIME,
+    EXIT_PRIORITY,
     GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN,
     INITIAL_STOP_BUFFER_POINTS,
     INITIAL_STOP_BUFFER_TICKS,
@@ -42,6 +43,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SIGNAL_DECISION_ON_CLOSED_BAR,
     SLIPPAGE_MODELED,
     STOP_INTRABAR_SLIPPAGE_MODELED,
+    STRUCTURAL_STOP_FIRST,
     TAKE_PROFIT,
     TAKE_PROFIT_ENABLED,
     TAKE_PROFIT_MONETARY_AMOUNT,
@@ -56,11 +58,13 @@ from agicore.trading.ema_pullback_v1_mnq import (
     EMA20PositionExitResult,
     EMAPullbackEntrySignalResult,
     EntrySignal,
+    ExitPriorityExecutionResult,
     InitialStopFillSource,
     InitialStopTriggerStatus,
     MACDStatus,
     NextBarOpen,
     PositionExitAction,
+    PositionExitReason,
     PullbackContractError,
     PullbackSide,
     SimulatedExecutionStatus,
@@ -68,6 +72,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SimulatedOrderType,
     StopEvaluationBar,
     TakeProfitEvaluationResult,
+    arbitrate_exit_at_open,
     construct_initial_structural_stop,
     evaluate_disabled_take_profit,
     evaluate_ema20_position_exit,
@@ -219,6 +224,8 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert TAKE_PROFIT_POINTS is None
     assert TAKE_PROFIT_R_MULTIPLE is None
     assert TAKE_PROFIT_PNL_EXIT_ENABLED is False
+    assert STRUCTURAL_STOP_FIRST is True
+    assert EXIT_PRIORITY == ("STRUCTURAL_STOP", "EMA20_EXIT")
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -1445,3 +1452,153 @@ def test_disabled_take_profit_is_deterministic_for_repeated_observation() -> Non
     }
 
     assert evaluate_disabled_take_profit(**arguments) == evaluate_disabled_take_profit(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("side", "open_price"),
+    [
+        (PullbackSide.LONG, Decimal("98.50")),
+        (PullbackSide.SHORT, Decimal("101.50")),
+    ],
+)
+def test_structural_stop_wins_collision_with_pending_ema20_exit_at_same_open(
+    side: PullbackSide,
+    open_price: Decimal,
+) -> None:
+    result = arbitrate_exit_at_open(
+        position=_protected_position(side),
+        pending_ema20_exit=_qualified_exit(side, sequence=21),
+        execution_bar=NextBarOpen(sequence=22, open=open_price),
+    )
+
+    assert result.exit_reason is PositionExitReason.STRUCTURAL_STOP
+    assert result.fill_price == open_price
+    assert result.structural_stop_executed is True
+    assert result.ema20_exit_executed is False
+    assert result.cancel_pending_ema20_exit is True
+    assert result.cancel_structural_stop is False
+    assert result.fill_count == 1
+    assert result.position_close_count == 1
+    assert result.position_closed is True
+
+
+@pytest.mark.parametrize(
+    ("side", "stop_price"),
+    [
+        (PullbackSide.LONG, Decimal("98.75")),
+        (PullbackSide.SHORT, Decimal("101.25")),
+    ],
+)
+def test_exact_stop_boundary_has_priority_over_pending_ema20_exit(
+    side: PullbackSide,
+    stop_price: Decimal,
+) -> None:
+    result = arbitrate_exit_at_open(
+        position=_protected_position(side),
+        pending_ema20_exit=_qualified_exit(side, sequence=21),
+        execution_bar=NextBarOpen(sequence=22, open=stop_price),
+    )
+
+    assert result.exit_reason is PositionExitReason.STRUCTURAL_STOP
+    assert result.fill_price == stop_price
+    assert result.cancel_pending_ema20_exit is True
+
+
+@pytest.mark.parametrize(
+    ("side", "open_price"),
+    [
+        (PullbackSide.LONG, Decimal("99.00")),
+        (PullbackSide.SHORT, Decimal("101.00")),
+    ],
+)
+def test_pending_ema20_exit_executes_when_stop_is_not_triggered_at_open(
+    side: PullbackSide,
+    open_price: Decimal,
+) -> None:
+    result = arbitrate_exit_at_open(
+        position=_protected_position(side),
+        pending_ema20_exit=_qualified_exit(side, sequence=21),
+        execution_bar=NextBarOpen(sequence=22, open=open_price),
+    )
+
+    assert result.exit_reason is PositionExitReason.EMA20_EXIT
+    assert result.fill_price == open_price
+    assert result.structural_stop_executed is False
+    assert result.ema20_exit_executed is True
+    assert result.cancel_pending_ema20_exit is False
+    assert result.cancel_structural_stop is True
+    assert result.fill_count == 1
+    assert result.position_close_count == 1
+    assert result.position_closed is True
+
+
+def test_exit_priority_result_rejects_two_fills_or_two_position_closes() -> None:
+    common = {
+        "side": PullbackSide.LONG,
+        "exit_reason": PositionExitReason.STRUCTURAL_STOP,
+        "execution_bar_sequence": 22,
+        "fill_price": Decimal("98.50"),
+        "structural_stop_executed": True,
+        "ema20_exit_executed": False,
+        "cancel_pending_ema20_exit": True,
+        "cancel_structural_stop": False,
+    }
+
+    with pytest.raises(PullbackContractError, match="exactly one fill and one close"):
+        ExitPriorityExecutionResult(**common, fill_count=2)
+    with pytest.raises(PullbackContractError, match="exactly one fill and one close"):
+        ExitPriorityExecutionResult(**common, position_close_count=2)
+
+
+def test_exit_priority_result_rejects_executing_both_exit_paths() -> None:
+    with pytest.raises(PullbackContractError, match="execute one exit and cancel the other"):
+        ExitPriorityExecutionResult(
+            side=PullbackSide.SHORT,
+            exit_reason=PositionExitReason.STRUCTURAL_STOP,
+            execution_bar_sequence=22,
+            fill_price=Decimal("101.50"),
+            structural_stop_executed=True,
+            ema20_exit_executed=True,
+            cancel_pending_ema20_exit=True,
+            cancel_structural_stop=False,
+        )
+
+
+def test_exit_priority_rejects_position_and_pending_exit_side_mismatch() -> None:
+    with pytest.raises(PullbackContractError, match="sides must match"):
+        arbitrate_exit_at_open(
+            position=_protected_position(PullbackSide.LONG),
+            pending_ema20_exit=_qualified_exit(PullbackSide.SHORT, sequence=21),
+            execution_bar=NextBarOpen(sequence=22, open=Decimal("98.50")),
+        )
+
+
+def test_exit_priority_requires_exact_pending_exit_execution_bar() -> None:
+    with pytest.raises(PullbackContractError, match="exact next bar"):
+        arbitrate_exit_at_open(
+            position=_protected_position(PullbackSide.LONG),
+            pending_ema20_exit=_qualified_exit(PullbackSide.LONG, sequence=21),
+            execution_bar=NextBarOpen(sequence=23, open=Decimal("98.50")),
+        )
+
+
+@pytest.mark.parametrize(
+    ("side", "open_price"),
+    [
+        (PullbackSide.LONG, Decimal("98.50")),
+        (PullbackSide.LONG, Decimal("99.00")),
+        (PullbackSide.SHORT, Decimal("101.50")),
+        (PullbackSide.SHORT, Decimal("101.00")),
+    ],
+)
+def test_exit_priority_is_reproducible(
+    side: PullbackSide,
+    open_price: Decimal,
+) -> None:
+    arguments = {
+        "position": _protected_position(side),
+        "pending_ema20_exit": _qualified_exit(side, sequence=21),
+        "execution_bar": NextBarOpen(sequence=22, open=open_price),
+    }
+
+    assert arbitrate_exit_at_open(**arguments) == arbitrate_exit_at_open(**arguments)

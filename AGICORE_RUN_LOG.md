@@ -378,3 +378,20 @@
   Risk Engine, broker, compte ou ordre réel ; aucun breakeven ou trailing stop ajouté.
 - Verdict : `EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED`.
+
+## 2026-09-26 — EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY
+
+- Reprise depuis `origin/main` au merge 8b410b9c00b0e3ff84822b068f54732d5f1886cf de la PR #258 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-exit-priority`, état initial propre.
+- Décision métier figée sans optimisation : `STRUCTURAL_STOP_FIRST`, puis `EMA20_EXIT`, pour une
+  sortie EMA20 en attente et un stop structurel évalués au même `Open[k]`.
+- Si le stop est déclenché inclusivement à l'ouverture, il remplit à `Open[k]` et annule la sortie
+  EMA20. Sinon la sortie EMA20 remplit à cette ouverture et annule le stop.
+- Le résultat fail-closed garantit un seul motif, un seul fill et une seule fermeture de position ;
+  il refuse doubles exécutions, doubles fermetures, incohérences de côté et mauvaise barre.
+- Quatorze nouveaux cas portent le fichier synthétique à 108 tests PASS en 0,23 s. Les 154 tests
+  stratégie/replay ciblés passent en 0,34 s. Suite complète : 6 020 passed, 6 warnings in 82.13s.
+- Ruff ciblé et `py_compile` PASS. Aucun accès dataset/OOS, PnL, optimisation, Risk Engine, broker,
+  compte ou ordre réel ; aucun breakeven ou trailing stop ajouté.
+- Verdict : `EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — BREAKEVEN_RULE_REQUIRED`.

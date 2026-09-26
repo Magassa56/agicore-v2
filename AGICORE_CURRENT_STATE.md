@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-26 UTC.
-Statut : BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — BREAKEVEN_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -12,9 +12,10 @@ EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS ;
 EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS ;
 EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS ;
 EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS ;
+EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-no-take-profit.
-Base GitHub vérifiée et récupérée : 2a9b334dbeb881f5b233534cd97863e646fe56f7.
+Branche de vérification : feature/ema-pullback-v1-mnq-exit-priority.
+Base GitHub vérifiée et récupérée : 8b410b9c00b0e3ff84822b068f54732d5f1886cf.
 
 ## Acquis vérifiés
 
@@ -452,6 +453,34 @@ Action humaine unique : définir la priorité déterministe lorsque le stop stru
 EMA20 peuvent tous deux fermer la même position, notamment si une sortie EMA20 en attente et un
 gap au-delà du stop deviennent exécutables au même `Open[k]`.
 
+Cette tranche a été intégrée par la PR #258, merge
+8b410b9c00b0e3ff84822b068f54732d5f1886cf.
+
+## EMA_PULLBACK_V1_MNQ — priorité des sorties figée
+
+La décision métier du 2026-09-26 fixe `STRUCTURAL_STOP_FIRST` et la hiérarchie exclusive
+`STRUCTURAL_STOP`, puis `EMA20_EXIT`. Lorsqu'une sortie EMA20 est en attente pour `Open[k]`, un
+stop structurel déclenché inclusivement par cette même ouverture gagne : le fill simulé est
+`Open[k]`, le motif est `STRUCTURAL_STOP` et la sortie EMA20 est annulée.
+
+Si le stop n'est pas déclenché à `Open[k]`, la sortie EMA20 en attente est exécutée à cette
+ouverture et le stop structurel est annulé. L'arbitre fail-closed impose exactement un motif,
+un fill et une fermeture de position ; deux exécutions ou deux fermetures sont invalides. Seule
+l'ouverture concernée participe à l'arbitrage, sans donnée intrabar future ni lookahead.
+
+Preuves locales : quatorze nouveaux cas portent le fichier synthétique à 108 tests PASS en 0,23 s.
+Ils couvrent LONG/SHORT, collision avec gap, égalité inclusive au stop, sortie EMA20 lorsque le stop
+n'est pas déclenché, annulation de l'autre sortie, refus d'un double fill/d'une double fermeture,
+cohérence des côtés, barre exacte et répétabilité. Les 154 tests stratégie/replay ciblés passent en
+0,34 s. La suite complète passe avec 6 020 tests et 6 warnings historiques en 82,13 s. Ruff ciblé
+et `py_compile` passent.
+
+`EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — BREAKEVEN_RULE_REQUIRED`.
+Action humaine unique : déclarer soit `BREAKEVEN = NONE`, soit la condition exacte d'activation,
+le niveau de remplacement et sa convention d'exécution, sans optimisation sur les données.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -462,6 +491,6 @@ Le CAS protège la publication des journaux, pas l'exécution concurrente d'un c
 les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre conservée hors
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
 Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le stop structurel
-initial et l'absence explicite de take-profit sont désormais formalisés. L'arbitrage entre les deux
-sorties existantes reste à définir avant l'évaluation ; cette
-stratégie demeure distincte de EMA19/50 V3 rejetée.
+initial, l'absence explicite de take-profit et la priorité entre les deux sorties existantes sont
+désormais formalisés. La règle de breakeven reste à décider avant l'évaluation ; cette stratégie
+demeure distincte de EMA19/50 V3 rejetée.
