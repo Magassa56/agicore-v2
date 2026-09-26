@@ -5,8 +5,9 @@ does not compute EMA20, does not emit a broker-executable order, and never reads
 OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses the
 deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions can be
 mapped to an offline bar-based simulated fill at ``Open[t+1]``.  The initial structural
-stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit; exit
-priority at one shared bar open is structural stop first, then a pending EMA20 exit.
+stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit or
+breakeven; exit priority at one shared bar open is structural stop first, then a pending
+EMA20 exit.
 """
 
 from __future__ import annotations
@@ -72,6 +73,15 @@ TAKE_PROFIT_R_MULTIPLE = None
 TAKE_PROFIT_PNL_EXIT_ENABLED = False
 STRUCTURAL_STOP_FIRST = True
 EXIT_PRIORITY = ("STRUCTURAL_STOP", "EMA20_EXIT")
+BREAKEVEN = "NONE"
+INITIAL_STRUCTURAL_STOP_IS_IMMUTABLE = INITIAL_STOP_IS_IMMUTABLE
+MOVE_STOP_TO_ENTRY = False
+BREAKEVEN_TRIGGER = None
+BREAKEVEN_PRICE = None
+BREAKEVEN_FAVORABLE_TICKS_TRIGGER = None
+BREAKEVEN_R_MULTIPLE_TRIGGER = None
+BREAKEVEN_MONETARY_PNL_TRIGGER = None
+BREAKEVEN_DURATION_BARS_TRIGGER = None
 
 
 class PullbackContractError(ValueError):
@@ -372,6 +382,46 @@ class ProtectedEntryExecutionResult:
     entry_price: Decimal | None
     initial_stop: InitialStructuralStop
     position_opened: bool
+
+
+@dataclass(frozen=True)
+class BreakevenEvaluationResult:
+    """Explicit proof that V1 keeps the original structural stop unchanged."""
+
+    position_side: PullbackSide
+    initial_stop: InitialStructuralStop
+    active_stop: InitialStructuralStop
+    breakeven: str = BREAKEVEN
+    initial_structural_stop_is_immutable: bool = INITIAL_STRUCTURAL_STOP_IS_IMMUTABLE
+    move_stop_to_entry: bool = MOVE_STOP_TO_ENTRY
+    breakeven_trigger: None = BREAKEVEN_TRIGGER
+    breakeven_price: None = BREAKEVEN_PRICE
+    favorable_ticks_trigger: None = BREAKEVEN_FAVORABLE_TICKS_TRIGGER
+    risk_multiple_trigger: None = BREAKEVEN_R_MULTIPLE_TRIGGER
+    monetary_pnl_trigger: None = BREAKEVEN_MONETARY_PNL_TRIGGER
+    duration_bars_trigger: None = BREAKEVEN_DURATION_BARS_TRIGGER
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.position_side, PullbackSide):
+            raise PullbackContractError("breakeven position side must be explicitly LONG or SHORT")
+        if not isinstance(self.initial_stop, InitialStructuralStop):
+            raise PullbackContractError("breakeven requires the initial structural stop")
+        if self.initial_stop.side is not self.position_side:
+            raise PullbackContractError("breakeven position and initial stop sides must match")
+        if self.active_stop is not self.initial_stop:
+            raise PullbackContractError("breakeven must retain the exact initial stop object")
+        if (
+            self.breakeven != BREAKEVEN
+            or self.initial_structural_stop_is_immutable is not True
+            or self.move_stop_to_entry is not False
+            or self.breakeven_trigger is not None
+            or self.breakeven_price is not None
+            or self.favorable_ticks_trigger is not None
+            or self.risk_multiple_trigger is not None
+            or self.monetary_pnl_trigger is not None
+            or self.duration_bars_trigger is not None
+        ):
+            raise PullbackContractError("V1 breakeven contract must remain explicitly disabled")
 
 
 @dataclass(frozen=True)
@@ -829,6 +879,70 @@ def evaluate_disabled_take_profit(
     return TakeProfitEvaluationResult(position_side=position_side)
 
 
+def evaluate_disabled_breakeven(
+    *,
+    position: ProtectedEntryExecutionResult,
+    observed_market_price: Decimal,
+    favorable_ticks: Decimal,
+    favorable_r_multiple: Decimal,
+    unrealized_pnl: Decimal,
+    elapsed_closed_bars: int,
+) -> BreakevenEvaluationResult:
+    """Keep the exact initial stop regardless of favorable movement or time.
+
+    The observations make every prohibited implicit trigger directly testable.  They may
+    describe profit, retracement, any tick distance, any ``R`` multiple, monetary PnL or
+    elapsed closed bars, but none can replace or move the initial structural stop.  No bar
+    after the current observation is accepted, so this pure rule has no lookahead input.
+    """
+    if not isinstance(position, ProtectedEntryExecutionResult):
+        raise PullbackContractError("breakeven evaluation requires a protected entry result")
+    if (
+        position.status is not SimulatedExecutionStatus.FILLED
+        or position.position_opened is not True
+        or not isinstance(position.side, PullbackSide)
+    ):
+        raise PullbackContractError("breakeven evaluation requires an opened position")
+    if (
+        not isinstance(position.entry_price, Decimal)
+        or not position.entry_price.is_finite()
+        or position.entry_price < 0
+    ):
+        raise PullbackContractError("breakeven evaluation requires a valid entry price")
+    if (
+        not isinstance(position.initial_stop, InitialStructuralStop)
+        or position.initial_stop.side is not position.side
+        or position.initial_stop.immutable is not True
+    ):
+        raise PullbackContractError("breakeven evaluation requires the immutable initial stop")
+    if (
+        not isinstance(observed_market_price, Decimal)
+        or not observed_market_price.is_finite()
+        or observed_market_price < 0
+    ):
+        raise PullbackContractError("observed_market_price must be a finite non-negative Decimal")
+    for field_name, value in (
+        ("favorable_ticks", favorable_ticks),
+        ("favorable_r_multiple", favorable_r_multiple),
+    ):
+        if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+            raise PullbackContractError(f"{field_name} must be a finite non-negative Decimal")
+    if not isinstance(unrealized_pnl, Decimal) or not unrealized_pnl.is_finite():
+        raise PullbackContractError("unrealized_pnl must be a finite Decimal")
+    if (
+        isinstance(elapsed_closed_bars, bool)
+        or not isinstance(elapsed_closed_bars, int)
+        or elapsed_closed_bars < 0
+    ):
+        raise PullbackContractError("elapsed_closed_bars must be a non-negative integer")
+
+    return BreakevenEvaluationResult(
+        position_side=position.side,
+        initial_stop=position.initial_stop,
+        active_stop=position.initial_stop,
+    )
+
+
 def construct_initial_structural_stop(
     *,
     decision: EMAPullbackEntrySignalResult,
@@ -1167,6 +1281,13 @@ def simulate_next_bar_market_execution(
 __all__ = [
     "BAR_BASED_EXECUTION_MODEL",
     "BID_ASK_SPREAD_MODELED",
+    "BREAKEVEN",
+    "BREAKEVEN_DURATION_BARS_TRIGGER",
+    "BREAKEVEN_FAVORABLE_TICKS_TRIGGER",
+    "BREAKEVEN_MONETARY_PNL_TRIGGER",
+    "BREAKEVEN_PRICE",
+    "BREAKEVEN_R_MULTIPLE_TRIGGER",
+    "BREAKEVEN_TRIGGER",
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
     "EARLIEST_EXECUTION_BAR_OFFSET",
     "EMA_PERIOD",
@@ -1181,6 +1302,7 @@ __all__ = [
     "INITIAL_STOP_BUFFER_TICKS",
     "INITIAL_STOP_IS_IMMUTABLE",
     "INITIAL_STOP_SOURCE_BAR_OFFSET",
+    "INITIAL_STRUCTURAL_STOP_IS_IMMUTABLE",
     "INSTRUMENT",
     "LATENCY_MODELED",
     "MACD_CROSS_REQUIRED",
@@ -1195,6 +1317,7 @@ __all__ = [
     "MAX_PULLBACK_DISTANCE_TICKS",
     "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
     "MNQ_TICK_SIZE_POINTS",
+    "MOVE_STOP_TO_ENTRY",
     "POSITION_EXIT_EQUALITY_TRIGGERS_EXIT",
     "POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT",
     "PULLBACK_LOOKBACK_BARS",
@@ -1216,6 +1339,7 @@ __all__ = [
     "TICK_REALISTIC_FILL_MODELED",
     "TIMEFRAME_MINUTES",
     "WICK_CROSS_EMA20_ALLOWED",
+    "BreakevenEvaluationResult",
     "ClosedBarEMA20",
     "EMA20PositionExitResult",
     "EMA20SlopeResult",
@@ -1245,6 +1369,7 @@ __all__ = [
     "assemble_ema_pullback_entry_signal",
     "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",
+    "evaluate_disabled_breakeven",
     "evaluate_disabled_take_profit",
     "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",

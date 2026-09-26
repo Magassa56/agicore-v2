@@ -10,6 +10,13 @@ import pytest
 from agicore.trading.ema_pullback_v1_mnq import (
     BAR_BASED_EXECUTION_MODEL,
     BID_ASK_SPREAD_MODELED,
+    BREAKEVEN,
+    BREAKEVEN_DURATION_BARS_TRIGGER,
+    BREAKEVEN_FAVORABLE_TICKS_TRIGGER,
+    BREAKEVEN_MONETARY_PNL_TRIGGER,
+    BREAKEVEN_PRICE,
+    BREAKEVEN_R_MULTIPLE_TRIGGER,
+    BREAKEVEN_TRIGGER,
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
     EARLIEST_EXECUTION_BAR_OFFSET,
     EMA_SEED_CONVENTION,
@@ -23,6 +30,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     INITIAL_STOP_BUFFER_TICKS,
     INITIAL_STOP_IS_IMMUTABLE,
     INITIAL_STOP_SOURCE_BAR_OFFSET,
+    INITIAL_STRUCTURAL_STOP_IS_IMMUTABLE,
     LATENCY_MODELED,
     MACD_CROSS_REQUIRED,
     MACD_CROSS_VALIDITY_BARS,
@@ -35,6 +43,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MAX_PULLBACK_DISTANCE_POINTS,
     MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
+    MOVE_STOP_TO_ENTRY,
     POSITION_EXIT_EQUALITY_TRIGGERS_EXIT,
     POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT,
     PULLBACK_LOOKBACK_BARS,
@@ -54,6 +63,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     TAKE_PROFIT_TICKS,
     TICK_REALISTIC_FILL_MODELED,
     WICK_CROSS_EMA20_ALLOWED,
+    BreakevenEvaluationResult,
     ClosedBarEMA20,
     EMA20PositionExitResult,
     EMAPullbackEntrySignalResult,
@@ -65,6 +75,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     NextBarOpen,
     PositionExitAction,
     PositionExitReason,
+    ProtectedEntryExecutionResult,
     PullbackContractError,
     PullbackSide,
     SimulatedExecutionStatus,
@@ -74,6 +85,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     TakeProfitEvaluationResult,
     arbitrate_exit_at_open,
     construct_initial_structural_stop,
+    evaluate_disabled_breakeven,
     evaluate_disabled_take_profit,
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
@@ -179,6 +191,27 @@ def _protected_position(side: PullbackSide):
     )
 
 
+def _evaluate_no_breakeven(
+    side: PullbackSide,
+    *,
+    observed_market_price: str,
+    favorable_ticks: str = "0",
+    favorable_r_multiple: str = "0",
+    unrealized_pnl: str = "0",
+    elapsed_closed_bars: int = 0,
+) -> tuple[ProtectedEntryExecutionResult, BreakevenEvaluationResult]:
+    position = _protected_position(side)
+    result = evaluate_disabled_breakeven(
+        position=position,
+        observed_market_price=Decimal(observed_market_price),
+        favorable_ticks=Decimal(favorable_ticks),
+        favorable_r_multiple=Decimal(favorable_r_multiple),
+        unrealized_pnl=Decimal(unrealized_pnl),
+        elapsed_closed_bars=elapsed_closed_bars,
+    )
+    return position, result
+
+
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
     assert PULLBACK_REQUIRED_TOUCH_BAR_OFFSET == 2
@@ -226,6 +259,15 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert TAKE_PROFIT_PNL_EXIT_ENABLED is False
     assert STRUCTURAL_STOP_FIRST is True
     assert EXIT_PRIORITY == ("STRUCTURAL_STOP", "EMA20_EXIT")
+    assert BREAKEVEN == "NONE"
+    assert INITIAL_STRUCTURAL_STOP_IS_IMMUTABLE is True
+    assert MOVE_STOP_TO_ENTRY is False
+    assert BREAKEVEN_TRIGGER is None
+    assert BREAKEVEN_PRICE is None
+    assert BREAKEVEN_FAVORABLE_TICKS_TRIGGER is None
+    assert BREAKEVEN_R_MULTIPLE_TRIGGER is None
+    assert BREAKEVEN_MONETARY_PNL_TRIGGER is None
+    assert BREAKEVEN_DURATION_BARS_TRIGGER is None
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -1602,3 +1644,177 @@ def test_exit_priority_is_reproducible(
     }
 
     assert arbitrate_exit_at_open(**arguments) == arbitrate_exit_at_open(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("side", "favorable_price"),
+    [
+        (PullbackSide.LONG, "120.00"),
+        (PullbackSide.SHORT, "80.00"),
+    ],
+)
+def test_favorable_profit_never_moves_initial_stop(
+    side: PullbackSide,
+    favorable_price: str,
+) -> None:
+    position, result = _evaluate_no_breakeven(
+        side,
+        observed_market_price=favorable_price,
+        favorable_ticks="200",
+        favorable_r_multiple="10",
+        unrealized_pnl="5000",
+        elapsed_closed_bars=100,
+    )
+
+    assert result.position_side is side
+    assert result.initial_stop is position.initial_stop
+    assert result.active_stop is position.initial_stop
+    assert result.active_stop.stop_price == position.initial_stop.stop_price
+    assert result.move_stop_to_entry is False
+    assert result.breakeven_price is None
+
+
+@pytest.mark.parametrize(
+    ("side", "favorable_price", "retracement_price"),
+    [
+        (PullbackSide.LONG, "120.00", "100.00"),
+        (PullbackSide.SHORT, "80.00", "100.00"),
+    ],
+)
+def test_price_exceeds_entry_then_retraces_without_moving_stop(
+    side: PullbackSide,
+    favorable_price: str,
+    retracement_price: str,
+) -> None:
+    position = _protected_position(side)
+    original_stop = position.initial_stop
+    common = {
+        "position": position,
+        "favorable_ticks": Decimal(80),
+        "favorable_r_multiple": Decimal(4),
+        "unrealized_pnl": Decimal(2000),
+    }
+
+    favorable_result = evaluate_disabled_breakeven(
+        **common,
+        observed_market_price=Decimal(favorable_price),
+        elapsed_closed_bars=10,
+    )
+    retracement_result = evaluate_disabled_breakeven(
+        **common,
+        observed_market_price=Decimal(retracement_price),
+        elapsed_closed_bars=11,
+    )
+
+    assert favorable_result.active_stop is original_stop
+    assert retracement_result.active_stop is original_stop
+    assert position.initial_stop is original_stop
+    assert retracement_result.active_stop.stop_price == original_stop.stop_price
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+@pytest.mark.parametrize(
+    ("favorable_ticks", "favorable_r_multiple"),
+    [("4", "1"), ("8", "2"), ("1000", "25")],
+)
+def test_one_r_two_r_or_any_tick_profit_never_triggers_breakeven(
+    side: PullbackSide,
+    favorable_ticks: str,
+    favorable_r_multiple: str,
+) -> None:
+    favorable_price = "1000" if side is PullbackSide.LONG else "1"
+    position, result = _evaluate_no_breakeven(
+        side,
+        observed_market_price=favorable_price,
+        favorable_ticks=favorable_ticks,
+        favorable_r_multiple=favorable_r_multiple,
+        unrealized_pnl="1000000",
+        elapsed_closed_bars=1000,
+    )
+
+    assert result.active_stop is position.initial_stop
+    assert result.breakeven_trigger is None
+    assert result.favorable_ticks_trigger is None
+    assert result.risk_multiple_trigger is None
+    assert result.monetary_pnl_trigger is None
+    assert result.duration_bars_trigger is None
+
+
+def test_breakeven_contract_exposes_no_hidden_trigger_or_price() -> None:
+    _, result = _evaluate_no_breakeven(
+        PullbackSide.LONG,
+        observed_market_price="1000000",
+        favorable_ticks="1000000",
+        favorable_r_multiple="1000000",
+        unrealized_pnl="1000000",
+        elapsed_closed_bars=1000000,
+    )
+
+    assert result.breakeven == "NONE"
+    assert result.initial_structural_stop_is_immutable is True
+    assert result.move_stop_to_entry is False
+    assert result.breakeven_trigger is None
+    assert result.breakeven_price is None
+
+
+def test_breakeven_contract_rejects_hidden_activation() -> None:
+    position = _protected_position(PullbackSide.SHORT)
+    common = {
+        "position_side": PullbackSide.SHORT,
+        "initial_stop": position.initial_stop,
+        "active_stop": position.initial_stop,
+    }
+
+    with pytest.raises(PullbackContractError, match="must remain explicitly disabled"):
+        BreakevenEvaluationResult(**common, move_stop_to_entry=True)
+    with pytest.raises(PullbackContractError, match="must remain explicitly disabled"):
+        BreakevenEvaluationResult(**common, breakeven_trigger="1R")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_later_observations_cannot_mutate_prior_breakeven_result_or_stop(
+    side: PullbackSide,
+) -> None:
+    position = _protected_position(side)
+    original_stop = position.initial_stop
+    baseline = evaluate_disabled_breakeven(
+        position=position,
+        observed_market_price=position.entry_price,
+        favorable_ticks=Decimal(0),
+        favorable_r_multiple=Decimal(0),
+        unrealized_pnl=Decimal(0),
+        elapsed_closed_bars=0,
+    )
+    future_price = Decimal(1000000) if side is PullbackSide.LONG else Decimal(0)
+
+    evaluate_disabled_breakeven(
+        position=position,
+        observed_market_price=future_price,
+        favorable_ticks=Decimal(1000000),
+        favorable_r_multiple=Decimal(1000000),
+        unrealized_pnl=Decimal(1000000),
+        elapsed_closed_bars=1000000,
+    )
+
+    assert baseline.active_stop is original_stop
+    assert baseline.active_stop.stop_price == original_stop.stop_price
+    assert position.initial_stop is original_stop
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_disabled_breakeven_is_deterministic(side: PullbackSide) -> None:
+    position = _protected_position(side)
+    arguments = {
+        "position": position,
+        "observed_market_price": Decimal(100),
+        "favorable_ticks": Decimal(50),
+        "favorable_r_multiple": Decimal(2),
+        "unrealized_pnl": Decimal(500),
+        "elapsed_closed_bars": 50,
+    }
+
+    first = evaluate_disabled_breakeven(**arguments)
+    second = evaluate_disabled_breakeven(**arguments)
+
+    assert first == second
+    assert first.active_stop is second.active_stop is position.initial_stop
