@@ -415,3 +415,24 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    modification du Risk Engine, broker ou ordre réel n'est introduit.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — BREAKEVEN_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — aucun breakeven (approuvé le 2026-09-26)
+
+1. **Mode** : `BREAKEVEN = NONE`, `move_stop_to_entry = false`,
+   `breakeven_trigger = null` et `breakeven_price = null` pour LONG comme pour SHORT.
+2. **Stop immuable** : le stop structurel initial attaché à la position reste inchangé pendant
+   toute sa durée. Aucun second niveau n'est créé et aucun recalcul depuis de nouvelles bougies
+   n'est autorisé.
+3. **Déclencheurs absents** : prix favorable, nombre de ticks, multiple de risque `R`, PnL
+   monétaire et durée en position ne déplacent jamais le stop vers l'entrée ou ailleurs.
+4. **Retournement après profit** : un dépassement favorable de l'entrée suivi d'un retracement
+   continue d'utiliser le stop structurel initial exact.
+5. **Fail-closed** : toute activation, tout prix ou tout seuil de breakeven implicite est refusé.
+   Le résultat conserve la même instance immuable du stop initial.
+6. **Sorties** : les seules sorties restent `STRUCTURAL_STOP` puis `EMA20_EXIT`, avec
+   `STRUCTURAL_STOP_FIRST`. Aucun autre motif de fermeture n'est ajouté.
+7. **Origine et portée** : cette décision initiale n'est issue d'aucune optimisation et n'autorise
+   ni trailing stop, ni accès OOS, ni métrique de performance, ni modification du Risk Engine,
+   ni broker ou ordre réel.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — TRAILING_STOP_RULE_REQUIRED`.

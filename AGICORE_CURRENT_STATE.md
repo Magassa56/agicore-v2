@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-26 UTC.
-Statut : BLOCKED_HUMAN_GATE — BREAKEVEN_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — TRAILING_STOP_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -13,9 +13,10 @@ EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS ;
 EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS ;
 EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS ;
+EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-exit-priority.
-Base GitHub vérifiée et récupérée : 8b410b9c00b0e3ff84822b068f54732d5f1886cf.
+Branche de vérification : feature/ema-pullback-v1-mnq-no-breakeven.
+Base GitHub vérifiée et récupérée : c38482176044224fdc82a2f2fcc8d252bd38e126.
 
 ## Acquis vérifiés
 
@@ -481,6 +482,38 @@ et `py_compile` passent.
 Action humaine unique : déclarer soit `BREAKEVEN = NONE`, soit la condition exacte d'activation,
 le niveau de remplacement et sa convention d'exécution, sans optimisation sur les données.
 
+Cette tranche a été intégrée par la PR #259, merge
+c38482176044224fdc82a2f2fcc8d252bd38e126.
+
+## EMA_PULLBACK_V1_MNQ — absence de breakeven figée
+
+La décision métier du 2026-09-26 fixe sans optimisation `BREAKEVEN = NONE`,
+`move_stop_to_entry = false`, `breakeven_trigger = null` et `breakeven_price = null`. Le stop
+structurel initial attaché à la position reste le même objet immuable pendant toute sa durée.
+
+Ni prix favorable, ni ticks gagnés, ni multiple de risque `R`, ni PnL monétaire, ni durée en
+position ne peut déplacer le stop vers l'entrée ou vers un autre niveau. Un prix qui dépasse
+l'entrée puis retrace conserve exactement le stop initial. Le contrat fail-closed refuse toute
+activation, tout niveau ou tout déclencheur de breakeven caché.
+
+Les seules sorties restent `STRUCTURAL_STOP`, puis `EMA20_EXIT`, avec la priorité déjà figée
+`STRUCTURAL_STOP_FIRST`. Cette tranche n'ajoute ni trailing stop, ni nouvelle sortie, ni règle
+d'exécution. L'évaluateur ne reçoit aucune barre future et conserve le même stop pour LONG et SHORT.
+
+Preuves locales : seize nouveaux cas portent le fichier synthétique à 124 tests PASS en 0,25 s.
+Ils couvrent LONG/SHORT, profit favorable, dépassement de l'entrée puis retracement, absence de
+déclencheur caché, seuils 1R/2R/25R et 4/8/1 000 ticks, immutabilité après nouvelles observations,
+symétrie, causalité et répétabilité. Les 170 régressions stratégie/replay ciblées passent en 0,39 s.
+La suite complète passe avec 6 036 tests et 6 warnings historiques en 84,05 s. Ruff ciblé, format
+Ruff et `py_compile` passent.
+
+`EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — TRAILING_STOP_RULE_REQUIRED`.
+Action humaine unique : déclarer soit `TRAILING_STOP = NONE`, soit sa condition exacte
+d'activation, sa formule de déplacement, sa fréquence de mise à jour et sa convention d'exécution,
+sans optimisation sur les données.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -491,6 +524,6 @@ Le CAS protège la publication des journaux, pas l'exécution concurrente d'un c
 les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre conservée hors
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
 Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le stop structurel
-initial, l'absence explicite de take-profit et la priorité entre les deux sorties existantes sont
-désormais formalisés. La règle de breakeven reste à décider avant l'évaluation ; cette stratégie
-demeure distincte de EMA19/50 V3 rejetée.
+initial, l'absence explicite de take-profit et de breakeven ainsi que la priorité entre les deux
+sorties existantes sont désormais formalisés. La règle de trailing stop reste à décider avant
+l'évaluation ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.
