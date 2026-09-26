@@ -973,10 +973,7 @@ def evaluate_initial_stop_on_bar(
     """
     if not isinstance(position, ProtectedEntryExecutionResult):
         raise PullbackContractError("stop evaluation requires a protected entry result")
-    if (
-        position.status is not SimulatedExecutionStatus.FILLED
-        or position.position_opened is not True
-    ):
+    if position.status is not SimulatedExecutionStatus.FILLED or not position.position_opened:
         raise PullbackContractError("stop evaluation requires an opened protected position")
     if not isinstance(bar, StopEvaluationBar):
         raise PullbackContractError("bar must be a StopEvaluationBar")
@@ -1038,7 +1035,10 @@ def arbitrate_exit_at_open(
     """
     if not isinstance(position, ProtectedEntryExecutionResult):
         raise PullbackContractError("exit priority requires a protected entry result")
-    if position.status is not SimulatedExecutionStatus.FILLED or not position.position_opened:
+    if (
+        position.status is not SimulatedExecutionStatus.FILLED
+        or position.position_opened is not True
+    ):
         raise PullbackContractError("exit priority requires an opened protected position")
     if not isinstance(position.side, PullbackSide):
         raise PullbackContractError("position side must be explicitly LONG or SHORT")
