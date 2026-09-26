@@ -6,7 +6,7 @@ OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD re
 deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions can be
 mapped to an offline bar-based simulated fill at ``Open[t+1]``.  The initial structural
 stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit; exit
-priority between the structural stop and the EMA20 close rule remains undefined.
+priority at one shared bar open is structural stop first, then a pending EMA20 exit.
 """
 
 from __future__ import annotations
@@ -70,6 +70,8 @@ TAKE_PROFIT_TICKS = None
 TAKE_PROFIT_POINTS = None
 TAKE_PROFIT_R_MULTIPLE = None
 TAKE_PROFIT_PNL_EXIT_ENABLED = False
+STRUCTURAL_STOP_FIRST = True
+EXIT_PRIORITY = ("STRUCTURAL_STOP", "EMA20_EXIT")
 
 
 class PullbackContractError(ValueError):
@@ -140,6 +142,13 @@ class InitialStopFillSource(StrEnum):
     NONE = "NONE"
     STOP_PRICE = "STOP_PRICE"
     BAR_OPEN_GAP = "BAR_OPEN_GAP"
+
+
+class PositionExitReason(StrEnum):
+    """Mutually exclusive reason that closed one V1 position."""
+
+    STRUCTURAL_STOP = "STRUCTURAL_STOP"
+    EMA20_EXIT = "EMA20_EXIT"
 
 
 @dataclass(frozen=True)
@@ -404,6 +413,79 @@ class InitialStopBarExecutionResult:
     evaluated_bar_sequence: int
     fill_price: Decimal | None
     position_closed: bool
+
+
+@dataclass(frozen=True)
+class ExitPriorityExecutionResult:
+    """Single-fill result of arbitrating stop and pending EMA20 exit at one open."""
+
+    side: PullbackSide
+    exit_reason: PositionExitReason
+    execution_bar_sequence: int
+    fill_price: Decimal
+    structural_stop_executed: bool
+    ema20_exit_executed: bool
+    cancel_pending_ema20_exit: bool
+    cancel_structural_stop: bool
+    fill_count: int = 1
+    position_close_count: int = 1
+    position_closed: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.side, PullbackSide):
+            raise PullbackContractError("exit priority side must be explicitly LONG or SHORT")
+        if not isinstance(self.exit_reason, PositionExitReason):
+            raise PullbackContractError("exit priority requires one explicit exit reason")
+        if (
+            isinstance(self.execution_bar_sequence, bool)
+            or not isinstance(self.execution_bar_sequence, int)
+            or self.execution_bar_sequence < 0
+        ):
+            raise PullbackContractError("exit priority sequence must be a non-negative integer")
+        if (
+            not isinstance(self.fill_price, Decimal)
+            or not self.fill_price.is_finite()
+            or self.fill_price < 0
+        ):
+            raise PullbackContractError("exit priority fill must be a finite non-negative Decimal")
+        boolean_flags = (
+            self.structural_stop_executed,
+            self.ema20_exit_executed,
+            self.cancel_pending_ema20_exit,
+            self.cancel_structural_stop,
+        )
+        if any(type(flag) is not bool for flag in boolean_flags):
+            raise PullbackContractError(
+                "exit priority execution and cancellation flags must be bool"
+            )
+        if (
+            type(self.fill_count) is not int
+            or self.fill_count != 1
+            or type(self.position_close_count) is not int
+            or self.position_close_count != 1
+            or self.position_closed is not True
+        ):
+            raise PullbackContractError("exit priority must produce exactly one fill and one close")
+        executed_count = int(self.structural_stop_executed) + int(self.ema20_exit_executed)
+        cancellation_count = int(self.cancel_pending_ema20_exit) + int(self.cancel_structural_stop)
+        if executed_count != 1 or cancellation_count != 1:
+            raise PullbackContractError("exit priority must execute one exit and cancel the other")
+        if self.exit_reason is PositionExitReason.STRUCTURAL_STOP:
+            valid = (
+                self.structural_stop_executed is True
+                and self.ema20_exit_executed is False
+                and self.cancel_pending_ema20_exit is True
+                and self.cancel_structural_stop is False
+            )
+        else:
+            valid = (
+                self.structural_stop_executed is False
+                and self.ema20_exit_executed is True
+                and self.cancel_pending_ema20_exit is False
+                and self.cancel_structural_stop is True
+            )
+        if not valid:
+            raise PullbackContractError("exit reason, execution and cancellation must be coherent")
 
 
 def distance_from_bar_range_to_ema20(bar: ClosedBarEMA20) -> Decimal:
@@ -939,6 +1021,85 @@ def evaluate_initial_stop_on_bar(
     )
 
 
+def arbitrate_exit_at_open(
+    *,
+    position: ProtectedEntryExecutionResult,
+    pending_ema20_exit: EMA20PositionExitResult,
+    execution_bar: NextBarOpen,
+) -> ExitPriorityExecutionResult:
+    """Execute exactly one exit at ``Open[k]`` using structural-stop-first priority.
+
+    A stop inclusively triggered by ``Open[k]`` wins and cancels the pending EMA20 exit.
+    Otherwise the already-qualified EMA20 exit fills at the same open and cancels the
+    structural stop.  No intrabar value after the open participates in this arbitration.
+    """
+    if not isinstance(position, ProtectedEntryExecutionResult):
+        raise PullbackContractError("exit priority requires a protected entry result")
+    if (
+        position.status is not SimulatedExecutionStatus.FILLED
+        or position.position_opened is not True
+    ):
+        raise PullbackContractError("exit priority requires an opened protected position")
+    if not isinstance(position.side, PullbackSide):
+        raise PullbackContractError("position side must be explicitly LONG or SHORT")
+    if not isinstance(position.initial_stop, InitialStructuralStop):
+        raise PullbackContractError("exit priority requires an immutable structural stop")
+    if not isinstance(pending_ema20_exit, EMA20PositionExitResult):
+        raise PullbackContractError("exit priority requires a pending EMA20 exit")
+    if not isinstance(pending_ema20_exit.position_side, PullbackSide):
+        raise PullbackContractError("pending EMA20 exit side must be explicitly LONG or SHORT")
+    expected_action = PositionExitAction(f"EXIT_{pending_ema20_exit.position_side.value}")
+    if (
+        pending_ema20_exit.exit_qualifies is not True
+        or pending_ema20_exit.action is not expected_action
+        or pending_ema20_exit.same_bar_execution_allowed is not False
+    ):
+        raise PullbackContractError("exit priority requires a qualified next-bar EMA20 exit")
+    if position.side is not pending_ema20_exit.position_side:
+        raise PullbackContractError("position and pending EMA20 exit sides must match")
+    if position.initial_stop.side is not position.side:
+        raise PullbackContractError("position and structural stop sides must match")
+    if (
+        position.execution_bar_sequence is None
+        or pending_ema20_exit.decision_bar_sequence < position.execution_bar_sequence
+    ):
+        raise PullbackContractError("pending EMA20 exit cannot precede position creation")
+    if not isinstance(execution_bar, NextBarOpen):
+        raise PullbackContractError("exit priority execution bar must be a NextBarOpen")
+    expected_sequence = pending_ema20_exit.decision_bar_sequence + EARLIEST_EXECUTION_BAR_OFFSET
+    if (
+        pending_ema20_exit.earliest_execution_bar_sequence != expected_sequence
+        or execution_bar.sequence != expected_sequence
+    ):
+        raise PullbackContractError("pending EMA20 exit must execute on its exact next bar")
+
+    stop_triggered_at_open = initial_stop_triggered_by_market_price(
+        initial_stop=position.initial_stop,
+        market_price=execution_bar.open,
+    )
+    if stop_triggered_at_open:
+        return ExitPriorityExecutionResult(
+            side=position.side,
+            exit_reason=PositionExitReason.STRUCTURAL_STOP,
+            execution_bar_sequence=execution_bar.sequence,
+            fill_price=execution_bar.open,
+            structural_stop_executed=True,
+            ema20_exit_executed=False,
+            cancel_pending_ema20_exit=True,
+            cancel_structural_stop=False,
+        )
+    return ExitPriorityExecutionResult(
+        side=position.side,
+        exit_reason=PositionExitReason.EMA20_EXIT,
+        execution_bar_sequence=execution_bar.sequence,
+        fill_price=execution_bar.open,
+        structural_stop_executed=False,
+        ema20_exit_executed=True,
+        cancel_pending_ema20_exit=False,
+        cancel_structural_stop=True,
+    )
+
+
 def simulate_next_bar_market_execution(
     *,
     decision: EMAPullbackEntrySignalResult | EMA20PositionExitResult,
@@ -1014,6 +1175,7 @@ __all__ = [
     "EMA_SLOPE_REQUIRED",
     "EXECUTION_PRICE_SOURCE",
     "EXECUTION_SIGNAL_TIME",
+    "EXIT_PRIORITY",
     "GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN",
     "INITIAL_STOP_BUFFER_POINTS",
     "INITIAL_STOP_BUFFER_TICKS",
@@ -1042,6 +1204,7 @@ __all__ = [
     "SLIPPAGE_MODELED",
     "STOP_INTRABAR_SLIPPAGE_MODELED",
     "STRATEGY_ID",
+    "STRUCTURAL_STOP_FIRST",
     "TAKE_PROFIT",
     "TAKE_PROFIT_ENABLED",
     "TAKE_PROFIT_MONETARY_AMOUNT",
@@ -1058,6 +1221,7 @@ __all__ = [
     "EMA20SlopeResult",
     "EMAPullbackEntrySignalResult",
     "EntrySignal",
+    "ExitPriorityExecutionResult",
     "InitialStopBarExecutionResult",
     "InitialStopFillSource",
     "InitialStopTriggerStatus",
@@ -1067,6 +1231,7 @@ __all__ = [
     "NextBarExecutionResult",
     "NextBarOpen",
     "PositionExitAction",
+    "PositionExitReason",
     "ProtectedEntryExecutionResult",
     "PullbackContractError",
     "PullbackPredicateResult",
@@ -1076,6 +1241,7 @@ __all__ = [
     "SimulatedOrderType",
     "StopEvaluationBar",
     "TakeProfitEvaluationResult",
+    "arbitrate_exit_at_open",
     "assemble_ema_pullback_entry_signal",
     "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",

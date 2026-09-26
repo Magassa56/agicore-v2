@@ -394,3 +394,24 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    connexion broker ou opération de trading réel n'est autorisée par cette décision.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — priorité des sorties (approuvée le 2026-09-26)
+
+1. **Hiérarchie** : `STRUCTURAL_STOP_FIRST`; l'ordre exclusif est `STRUCTURAL_STOP`, puis
+   `EMA20_EXIT`. Cette convention V1 n'est issue d'aucune optimisation.
+2. **Collision à l'ouverture** : si le stop structurel et une sortie EMA20 en attente sont tous
+   deux exécutables à `Open[k]`, le fill simulé est `Open[k]`, le motif est `STRUCTURAL_STOP` et
+   la sortie EMA20 en attente est annulée.
+3. **Stop non déclenché à l'ouverture** : la sortie EMA20 en attente est exécutée à `Open[k]`, le
+   motif est `EMA20_EXIT` et le stop structurel est annulé.
+4. **Exclusivité** : une position ne peut produire qu'un motif, un fill et une fermeture. Une
+   double exécution, une double fermeture ou une annulation incohérente est refusée fail-closed.
+5. **Frontière du stop** : l'égalité de `Open[k]` au stop déclenche le stop, conformément aux
+   comparaisons inclusives déjà approuvées pour LONG et SHORT.
+6. **Causalité** : l'arbitrage ne lit que la position ouverte, la sortie EMA20 décidée sur la barre
+   clôturée précédente et `Open[k]`. Les valeurs intrabar ou postérieures à cette ouverture sont
+   sans effet.
+7. **Portée** : aucun breakeven, trailing stop, accès OOS, optimisation, métrique de performance,
+   modification du Risk Engine, broker ou ordre réel n'est introduit.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — BREAKEVEN_RULE_REQUIRED`.
