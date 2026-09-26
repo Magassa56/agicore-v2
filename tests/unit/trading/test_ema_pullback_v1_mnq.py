@@ -42,6 +42,14 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SIGNAL_DECISION_ON_CLOSED_BAR,
     SLIPPAGE_MODELED,
     STOP_INTRABAR_SLIPPAGE_MODELED,
+    TAKE_PROFIT,
+    TAKE_PROFIT_ENABLED,
+    TAKE_PROFIT_MONETARY_AMOUNT,
+    TAKE_PROFIT_PNL_EXIT_ENABLED,
+    TAKE_PROFIT_POINTS,
+    TAKE_PROFIT_PRICE,
+    TAKE_PROFIT_R_MULTIPLE,
+    TAKE_PROFIT_TICKS,
     TICK_REALISTIC_FILL_MODELED,
     WICK_CROSS_EMA20_ALLOWED,
     ClosedBarEMA20,
@@ -59,7 +67,9 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SimulatedOrderPurpose,
     SimulatedOrderType,
     StopEvaluationBar,
+    TakeProfitEvaluationResult,
     construct_initial_structural_stop,
+    evaluate_disabled_take_profit,
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
@@ -201,6 +211,14 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert INITIAL_STOP_IS_IMMUTABLE is True
     assert GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN is True
     assert STOP_INTRABAR_SLIPPAGE_MODELED is False
+    assert TAKE_PROFIT == "NONE"
+    assert TAKE_PROFIT_ENABLED is False
+    assert TAKE_PROFIT_PRICE is None
+    assert TAKE_PROFIT_MONETARY_AMOUNT is None
+    assert TAKE_PROFIT_TICKS is None
+    assert TAKE_PROFIT_POINTS is None
+    assert TAKE_PROFIT_R_MULTIPLE is None
+    assert TAKE_PROFIT_PNL_EXIT_ENABLED is False
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -1356,3 +1374,74 @@ def test_initial_stop_rejects_decision_bar_not_matching_signal() -> None:
             decision_bar=_bar(21, low="99", high="101", close="99.25"),
             required_touch_bar=_bar(19, low="99", high="101", close="100"),
         )
+
+
+@pytest.mark.parametrize(
+    ("side", "observed_market_price", "unrealized_pnl"),
+    [
+        (PullbackSide.LONG, Decimal(1000000), Decimal(999999)),
+        (PullbackSide.SHORT, Decimal(0), Decimal(999999)),
+    ],
+)
+def test_arbitrary_favorable_price_never_creates_take_profit_exit(
+    side: PullbackSide,
+    observed_market_price: Decimal,
+    unrealized_pnl: Decimal,
+) -> None:
+    result = evaluate_disabled_take_profit(
+        position_side=side,
+        observed_market_price=observed_market_price,
+        unrealized_pnl=unrealized_pnl,
+    )
+
+    assert result.action is PositionExitAction.HOLD
+    assert result.exit_qualifies is False
+    assert result.position_closed is False
+    assert result.take_profit_enabled is False
+    assert result.take_profit_price is None
+
+
+def test_no_take_profit_dimension_or_hidden_target_is_configured() -> None:
+    result = evaluate_disabled_take_profit(
+        position_side=PullbackSide.LONG,
+        observed_market_price=Decimal(1000000),
+        unrealized_pnl=Decimal(1000000),
+    )
+
+    assert result.take_profit == "NONE"
+    assert result.monetary_amount is None
+    assert result.ticks is None
+    assert result.points is None
+    assert result.risk_multiple is None
+    assert result.pnl_exit_enabled is False
+
+
+@pytest.mark.parametrize("unrealized_pnl", ["0", "100", "500", "1000000000"])
+def test_unrealized_pnl_threshold_never_triggers_take_profit(unrealized_pnl: str) -> None:
+    result = evaluate_disabled_take_profit(
+        position_side=PullbackSide.LONG,
+        observed_market_price=Decimal(1000000),
+        unrealized_pnl=Decimal(unrealized_pnl),
+    )
+
+    assert result.exit_qualifies is False
+    assert result.action is PositionExitAction.HOLD
+    assert result.position_closed is False
+
+
+def test_take_profit_contract_rejects_any_attempt_to_enable_hidden_target() -> None:
+    with pytest.raises(PullbackContractError, match="must remain explicitly disabled"):
+        TakeProfitEvaluationResult(
+            position_side=PullbackSide.SHORT,
+            take_profit_enabled=True,
+        )
+
+
+def test_disabled_take_profit_is_deterministic_for_repeated_observation() -> None:
+    arguments = {
+        "position_side": PullbackSide.SHORT,
+        "observed_market_price": Decimal(1),
+        "unrealized_pnl": Decimal(999999),
+    }
+
+    assert evaluate_disabled_take_profit(**arguments) == evaluate_disabled_take_profit(**arguments)

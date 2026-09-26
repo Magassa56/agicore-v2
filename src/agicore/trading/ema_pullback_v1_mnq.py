@@ -5,8 +5,8 @@ does not compute EMA20, does not emit a broker-executable order, and never reads
 OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses the
 deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions can be
 mapped to an offline bar-based simulated fill at ``Open[t+1]``.  The initial structural
-stop is frozen from the required ``t-2`` bar; profit-taking exits remain deliberately
-undefined.
+stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit; exit
+priority between the structural stop and the EMA20 close rule remains undefined.
 """
 
 from __future__ import annotations
@@ -62,6 +62,14 @@ INITIAL_STOP_BUFFER_POINTS = MNQ_TICK_SIZE_POINTS * INITIAL_STOP_BUFFER_TICKS
 INITIAL_STOP_IS_IMMUTABLE = True
 GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN = True
 STOP_INTRABAR_SLIPPAGE_MODELED = False
+TAKE_PROFIT = "NONE"
+TAKE_PROFIT_ENABLED = False
+TAKE_PROFIT_PRICE = None
+TAKE_PROFIT_MONETARY_AMOUNT = None
+TAKE_PROFIT_TICKS = None
+TAKE_PROFIT_POINTS = None
+TAKE_PROFIT_R_MULTIPLE = None
+TAKE_PROFIT_PNL_EXIT_ENABLED = False
 
 
 class PullbackContractError(ValueError):
@@ -234,6 +242,42 @@ class EMA20PositionExitResult:
     decision_bar_sequence: int
     earliest_execution_bar_sequence: int
     same_bar_execution_allowed: bool = False
+
+
+@dataclass(frozen=True)
+class TakeProfitEvaluationResult:
+    """Explicit V1 result proving that no profit target can request an exit."""
+
+    position_side: PullbackSide
+    action: PositionExitAction = PositionExitAction.HOLD
+    exit_qualifies: bool = False
+    take_profit: str = TAKE_PROFIT
+    take_profit_enabled: bool = TAKE_PROFIT_ENABLED
+    take_profit_price: None = TAKE_PROFIT_PRICE
+    monetary_amount: None = TAKE_PROFIT_MONETARY_AMOUNT
+    ticks: None = TAKE_PROFIT_TICKS
+    points: None = TAKE_PROFIT_POINTS
+    risk_multiple: None = TAKE_PROFIT_R_MULTIPLE
+    pnl_exit_enabled: bool = TAKE_PROFIT_PNL_EXIT_ENABLED
+    position_closed: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.position_side, PullbackSide):
+            raise PullbackContractError("position_side must be explicitly LONG or SHORT")
+        if (
+            self.action is not PositionExitAction.HOLD
+            or self.exit_qualifies is not False
+            or self.take_profit != TAKE_PROFIT
+            or self.take_profit_enabled is not False
+            or self.take_profit_price is not None
+            or self.monetary_amount is not None
+            or self.ticks is not None
+            or self.points is not None
+            or self.risk_multiple is not None
+            or self.pnl_exit_enabled is not False
+            or self.position_closed is not False
+        ):
+            raise PullbackContractError("V1 take-profit contract must remain explicitly disabled")
 
 
 @dataclass(frozen=True)
@@ -678,6 +722,31 @@ def evaluate_ema20_position_exit(
     )
 
 
+def evaluate_disabled_take_profit(
+    *,
+    position_side: PullbackSide,
+    observed_market_price: Decimal,
+    unrealized_pnl: Decimal,
+) -> TakeProfitEvaluationResult:
+    """Return HOLD regardless of price or PnL because V1 has no take-profit.
+
+    The observations are accepted only to make the fail-closed rule directly testable:
+    no favorable price, monetary gain, tick/point distance, or implicit risk multiple can
+    produce a take-profit exit.  This function emits no order and reads no future value.
+    """
+    if not isinstance(position_side, PullbackSide):
+        raise PullbackContractError("position_side must be explicitly LONG or SHORT")
+    if (
+        not isinstance(observed_market_price, Decimal)
+        or not observed_market_price.is_finite()
+        or observed_market_price < 0
+    ):
+        raise PullbackContractError("observed_market_price must be a finite non-negative Decimal")
+    if not isinstance(unrealized_pnl, Decimal) or not unrealized_pnl.is_finite():
+        raise PullbackContractError("unrealized_pnl must be a finite Decimal")
+    return TakeProfitEvaluationResult(position_side=position_side)
+
+
 def construct_initial_structural_stop(
     *,
     decision: EMAPullbackEntrySignalResult,
@@ -973,6 +1042,14 @@ __all__ = [
     "SLIPPAGE_MODELED",
     "STOP_INTRABAR_SLIPPAGE_MODELED",
     "STRATEGY_ID",
+    "TAKE_PROFIT",
+    "TAKE_PROFIT_ENABLED",
+    "TAKE_PROFIT_MONETARY_AMOUNT",
+    "TAKE_PROFIT_PNL_EXIT_ENABLED",
+    "TAKE_PROFIT_POINTS",
+    "TAKE_PROFIT_PRICE",
+    "TAKE_PROFIT_R_MULTIPLE",
+    "TAKE_PROFIT_TICKS",
     "TICK_REALISTIC_FILL_MODELED",
     "TIMEFRAME_MINUTES",
     "WICK_CROSS_EMA20_ALLOWED",
@@ -998,9 +1075,11 @@ __all__ = [
     "SimulatedOrderPurpose",
     "SimulatedOrderType",
     "StopEvaluationBar",
+    "TakeProfitEvaluationResult",
     "assemble_ema_pullback_entry_signal",
     "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",
+    "evaluate_disabled_take_profit",
     "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",
     "evaluate_ema_pullback_entry_signal",

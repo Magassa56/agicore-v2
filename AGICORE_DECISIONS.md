@@ -375,3 +375,22 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    opération de trading réel n'est autorisée par cette décision.
 9. **Verdict** : `EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — aucun take-profit (approuvé le 2026-09-26)
+
+1. **Mode** : `TAKE_PROFIT = NONE`, `take_profit_enabled = false` et
+   `take_profit_price = null` pour LONG comme pour SHORT.
+2. **Aucune cible** : aucun objectif fixe, monétaire, en ticks, en points ou en multiple de risque
+   n'existe dans V1. Aucun profit target implicite n'est autorisé.
+3. **PnL sans effet** : un prix favorable ou un PnL latent, quelle que soit sa valeur, ne qualifie
+   jamais une sortie. Le résultat take-profit reste `HOLD` et ne ferme aucune position.
+4. **Sorties restantes** : seules la réalisation du stop structurel initial et la sortie principale
+   EMA20 déjà approuvée peuvent fermer une position.
+5. **Origine** : l'absence de take-profit est une décision de conception initiale, sans sélection
+   ni optimisation à partir de performances.
+6. **Exclusions** : aucun breakeven ni trailing stop n'est introduit ; la priorité entre stop et
+   sortie EMA20 reste délibérément non définie dans cette tranche.
+7. **Frontières** : aucune donnée OOS, métrique de performance, modification du Risk Engine,
+   connexion broker ou opération de trading réel n'est autorisée par cette décision.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED`.

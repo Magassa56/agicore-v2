@@ -363,3 +363,18 @@
   `git diff --check` PASS. Aucun accès dataset/OOS, PnL, optimisation, Risk Engine, broker ou ordre.
 - Verdict : `EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED`.
+
+## 2026-09-26 — EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE
+
+- Reprise depuis `origin/main` au merge 2a9b334dbeb881f5b233534cd97863e646fe56f7 de la PR #257 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-no-take-profit`, état initial propre.
+- Décision métier figée sans optimisation : `TAKE_PROFIT = NONE`, activation fausse et prix nul.
+  Aucune cible monétaire, ticks, points ou multiple de risque n'est créée.
+- Une observation de prix favorable ou de PnL latent ne produit jamais une sortie ; le contrat
+  retourne systématiquement `HOLD`, sans ordre et sans fermeture de position.
+- Neuf nouveaux cas portent le fichier synthétique à 94 tests PASS en 0,23 s. Les 140 tests
+  stratégie/replay ciblés passent en 0,49 s. Suite complète : 6 006 passed, 6 warnings in 77.13s.
+- Ruff ciblé, format Ruff et `git diff --check` PASS. Aucun accès dataset/OOS, optimisation,
+  Risk Engine, broker, compte ou ordre réel ; aucun breakeven ou trailing stop ajouté.
+- Verdict : `EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED`.

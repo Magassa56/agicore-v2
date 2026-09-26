@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-26 UTC.
-Statut : BLOCKED_HUMAN_GATE — TAKE_PROFIT_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -11,9 +11,10 @@ EMA_PULLBACK_V1_MNQ_EMA20_POSITION_EXIT = PASS ;
 EMA_PULLBACK_V1_MNQ_T_MINUS_2_TOUCH_OR_PROXIMITY = PASS ;
 EMA_PULLBACK_V1_MNQ_NEXT_BAR_EXECUTION = PASS ;
 EMA_PULLBACK_V1_MNQ_INITIAL_STRUCTURAL_STOP = PASS ;
+EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-structural-stop.
-Base GitHub vérifiée et récupérée : f9cc8c835b538d7df1ad0a660cabb7da619f13db.
+Branche de vérification : feature/ema-pullback-v1-mnq-no-take-profit.
+Base GitHub vérifiée et récupérée : 2a9b334dbeb881f5b233534cd97863e646fe56f7.
 
 ## Acquis vérifiés
 
@@ -423,6 +424,34 @@ gardes de confidentialité, scan anti-fuite et `git diff --check` passent.
 Action humaine unique : définir la règle initiale exacte de prise de profit LONG et SHORT, sans
 l'optimiser sur les données. Breakeven, trailing stop et priorité entre sorties restent non définis.
 
+Cette tranche a été intégrée par la PR #257, merge
+2a9b334dbeb881f5b233534cd97863e646fe56f7.
+
+## EMA_PULLBACK_V1_MNQ — absence de take-profit figée
+
+La décision métier du 2026-09-26 fixe `TAKE_PROFIT = NONE`,
+`take_profit_enabled = false` et `take_profit_price = null`. V1 ne contient aucune cible fixe,
+monétaire, en ticks, en points ou en multiple de risque. Aucun niveau favorable, gain latent ou
+seuil de PnL ne peut produire une sortie take-profit implicite.
+
+Une position reste donc ouverte jusqu'au stop structurel initial ou jusqu'à une décision de sortie
+EMA20 déjà définie. Cette absence de take-profit est une décision initiale sans optimisation. Elle
+n'autorise ni breakeven, ni trailing stop, et ne fixe pas l'arbitrage lorsque les deux sorties
+existantes deviennent concurrentes.
+
+Preuves locales : neuf nouveaux cas portent le fichier synthétique à 94 tests PASS en 0,23 s. Ils
+couvrent LONG/SHORT, prix arbitrairement favorable, PnL extrême, absence de cible monétaire,
+ticks, points et multiple de risque, refus d'une activation cachée et répétabilité. Les 140 tests
+stratégie/replay ciblés passent en 0,49 s. La suite complète passe avec 6 006 tests et 6 warnings
+historiques en 77,13 s. Ruff ciblé, format Ruff et `git diff --check` passent.
+
+`EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — EXIT_PRIORITY_RULE_REQUIRED`.
+Action humaine unique : définir la priorité déterministe lorsque le stop structurel et la sortie
+EMA20 peuvent tous deux fermer la même position, notamment si une sortie EMA20 en attente et un
+gap au-delà du stop deviennent exécutables au même `Open[k]`.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -432,7 +461,7 @@ Aucun ancien événement legacy migré implicitement. Aucun accès data/, secret
 Le CAS protège la publication des journaux, pas l'exécution concurrente d'un callback externe ;
 les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre conservée hors
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
-Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based et le stop structurel
-initial sont désormais formalisés. La prise de profit et l'arbitrage entre sorties restent à définir
-avant l'évaluation ; cette
+Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le stop structurel
+initial et l'absence explicite de take-profit sont désormais formalisés. L'arbitrage entre les deux
+sorties existantes reste à définir avant l'évaluation ; cette
 stratégie demeure distincte de EMA19/50 V3 rejetée.
