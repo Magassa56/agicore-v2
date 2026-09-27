@@ -413,3 +413,21 @@
   broker, compte ou ordre réel ; aucun trailing stop ajouté.
 - Verdict : `EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — TRAILING_STOP_RULE_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE
+
+- Reprise depuis `origin/main` au merge 957b1926612d00f8b48c7b5cb4acb983e0cb1205 de la PR #260 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-no-trailing-stop`, état initial propre.
+- Décision métier figée sans optimisation : `TRAILING_STOP = NONE`; activation, distance, step,
+  fréquence et référence nulles. Le stop structurel initial reste strictement immuable.
+- Nouveaux High/Low, prix favorable, ticks, multiples `R`, PnL, EMA20 et durée restent sans effet.
+  Le contrat impose la même instance de stop et refuse une copie égale ou une configuration cachée.
+- Les seules sorties restent `STRUCTURAL_STOP`, puis `EMA20_EXIT`, avec
+  `STRUCTURAL_STOP_FIRST`; take-profit, breakeven et trailing stop sont tous explicitement absents.
+- Vingt-quatre nouveaux cas portent le fichier synthétique à 148 tests PASS en 0,12 s. Les 152
+  tests contrat/confidentialité passent en 0,27 s et les 194 régressions stratégie/replay en 0,51 s.
+  Suite complète : 6 060 passed, 6 warnings in 77.15s.
+- Ruff ciblé, format Ruff et `py_compile` PASS. Aucun accès dataset/OOS, optimisation, Risk Engine,
+  broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — SESSION_FILTER_RULE_REQUIRED`.
