@@ -466,3 +466,21 @@
   Ruff ciblé, format Ruff, `py_compile`, `git diff --check` PASS ; CI à vérifier sur la PR.
 - Verdict : `EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS` ; prochaine gate métier
   unique : `BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ
+
+- Reprise depuis `origin/main` au merge bda3a848af32f7909540ecafa3eb35c05c799b12 de la
+  PR #263 ; branche dédiée `feature/ema-pullback-v1-mnq-fixed-position-size`, base propre.
+- Décision sans optimisation : taille fixe d'un contrat ; LONG `+1 MNQ`, SHORT `-1 MNQ`,
+  `abs(position) <= 1`. La position n'est créée qu'après le fill causal exact à `Open[t+1]`.
+- Pourcentage de risque, volatilité, distance du stop, PnL, martingale et anti-martingale ne sont
+  ni des entrées ni des modes actifs. Le contrat fail-closed refuse chaque activation cachée.
+- Les signaux pendant une position ouverte laissent la taille inchangée ; aucun second contrat,
+  pyramiding ou inversion. Un fill V1 de sortie vérifié remet la position à zéro.
+- Vingt-huit nouveaux cas portent le fichier synthétique à 234 tests PASS ; les 241 tests
+  stratégie/replay ciblés et les 256 tests contrat/filiation/OOS passent. Suite complète :
+  6 146 passed, 6 warnings in 76.91s. Ruff ciblé, format Ruff, `py_compile` et diff-check PASS ;
+  CI à vérifier sur la PR.
+- Aucun accès dataset/OOS, PnL, optimisation, Risk Engine, broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS` ; prochaine gate métier
+  unique : `BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED`.

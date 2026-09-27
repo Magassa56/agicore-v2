@@ -498,3 +498,24 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    ni broker, ni ordre réel. La taille initiale d'une position n'est pas décidée ici.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS` ; prochaine gate métier
    unique : `BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — taille fixe d'un MNQ (approuvé le 2026-09-27)
+
+1. **Mode** : `POSITION_SIZE_MODE = FIXED`, `INITIAL_POSITION_SIZE = 1 MNQ` et
+   `MAX_POSITION_SIZE = 1 MNQ` ; LONG vaut `+1`, SHORT vaut `-1`.
+2. **Exécution causale** : la position signée n'existe qu'après le fill exact à `Open[t+1]` déjà
+   exigé par le modèle d'exécution. Un signal à `Close[t]` sans ce fill ne crée pas de position.
+3. **Sizing dynamique absent** : pourcentage de risque, volatilité, distance du stop, PnL,
+   martingale et anti-martingale sont désactivés. Aucun de ces facteurs n'entre dans l'API.
+4. **Position ouverte** : un signal de même sens ou opposé est ignoré et la quantité reste
+   strictement `+1` ou `-1` ; aucun second contrat, pyramiding, scale-in ou inversion.
+5. **Sortie** : un fill de sortie V1 vérifié, structurel ou EMA20 arbitré, remet la position à
+   zéro. Une sortie non remplie ou de côté incohérent ne peut pas déclarer `FLAT`.
+6. **Risk Engine inchangé** : le plafond général éventuel de deux MNQ reste externe et supérieur.
+   La stratégie demande toujours un seul MNQ et ne modifie aucune limite du moteur de risque.
+   Toute comparaison future avec deux MNQ ou un sizing Risk Engine sera une expérience séparée,
+   postérieure à la mesure de cette baseline et sans réécriture de sa définition.
+7. **Portée** : baseline déterministe initiale sans optimisation, accès OOS, PnL de sélection,
+   broker ou ordre réel.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS` ; prochaine gate métier
+   unique : `BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED`.

@@ -11,6 +11,7 @@ import pytest
 from agicore.trading.ema_pullback_v1_mnq import (
     ADD_TO_POSITION,
     ALLOWED_WEEKDAYS,
+    ANTI_MARTINGALE,
     BAR_BASED_EXECUTION_MODEL,
     BID_ASK_SPREAD_MODELED,
     BREAKEVEN,
@@ -32,6 +33,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     EXECUTION_SIGNAL_TIME,
     EXIT_PRIORITY,
     GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN,
+    INITIAL_POSITION_SIZE,
     INITIAL_STOP_BUFFER_POINTS,
     INITIAL_STOP_BUFFER_TICKS,
     INITIAL_STOP_IS_IMMUTABLE,
@@ -46,18 +48,23 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MACD_SIGNAL_LINE_MA_TYPE,
     MACD_SIGNAL_PERIOD,
     MACD_SLOW_PERIOD,
+    MARTINGALE,
+    MAX_POSITION_SIZE,
     MAX_PULLBACK_DISTANCE_POINTS,
     MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
     MOVE_STOP_TO_ENTRY,
     OPEN_POSITION_SIGNAL_POLICY,
+    PNL_BASED_SIZING,
     POSITION_EXIT_EQUALITY_TRIGGERS_EXIT,
     POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT,
+    POSITION_SIZE_MODE,
     PULLBACK_LOOKBACK_BARS,
     PULLBACK_PROXIMITY_QUALIFIES,
     PULLBACK_REQUIRED_TOUCH_BAR_OFFSET,
     QUEUE_SIGNAL_UNTIL_FLAT,
     REVERSE_POSITION,
+    RISK_PERCENT_SIZING,
     SCALE_IN,
     SESSION_END,
     SESSION_FILTER,
@@ -66,6 +73,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SLIPPAGE_MODELED,
     SOURCE_CALENDAR_REQUIRED,
     SOURCE_TRADING_HOURS_TEMPLATE,
+    STOP_DISTANCE_SIZING,
     STOP_INTRABAR_SLIPPAGE_MODELED,
     STRATEGY_ENTRY_SESSION_FILTER_ENABLED,
     STRATEGY_TIMEZONE,
@@ -86,6 +94,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     TRAILING_STOP,
     TRAILING_STOP_ENABLED,
     TRAILING_UPDATE_FREQUENCY,
+    VOLATILITY_SIZING,
     WICK_CROSS_EMA20_ALLOWED,
     BreakevenEvaluationResult,
     ClosedBarEMA20,
@@ -93,6 +102,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     EMAPullbackEntrySignalResult,
     EntrySignal,
     ExitPriorityExecutionResult,
+    FixedPositionSizeResult,
     InitialStopFillSource,
     InitialStopTriggerStatus,
     MACDStatus,
@@ -101,6 +111,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     OpenPositionSignalPolicyResult,
     PositionExitAction,
     PositionExitReason,
+    PositionSizeTransition,
     PositionState,
     ProtectedEntryExecutionResult,
     PullbackContractError,
@@ -121,6 +132,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
+    evaluate_fixed_position_size,
     evaluate_initial_stop_on_bar,
     evaluate_macd_confirmation,
     evaluate_open_position_signal_policy,
@@ -2538,3 +2550,221 @@ def test_open_position_signal_policy_has_no_future_bar_input() -> None:
         "last_exit",
         "pending_ema20_exit",
     }
+
+
+def _allowed_size_policy(side: PullbackSide) -> OpenPositionSignalPolicyResult:
+    return evaluate_open_position_signal_policy(
+        candidate_signal=_qualified_entry(side),
+        decision_bar=_signal_policy_bar(20),
+        position_at_close=None,
+    )
+
+
+def _fixed_size_open(side: PullbackSide) -> FixedPositionSizeResult:
+    return evaluate_fixed_position_size(
+        signal_policy=_allowed_size_policy(side),
+        entry_execution=_protected_position(side),
+    )
+
+
+def _triggered_structural_exit(side: PullbackSide):
+    position = _protected_position(side)
+    stop_price = position.initial_stop.stop_price
+    return evaluate_initial_stop_on_bar(
+        position=position,
+        bar=StopEvaluationBar(
+            sequence=23,
+            open=Decimal(100),
+            low=stop_price if side is PullbackSide.LONG else Decimal(99),
+            high=stop_price if side is PullbackSide.SHORT else Decimal(101),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("side", "expected_signed_contracts"),
+    [(PullbackSide.LONG, 1), (PullbackSide.SHORT, -1)],
+)
+def test_fixed_position_size_opens_exactly_one_signed_mnq_contract(
+    side: PullbackSide,
+    expected_signed_contracts: int,
+) -> None:
+    result = _fixed_size_open(side)
+
+    assert result.transition is PositionSizeTransition.ENTRY
+    assert result.position_state is PositionState(side.value)
+    assert result.side is side
+    assert result.instrument == "MNQ"
+    assert result.signed_contracts == expected_signed_contracts
+    assert result.absolute_contracts == 1
+    assert result.requested_entry_contracts == 1
+    assert result.position_size_mode == "FIXED"
+    assert result.initial_position_size == result.max_position_size == 1
+
+
+def test_fixed_position_size_constants_define_strategy_cap_one() -> None:
+    assert POSITION_SIZE_MODE == "FIXED"
+    assert INITIAL_POSITION_SIZE == MAX_POSITION_SIZE == 1
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_position_is_never_created_before_exact_next_bar_fill(side: PullbackSide) -> None:
+    with pytest.raises(PullbackContractError, match="exact next-bar entry fill"):
+        evaluate_fixed_position_size(
+            signal_policy=_allowed_size_policy(side),
+            entry_execution=None,
+        )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_fixed_position_size_rejects_two_contracts(side: PullbackSide) -> None:
+    position = _fixed_size_open(side)
+    with pytest.raises(PullbackContractError, match="cannot exceed one"):
+        replace(
+            position, signed_contracts=2 if side is PullbackSide.LONG else -2, absolute_contracts=2
+        )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"risk_percent_sizing": True},
+        {"volatility_sizing": True},
+        {"stop_distance_sizing": True},
+        {"pnl_based_sizing": True},
+        {"martingale": True},
+        {"anti_martingale": True},
+    ],
+)
+def test_fixed_position_size_rejects_every_hidden_sizing_mode(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(PullbackContractError, match="hidden or dynamic"):
+        replace(_fixed_size_open(PullbackSide.LONG), **override)  # type: ignore[arg-type]
+
+
+def test_dynamic_sizing_modes_are_explicitly_disabled() -> None:
+    assert (
+        RISK_PERCENT_SIZING,
+        VOLATILITY_SIZING,
+        STOP_DISTANCE_SIZING,
+        PNL_BASED_SIZING,
+        MARTINGALE,
+        ANTI_MARTINGALE,
+    ) == (False,) * 6
+
+
+def test_fixed_sizing_has_no_pnl_stop_distance_volatility_or_balance_input() -> None:
+    parameters = set(signature(evaluate_fixed_position_size).parameters)
+    assert parameters == {"signal_policy", "entry_execution", "open_position", "closing_exit"}
+    assert parameters.isdisjoint(
+        {
+            "pnl",
+            "balance",
+            "equity",
+            "risk_percent",
+            "stop_distance",
+            "volatility",
+            "atr",
+            "previous_trade_result",
+        }
+    )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+@pytest.mark.parametrize("same_direction", [True, False])
+def test_open_position_signal_cannot_pyramid_or_reverse_fixed_size(
+    side: PullbackSide,
+    same_direction: bool,
+) -> None:
+    candidate_side = (
+        side
+        if same_direction
+        else PullbackSide.SHORT
+        if side is PullbackSide.LONG
+        else PullbackSide.LONG
+    )
+    policy = evaluate_open_position_signal_policy(
+        candidate_signal=_qualified_entry(candidate_side, sequence=22),
+        decision_bar=_signal_policy_bar(22),
+        position_at_close=_protected_position(side),
+    )
+    opened = _fixed_size_open(side)
+    held = evaluate_fixed_position_size(signal_policy=policy, open_position=opened)
+
+    assert held.transition is PositionSizeTransition.HOLD
+    assert held.signed_contracts == opened.signed_contracts
+    assert held.absolute_contracts == 1
+    assert held.requested_entry_contracts == 0
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+@pytest.mark.parametrize("exit_kind", ["EMA20_PRIORITY", "STRUCTURAL_STOP"])
+def test_verified_exit_returns_fixed_position_to_zero(
+    side: PullbackSide,
+    exit_kind: str,
+) -> None:
+    closing_exit = (
+        _signal_policy_exit(side)
+        if exit_kind == "EMA20_PRIORITY"
+        else _triggered_structural_exit(side)
+    )
+    result = evaluate_fixed_position_size(
+        signal_policy=None,
+        open_position=_fixed_size_open(side),
+        closing_exit=closing_exit,
+    )
+
+    assert result.transition is PositionSizeTransition.EXIT
+    assert result.position_state is PositionState.FLAT
+    assert result.side is None
+    assert result.signed_contracts == result.absolute_contracts == 0
+    assert result.requested_entry_contracts == 0
+
+
+def test_no_signal_while_flat_keeps_zero_contracts() -> None:
+    policy = evaluate_open_position_signal_policy(
+        candidate_signal=None,
+        decision_bar=_signal_policy_bar(20),
+        position_at_close=None,
+    )
+    result = evaluate_fixed_position_size(signal_policy=policy)
+    assert result.transition is PositionSizeTransition.FLAT
+    assert result.signed_contracts == 0
+
+
+def test_open_position_refuses_second_entry_fill() -> None:
+    opened = _fixed_size_open(PullbackSide.LONG)
+    with pytest.raises(PullbackContractError, match="cannot accept another entry fill"):
+        evaluate_fixed_position_size(
+            signal_policy=evaluate_open_position_signal_policy(
+                candidate_signal=_qualified_entry(PullbackSide.LONG, sequence=22),
+                decision_bar=_signal_policy_bar(22),
+                position_at_close=_protected_position(PullbackSide.LONG),
+            ),
+            entry_execution=_protected_position(PullbackSide.LONG),
+            open_position=opened,
+        )
+
+
+def test_fixed_position_size_rejects_wrong_side_exit() -> None:
+    with pytest.raises(PullbackContractError, match="must match"):
+        evaluate_fixed_position_size(
+            signal_policy=None,
+            open_position=_fixed_size_open(PullbackSide.LONG),
+            closing_exit=_signal_policy_exit(PullbackSide.SHORT),
+        )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_fixed_position_size_is_immutable_and_deterministic(side: PullbackSide) -> None:
+    arguments = {
+        "signal_policy": _allowed_size_policy(side),
+        "entry_execution": _protected_position(side),
+    }
+    first = evaluate_fixed_position_size(**arguments)
+    second = evaluate_fixed_position_size(**arguments)
+    assert first == second
+
+    with pytest.raises(FrozenInstanceError):
+        first.signed_contracts = 2  # type: ignore[misc]
