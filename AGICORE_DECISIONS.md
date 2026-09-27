@@ -538,3 +538,26 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
 8. **Portée** : convention déterministe initiale sans optimisation, OOS, broker ni ordre réel.
 9. **Verdict** : `EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS` ; prochaine gate
    unique : `BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — coûts fixes initiaux (approuvés le 2026-09-27)
+
+1. **Version** : `EMA_PULLBACK_V1_MNQ_COSTS_2026_09_27`, classification
+   `VERSIONED_V1_COST_ASSUMPTION`. Le tarif ne peut pas changer silencieusement.
+2. **Commission** : `0.51 USD` par côté et contrat, appliquée `EACH_FILL`. Entrée et sortie paient
+   chacune une commission ; rejet, signal ignoré, expiration et marque finale sans fill paient zéro.
+3. **Slippage** : un tick de `0.25` point par entry, EMA20 exit et structural stop, toujours dans le
+   sens défavorable. Aucun slippage favorable n'est autorisé.
+4. **Stops** : le stop normal utilise le stop structurel comme prix de base ; le gap-through utilise
+   l'Open de la barre. Le tick défavorable est ensuite embarqué une seule fois dans le prix exécuté.
+5. **Spread** : `ABSORBED_IN_FIXED_SLIPPAGE`; aucun débit Bid/Ask ou spread distinct n'est ajouté.
+6. **Unités** : spécification CME MNQ de `2.00 USD` par point, donc `0.50 USD` par tick. Prix sur la
+   grille exacte de `0.25` ; USD à deux décimales avec `ROUND_HALF_UP`.
+7. **PnL** : prix de sortie déjà slippé moins prix d'entrée déjà slippé, conversion USD, puis retrait
+   des seules commissions de fills. Aucun second coût monétaire de slippage ou spread.
+8. **Fin de flux** : la marque part de l'entrée déjà slippée sans créer de fill, commission ou coût
+   supplémentaire ; le latent reste exclu du réalisé et des trades fermés.
+9. **Fail-closed** : prix hors grille, coût/slippage négatif, sens favorable, modèle de spread caché,
+   configuration non versionnée ou double comptage sont refusés.
+10. **Portée** : baseline déterministe sans optimisation, sans OOS, Risk Engine, broker ni ordre réel.
+11. **Verdict** : `EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS` et formalisation V1 `PASS` ;
+    prochaine gate : `BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED`.

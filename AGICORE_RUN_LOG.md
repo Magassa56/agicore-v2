@@ -501,3 +501,22 @@
 - Aucun accès dataset/OOS, optimisation, Risk Engine, broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS` ; prochaine gate
   unique : `BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL
+
+- Reprise depuis `origin/main` au merge 3cfcc83a062abce86fb4ddc562abcca722ab625c de la PR #265 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-cost-model`, base et worktree propres.
+- Baseline datée : commission Apex/Rithmic `0.51 USD` par fill et MNQ ; un tick défavorable pour
+  l'entrée, la sortie EMA20 et le stop structurel ; spread absorbé sans second débit.
+- Spécification CME : `2.00 USD` par point MNQ, `0.50 USD` par tick. Comptabilité `Decimal`, grille
+  `0.25`, montants USD `ROUND_HALF_UP` à deux décimales.
+- Les prix bar-based restent les prix de base auditables. Le prix comptable embarque le slippage ;
+  le PnL net retire ensuite les commissions uniquement.
+- Stop normal depuis son niveau, gap-through depuis l'Open. Rejet, signal ignoré, expiration et
+  marque EOD ne paient rien ; la marque ouverte utilise toutefois l'entrée déjà slippée.
+- Vingt-huit nouveaux cas portent le fichier synthétique à 285 tests PASS ; 292 régressions
+  stratégie/replay et 307 tests contrat/filiation/OOS passent. Suite complète : 6 197 passed,
+  6 warnings in 74.95s. Ruff ciblé, format Ruff, `py_compile` et diff-check PASS.
+- Aucun dataset/OOS, replay historique, optimisation, Risk Engine, broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS` et formalisation V1 `PASS` ;
+  prochaine gate : `BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED`.

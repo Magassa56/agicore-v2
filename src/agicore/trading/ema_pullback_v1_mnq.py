@@ -14,6 +14,10 @@ While a position is open at a close, all new entry signals are discarded, includ
 those formed on the close that schedules a next-bar EMA20 exit.
 Each accepted entry requests exactly one MNQ contract; the strategy never varies this
 quantity from risk, volatility, stop distance, PnL, or prior trade outcomes.
+The V1 cost layer keeps the causal bar-based prices as explicit ``base_fill_price``
+values, then embeds exactly one adverse MNQ tick in every actual simulated fill and
+charges the versioned per-side commission once.  It never charges rejected, ignored,
+expired, or end-of-data mark events and never adds a second spread/slippage debit.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
 from .market_replay import calculate_ema
@@ -59,7 +63,7 @@ POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT = False
 EXECUTION_SIGNAL_TIME = "CLOSE_T"
 EXECUTION_PRICE_SOURCE = "OPEN_T_PLUS_1"
 BAR_BASED_EXECUTION_MODEL = True
-SLIPPAGE_MODELED = False
+SLIPPAGE_MODELED = True
 BID_ASK_SPREAD_MODELED = False
 LATENCY_MODELED = False
 TICK_REALISTIC_FILL_MODELED = False
@@ -68,7 +72,7 @@ INITIAL_STOP_BUFFER_TICKS = 1
 INITIAL_STOP_BUFFER_POINTS = MNQ_TICK_SIZE_POINTS * INITIAL_STOP_BUFFER_TICKS
 INITIAL_STOP_IS_IMMUTABLE = True
 GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN = True
-STOP_INTRABAR_SLIPPAGE_MODELED = False
+STOP_INTRABAR_SLIPPAGE_MODELED = True
 TAKE_PROFIT = "NONE"
 TAKE_PROFIT_ENABLED = False
 TAKE_PROFIT_PRICE = None
@@ -126,6 +130,30 @@ END_OF_DATA_FORCED_EXIT = False
 END_OF_DATA_SYNTHETIC_FILL = False
 UNREALIZED_PNL_IS_REALIZED = False
 UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS = False
+COST_MODEL_ID = "EMA_PULLBACK_V1_MNQ_COSTS_2026_09_27"
+COST_MODEL_VERSION = "1.0"
+COST_MODEL_REFERENCE_DATE = "2026-09-27"
+COST_MODEL_CLASSIFICATION = "VERSIONED_V1_COST_ASSUMPTION"
+COMMISSION_PER_SIDE_USD = Decimal("0.51")
+ENTRY_SLIPPAGE_TICKS = 1
+EMA20_EXIT_SLIPPAGE_TICKS = 1
+STRUCTURAL_STOP_SLIPPAGE_TICKS = 1
+SPREAD_MODEL = "ABSORBED_IN_FIXED_SLIPPAGE"
+EXPLICIT_BID_ASK_SPREAD_CHARGE = False
+FEE_APPLICATION = "EACH_FILL"
+ROUNDING_POLICY = "DECIMAL_EXACT_TICK_GRID_AND_USD_CENTS_HALF_UP"
+USD_CENT = Decimal("0.01")
+MNQ_POINT_VALUE_USD = Decimal("2.00")
+MNQ_TICK_VALUE_USD = MNQ_TICK_SIZE_POINTS * MNQ_POINT_VALUE_USD
+SLIPPAGE_EMBEDDED_IN_EXECUTION_PRICE = True
+SEPARATE_SLIPPAGE_CHARGE_USD = Decimal("0.00")
+SEPARATE_SPREAD_CHARGE_USD = Decimal("0.00")
+COMMISSION_SOURCE_URL = (
+    "https://apextraderfunding.com/help-center/rithmic/rithmic-commissions-instruments/"
+)
+MNQ_CONTRACT_SPEC_SOURCE_URL = (
+    "https://www.cmegroup.com/markets/equities/nasdaq/micro-e-mini-nasdaq-100.html"
+)
 
 
 class PullbackContractError(ValueError):
@@ -235,6 +263,23 @@ class EndOfDataPositionState(StrEnum):
 
     FLAT = "FLAT"
     OPEN_AT_END_OF_DATA = "OPEN_AT_END_OF_DATA"
+
+
+class CostEventKind(StrEnum):
+    """Execution or non-execution event evaluated by the V1 cost layer."""
+
+    ENTRY = "ENTRY"
+    EMA20_EXIT = "EMA20_EXIT"
+    STRUCTURAL_STOP = "STRUCTURAL_STOP"
+    IGNORED_SIGNAL = "IGNORED_SIGNAL"
+    END_OF_DATA_MARK = "END_OF_DATA_MARK"
+
+
+class CostApplicationStatus(StrEnum):
+    """Whether one source event created an actual cost-bearing simulated fill."""
+
+    FILLED = "FILLED"
+    NO_FILL = "NO_FILL"
 
 
 @dataclass(frozen=True)
@@ -1174,15 +1219,17 @@ def evaluate_end_of_data_position(
     final_valid_bar: ClosedBarEMA20,
     position: FixedPositionSizeResult | None,
     entry_execution: ProtectedEntryExecutionResult | None,
+    costed_entry_fill: V1CostedFillResult | None,
     realized_pnl: Decimal,
     realized_equity: Decimal,
     closed_trade_count: int,
 ) -> EndOfDataPositionResult:
     """Report final state without a forced exit, fill, or closed-trade mutation.
 
-    Values use normalized MNQ points until the separate fees/slippage accounting
-    model is approved.  Only ``final_valid_bar.close`` marks an open position; High,
-    Low, Open, EMA20, reconstructed quotes, and unavailable future bars are excluded.
+    Values remain normalized MNQ points, but the mark starts from the already-slipped
+    entry execution.  The entry commission is an upstream realized fill expense and
+    this mark creates no new charge.  Only ``final_valid_bar.close`` marks an open
+    position; High, Low, Open, EMA20, reconstructed quotes, and future bars are excluded.
     """
     if not isinstance(final_valid_bar, ClosedBarEMA20):
         raise PullbackContractError("end-of-data reporting requires the final valid closed bar")
@@ -1196,7 +1243,7 @@ def evaluate_end_of_data_position(
         raise PullbackContractError("closed_trade_count must be a non-negative integer")
 
     mark_price = final_valid_bar.close
-    if position is None and entry_execution is None:
+    if position is None and entry_execution is None and costed_entry_fill is None:
         unrealized_pnl_at_end = Decimal(0)
         return EndOfDataPositionResult(
             position_state=EndOfDataPositionState.FLAT,
@@ -1214,8 +1261,10 @@ def evaluate_end_of_data_position(
             closed_trade_count_change=0,
             open_position_at_end=False,
         )
-    if position is None or entry_execution is None:
-        raise PullbackContractError("open end-of-data reporting requires position and entry fill")
+    if position is None or entry_execution is None or costed_entry_fill is None:
+        raise PullbackContractError(
+            "open end-of-data reporting requires position, entry fill, and costed entry"
+        )
     if (
         not isinstance(position, FixedPositionSizeResult)
         or position.position_state is PositionState.FLAT
@@ -1242,12 +1291,25 @@ def evaluate_end_of_data_position(
     ):
         raise PullbackContractError("end-of-data position requires its causal filled entry")
 
-    unrealized_pnl_at_end = (mark_price - entry_execution.entry_price) * position.signed_contracts
+    if (
+        not isinstance(costed_entry_fill, V1CostedFillResult)
+        or costed_entry_fill.status is not CostApplicationStatus.FILLED
+        or costed_entry_fill.event_kind is not CostEventKind.ENTRY
+        or costed_entry_fill.side is not position.side
+        or costed_entry_fill.fill_quantity != 1
+        or costed_entry_fill.base_fill_price != entry_execution.entry_price
+        or costed_entry_fill.execution_price is None
+    ):
+        raise PullbackContractError("end-of-data mark requires the exact costed entry fill")
+
+    unrealized_pnl_at_end = (
+        mark_price - costed_entry_fill.execution_price
+    ) * position.signed_contracts
     return EndOfDataPositionResult(
         position_state=EndOfDataPositionState.OPEN_AT_END_OF_DATA,
         position_side=position.side,
         signed_contracts=position.signed_contracts,
-        entry_price=entry_execution.entry_price,
+        entry_price=costed_entry_fill.execution_price,
         mark_price=mark_price,
         mark_bar_sequence=final_valid_bar.sequence,
         realized_pnl=realized_pnl,
@@ -1258,6 +1320,430 @@ def evaluate_end_of_data_position(
         closed_trade_count=closed_trade_count,
         closed_trade_count_change=0,
         open_position_at_end=True,
+    )
+
+
+def _is_on_mnq_tick_grid(price: Decimal) -> bool:
+    return price % MNQ_TICK_SIZE_POINTS == 0
+
+
+def _round_usd(amount: Decimal) -> Decimal:
+    return amount.quantize(USD_CENT, rounding=ROUND_HALF_UP)
+
+
+def _slippage_ticks_for_event(event_kind: CostEventKind) -> int:
+    mapping = {
+        CostEventKind.ENTRY: ENTRY_SLIPPAGE_TICKS,
+        CostEventKind.EMA20_EXIT: EMA20_EXIT_SLIPPAGE_TICKS,
+        CostEventKind.STRUCTURAL_STOP: STRUCTURAL_STOP_SLIPPAGE_TICKS,
+    }
+    try:
+        return mapping[event_kind]
+    except KeyError as exc:
+        raise PullbackContractError("non-fill events cannot receive slippage") from exc
+
+
+@dataclass(frozen=True)
+class V1CostedFillResult:
+    """One costed fill, or explicit proof that a source event created no fill."""
+
+    event_kind: CostEventKind
+    status: CostApplicationStatus
+    side: PullbackSide | None
+    fill_quantity: int
+    base_fill_price: Decimal | None
+    execution_price: Decimal | None
+    slippage_ticks: int
+    slippage_points: Decimal
+    commission_usd: Decimal
+    cost_model_id: str = COST_MODEL_ID
+    cost_model_version: str = COST_MODEL_VERSION
+    cost_model_reference_date: str = COST_MODEL_REFERENCE_DATE
+    cost_model_classification: str = COST_MODEL_CLASSIFICATION
+    commission_per_side_usd: Decimal = COMMISSION_PER_SIDE_USD
+    tick_size_points: Decimal = MNQ_TICK_SIZE_POINTS
+    point_value_usd: Decimal = MNQ_POINT_VALUE_USD
+    spread_model: str = SPREAD_MODEL
+    explicit_bid_ask_spread_charge: bool = EXPLICIT_BID_ASK_SPREAD_CHARGE
+    fee_application: str = FEE_APPLICATION
+    rounding_policy: str = ROUNDING_POLICY
+    slippage_embedded_in_execution_price: bool = SLIPPAGE_EMBEDDED_IN_EXECUTION_PRICE
+    separate_slippage_charge_usd: Decimal = SEPARATE_SLIPPAGE_CHARGE_USD
+    separate_spread_charge_usd: Decimal = SEPARATE_SPREAD_CHARGE_USD
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.event_kind, CostEventKind) or not isinstance(
+            self.status, CostApplicationStatus
+        ):
+            raise PullbackContractError("cost event and application status must be explicit")
+        if (
+            self.cost_model_id != COST_MODEL_ID
+            or self.cost_model_version != COST_MODEL_VERSION
+            or self.cost_model_reference_date != COST_MODEL_REFERENCE_DATE
+            or self.cost_model_classification != COST_MODEL_CLASSIFICATION
+            or self.commission_per_side_usd != COMMISSION_PER_SIDE_USD
+            or self.tick_size_points != MNQ_TICK_SIZE_POINTS
+            or self.point_value_usd != MNQ_POINT_VALUE_USD
+            or self.spread_model != SPREAD_MODEL
+            or self.explicit_bid_ask_spread_charge is not False
+            or self.fee_application != FEE_APPLICATION
+            or self.rounding_policy != ROUNDING_POLICY
+            or self.slippage_embedded_in_execution_price is not True
+            or self.separate_slippage_charge_usd != Decimal("0.00")
+            or self.separate_spread_charge_usd != Decimal("0.00")
+        ):
+            raise PullbackContractError("V1 cost configuration cannot be changed implicitly")
+        for field_name in (
+            "commission_per_side_usd",
+            "tick_size_points",
+            "point_value_usd",
+            "slippage_points",
+            "commission_usd",
+            "separate_slippage_charge_usd",
+            "separate_spread_charge_usd",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+                raise PullbackContractError(f"{field_name} must be a finite non-negative Decimal")
+        if type(self.fill_quantity) is not int or self.fill_quantity not in (0, 1):
+            raise PullbackContractError("V1 cost fills must contain zero or one MNQ")
+        if type(self.slippage_ticks) is not int or self.slippage_ticks < 0:
+            raise PullbackContractError("slippage ticks must be a non-negative integer")
+        if self.commission_usd != _round_usd(self.commission_usd):
+            raise PullbackContractError("commission must use USD cents ROUND_HALF_UP")
+        if self.side is not None and not isinstance(self.side, PullbackSide):
+            raise PullbackContractError("cost event side must be explicitly LONG, SHORT, or absent")
+
+        if self.status is CostApplicationStatus.NO_FILL:
+            if (
+                self.fill_quantity != 0
+                or self.base_fill_price is not None
+                or self.execution_price is not None
+                or self.slippage_ticks != 0
+                or self.slippage_points != Decimal(0)
+                or self.commission_usd != Decimal("0.00")
+            ):
+                raise PullbackContractError("a non-fill event cannot incur cost or execution price")
+            return
+
+        if self.event_kind not in (
+            CostEventKind.ENTRY,
+            CostEventKind.EMA20_EXIT,
+            CostEventKind.STRUCTURAL_STOP,
+        ):
+            raise PullbackContractError("only actual entry or exit fills may incur V1 costs")
+        if not isinstance(self.side, PullbackSide) or self.fill_quantity != 1:
+            raise PullbackContractError("a costed V1 fill must identify one MNQ side")
+        if (
+            not isinstance(self.base_fill_price, Decimal)
+            or not self.base_fill_price.is_finite()
+            or self.base_fill_price < 0
+            or not _is_on_mnq_tick_grid(self.base_fill_price)
+            or not isinstance(self.execution_price, Decimal)
+            or not self.execution_price.is_finite()
+            or self.execution_price < 0
+            or not _is_on_mnq_tick_grid(self.execution_price)
+        ):
+            raise PullbackContractError(
+                "base and execution prices must use the exact MNQ tick grid"
+            )
+        expected_ticks = _slippage_ticks_for_event(self.event_kind)
+        expected_points = MNQ_TICK_SIZE_POINTS * expected_ticks
+        if self.slippage_ticks != expected_ticks or self.slippage_points != expected_points:
+            raise PullbackContractError("every V1 fill must embed exactly one configured tick")
+        is_entry = self.event_kind is CostEventKind.ENTRY
+        adverse_sign = (
+            Decimal(1)
+            if (is_entry and self.side is PullbackSide.LONG)
+            or (not is_entry and self.side is PullbackSide.SHORT)
+            else Decimal(-1)
+        )
+        expected_execution_price = self.base_fill_price + adverse_sign * expected_points
+        if self.execution_price != expected_execution_price:
+            raise PullbackContractError("V1 slippage must be strictly adverse and embedded once")
+        expected_commission = _round_usd(COMMISSION_PER_SIDE_USD * self.fill_quantity)
+        if self.commission_usd != expected_commission:
+            raise PullbackContractError("commission must be charged once per actual fill")
+
+
+@dataclass(frozen=True)
+class V1RealizedTradePnL:
+    """Net USD result from two already-slipped fills and their commissions only."""
+
+    side: PullbackSide
+    quantity: int
+    entry_execution_price: Decimal
+    exit_execution_price: Decimal
+    gross_price_pnl_points: Decimal
+    gross_price_pnl_usd: Decimal
+    total_commission_usd: Decimal
+    net_realized_pnl_usd: Decimal
+    point_value_usd: Decimal = MNQ_POINT_VALUE_USD
+    slippage_already_embedded: bool = SLIPPAGE_EMBEDDED_IN_EXECUTION_PRICE
+    separate_slippage_charge_usd: Decimal = SEPARATE_SLIPPAGE_CHARGE_USD
+    separate_spread_charge_usd: Decimal = SEPARATE_SPREAD_CHARGE_USD
+    rounding_policy: str = ROUNDING_POLICY
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.side, PullbackSide) or self.quantity != 1:
+            raise PullbackContractError("realized V1 PnL requires exactly one MNQ")
+        if (
+            self.point_value_usd != MNQ_POINT_VALUE_USD
+            or self.slippage_already_embedded is not True
+            or self.separate_slippage_charge_usd != Decimal("0.00")
+            or self.separate_spread_charge_usd != Decimal("0.00")
+            or self.rounding_policy != ROUNDING_POLICY
+        ):
+            raise PullbackContractError("realized PnL cannot double-count costs")
+        for field_name in (
+            "entry_execution_price",
+            "exit_execution_price",
+            "gross_price_pnl_points",
+            "gross_price_pnl_usd",
+            "total_commission_usd",
+            "net_realized_pnl_usd",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, Decimal) or not value.is_finite():
+                raise PullbackContractError(f"{field_name} must be a finite Decimal")
+        if self.total_commission_usd < 0:
+            raise PullbackContractError("realized commission cannot be negative")
+        if not _is_on_mnq_tick_grid(self.entry_execution_price) or not _is_on_mnq_tick_grid(
+            self.exit_execution_price
+        ):
+            raise PullbackContractError("realized trade prices must remain on the MNQ tick grid")
+        expected_points = (
+            self.exit_execution_price - self.entry_execution_price
+            if self.side is PullbackSide.LONG
+            else self.entry_execution_price - self.exit_execution_price
+        )
+        expected_gross_usd = _round_usd(expected_points * MNQ_POINT_VALUE_USD * self.quantity)
+        expected_commission = _round_usd(COMMISSION_PER_SIDE_USD * self.quantity * 2)
+        if (
+            self.gross_price_pnl_points != expected_points
+            or self.gross_price_pnl_usd != expected_gross_usd
+            or self.total_commission_usd != expected_commission
+            or self.net_realized_pnl_usd
+            != _round_usd(expected_gross_usd - self.total_commission_usd)
+        ):
+            raise PullbackContractError("net PnL must use slipped prices minus commissions only")
+
+
+def _no_fill_cost_result(
+    *,
+    event_kind: CostEventKind,
+    side: PullbackSide | None,
+) -> V1CostedFillResult:
+    return V1CostedFillResult(
+        event_kind=event_kind,
+        status=CostApplicationStatus.NO_FILL,
+        side=side,
+        fill_quantity=0,
+        base_fill_price=None,
+        execution_price=None,
+        slippage_ticks=0,
+        slippage_points=Decimal(0),
+        commission_usd=Decimal("0.00"),
+    )
+
+
+def _filled_cost_result(
+    *,
+    event_kind: CostEventKind,
+    side: PullbackSide,
+    base_fill_price: Decimal,
+) -> V1CostedFillResult:
+    if not isinstance(base_fill_price, Decimal) or not base_fill_price.is_finite():
+        raise PullbackContractError("cost application requires a finite Decimal base fill")
+    if base_fill_price < 0 or not _is_on_mnq_tick_grid(base_fill_price):
+        raise PullbackContractError("base fill price must use the exact MNQ tick grid")
+    slippage_ticks = _slippage_ticks_for_event(event_kind)
+    slippage_points = MNQ_TICK_SIZE_POINTS * slippage_ticks
+    is_entry = event_kind is CostEventKind.ENTRY
+    adverse_sign = (
+        Decimal(1)
+        if (is_entry and side is PullbackSide.LONG) or (not is_entry and side is PullbackSide.SHORT)
+        else Decimal(-1)
+    )
+    execution_price = base_fill_price + adverse_sign * slippage_points
+    if execution_price < 0:
+        raise PullbackContractError("adverse slippage cannot create a negative execution price")
+    return V1CostedFillResult(
+        event_kind=event_kind,
+        status=CostApplicationStatus.FILLED,
+        side=side,
+        fill_quantity=1,
+        base_fill_price=base_fill_price,
+        execution_price=execution_price,
+        slippage_ticks=slippage_ticks,
+        slippage_points=slippage_points,
+        commission_usd=_round_usd(COMMISSION_PER_SIDE_USD),
+    )
+
+
+def apply_v1_execution_costs(
+    event: (
+        NextBarExecutionResult
+        | ProtectedEntryExecutionResult
+        | InitialStopBarExecutionResult
+        | ExitPriorityExecutionResult
+        | OpenPositionSignalPolicyResult
+        | EndOfDataPositionResult
+    ),
+) -> V1CostedFillResult:
+    """Apply fixed adverse slippage and commission to an existing causal fill only."""
+    if isinstance(event, NextBarExecutionResult):
+        if not isinstance(event.purpose, SimulatedOrderPurpose) or not isinstance(
+            event.side, PullbackSide
+        ):
+            raise PullbackContractError("next-bar cost event must identify purpose and side")
+        event_kind = (
+            CostEventKind.ENTRY
+            if event.purpose is SimulatedOrderPurpose.ENTRY
+            else CostEventKind.EMA20_EXIT
+        )
+        if event.status is SimulatedExecutionStatus.EXPIRED_NO_EXECUTION:
+            if (
+                event.execution_bar_sequence is not None
+                or event.execution_price is not None
+                or event.position_opened
+                or event.position_closed
+            ):
+                raise PullbackContractError("expired execution cannot contain a hidden fill")
+            return _no_fill_cost_result(event_kind=event_kind, side=event.side)
+        if (
+            event.status is not SimulatedExecutionStatus.FILLED
+            or event.order_type is not SimulatedOrderType.MARKET
+            or event.execution_bar_sequence != event.decision_bar_sequence + 1
+            or not isinstance(event.execution_price, Decimal)
+            or event.position_opened is not (event_kind is CostEventKind.ENTRY)
+            or event.position_closed is not (event_kind is CostEventKind.EMA20_EXIT)
+        ):
+            raise PullbackContractError("next-bar event must be one coherent causal fill")
+        return _filled_cost_result(
+            event_kind=event_kind,
+            side=event.side,
+            base_fill_price=event.execution_price,
+        )
+
+    if isinstance(event, ProtectedEntryExecutionResult):
+        if (
+            not isinstance(event.side, PullbackSide)
+            or event.order_type is not SimulatedOrderType.MARKET
+        ):
+            raise PullbackContractError("protected entry cost event must identify side and MARKET")
+        if event.status in (
+            SimulatedExecutionStatus.EXPIRED_NO_EXECUTION,
+            SimulatedExecutionStatus.REJECT_ENTRY,
+        ):
+            if event.entry_price is not None or event.position_opened:
+                raise PullbackContractError("rejected or expired entry cannot contain a fill")
+            return _no_fill_cost_result(event_kind=CostEventKind.ENTRY, side=event.side)
+        if (
+            event.status is not SimulatedExecutionStatus.FILLED
+            or event.position_opened is not True
+            or event.execution_bar_sequence != event.decision_bar_sequence + 1
+            or not isinstance(event.entry_price, Decimal)
+        ):
+            raise PullbackContractError("protected entry must be one coherent causal fill")
+        return _filled_cost_result(
+            event_kind=CostEventKind.ENTRY,
+            side=event.side,
+            base_fill_price=event.entry_price,
+        )
+
+    if isinstance(event, InitialStopBarExecutionResult):
+        if not isinstance(event.side, PullbackSide) or not isinstance(
+            event.fill_source, InitialStopFillSource
+        ):
+            raise PullbackContractError("stop cost event must identify side and fill source")
+        if event.status is InitialStopTriggerStatus.NOT_TRIGGERED:
+            if event.fill_price is not None or event.position_closed:
+                raise PullbackContractError("inactive stop cannot contain a hidden fill")
+            return _no_fill_cost_result(
+                event_kind=CostEventKind.STRUCTURAL_STOP,
+                side=event.side,
+            )
+        if (
+            event.status is not InitialStopTriggerStatus.STOP_TRIGGERED
+            or event.position_closed is not True
+            or not isinstance(event.fill_price, Decimal)
+            or event.fill_source is InitialStopFillSource.NONE
+        ):
+            raise PullbackContractError("triggered stop must contain one coherent fill")
+        return _filled_cost_result(
+            event_kind=CostEventKind.STRUCTURAL_STOP,
+            side=event.side,
+            base_fill_price=event.fill_price,
+        )
+
+    if isinstance(event, ExitPriorityExecutionResult):
+        event_kind = (
+            CostEventKind.STRUCTURAL_STOP
+            if event.exit_reason is PositionExitReason.STRUCTURAL_STOP
+            else CostEventKind.EMA20_EXIT
+        )
+        return _filled_cost_result(
+            event_kind=event_kind,
+            side=event.side,
+            base_fill_price=event.fill_price,
+        )
+
+    if isinstance(event, OpenPositionSignalPolicyResult):
+        if event.action is not OpenPositionSignalAction.IGNORE:
+            raise PullbackContractError("cost layer accepts only the explicit ignored-signal case")
+        side = PullbackSide(event.position_state.value)
+        return _no_fill_cost_result(event_kind=CostEventKind.IGNORED_SIGNAL, side=side)
+
+    if isinstance(event, EndOfDataPositionResult):
+        if event.synthetic_fill or event.fill_price is not None:
+            raise PullbackContractError("end-of-data mark cannot contain a hidden fill")
+        return _no_fill_cost_result(
+            event_kind=CostEventKind.END_OF_DATA_MARK,
+            side=event.position_side,
+        )
+
+    raise PullbackContractError("unsupported event cannot enter the V1 cost layer")
+
+
+def calculate_v1_realized_trade_pnl(
+    *,
+    entry_fill: V1CostedFillResult,
+    exit_fill: V1CostedFillResult,
+) -> V1RealizedTradePnL:
+    """Calculate net USD PnL without charging spread or slippage a second time."""
+    if (
+        not isinstance(entry_fill, V1CostedFillResult)
+        or entry_fill.status is not CostApplicationStatus.FILLED
+        or entry_fill.event_kind is not CostEventKind.ENTRY
+        or not isinstance(entry_fill.side, PullbackSide)
+        or entry_fill.execution_price is None
+    ):
+        raise PullbackContractError("realized trade requires one costed entry fill")
+    if (
+        not isinstance(exit_fill, V1CostedFillResult)
+        or exit_fill.status is not CostApplicationStatus.FILLED
+        or exit_fill.event_kind not in (CostEventKind.EMA20_EXIT, CostEventKind.STRUCTURAL_STOP)
+        or exit_fill.side is not entry_fill.side
+        or exit_fill.execution_price is None
+    ):
+        raise PullbackContractError("realized trade requires one matching costed exit fill")
+    gross_points = (
+        exit_fill.execution_price - entry_fill.execution_price
+        if entry_fill.side is PullbackSide.LONG
+        else entry_fill.execution_price - exit_fill.execution_price
+    )
+    gross_usd = _round_usd(gross_points * MNQ_POINT_VALUE_USD)
+    total_commission = _round_usd(entry_fill.commission_usd + exit_fill.commission_usd)
+    return V1RealizedTradePnL(
+        side=entry_fill.side,
+        quantity=1,
+        entry_execution_price=entry_fill.execution_price,
+        exit_execution_price=exit_fill.execution_price,
+        gross_price_pnl_points=gross_points,
+        gross_price_pnl_usd=gross_usd,
+        total_commission_usd=total_commission,
+        net_realized_pnl_usd=_round_usd(gross_usd - total_commission),
     )
 
 
@@ -2105,10 +2591,17 @@ __all__ = [
     "BREAKEVEN_R_MULTIPLE_TRIGGER",
     "BREAKEVEN_TRIGGER",
     "CLOSE_AND_REVERSE",
+    "COMMISSION_PER_SIDE_USD",
+    "COMMISSION_SOURCE_URL",
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
+    "COST_MODEL_CLASSIFICATION",
+    "COST_MODEL_ID",
+    "COST_MODEL_REFERENCE_DATE",
+    "COST_MODEL_VERSION",
     "DEFERRED_ENTRY",
     "DST_RULE",
     "EARLIEST_EXECUTION_BAR_OFFSET",
+    "EMA20_EXIT_SLIPPAGE_TICKS",
     "EMA_PERIOD",
     "EMA_SEED_CONVENTION",
     "EMA_SLOPE_LOOKBACK_BARS",
@@ -2117,9 +2610,12 @@ __all__ = [
     "END_OF_DATA_FORCED_EXIT",
     "END_OF_DATA_POSITION_POLICY",
     "END_OF_DATA_SYNTHETIC_FILL",
+    "ENTRY_SLIPPAGE_TICKS",
     "EXECUTION_PRICE_SOURCE",
     "EXECUTION_SIGNAL_TIME",
     "EXIT_PRIORITY",
+    "EXPLICIT_BID_ASK_SPREAD_CHARGE",
+    "FEE_APPLICATION",
     "GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN",
     "INITIAL_POSITION_SIZE",
     "INITIAL_STOP_BUFFER_POINTS",
@@ -2142,7 +2638,10 @@ __all__ = [
     "MAX_PULLBACK_DISTANCE_POINTS",
     "MAX_PULLBACK_DISTANCE_TICKS",
     "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
+    "MNQ_CONTRACT_SPEC_SOURCE_URL",
+    "MNQ_POINT_VALUE_USD",
     "MNQ_TICK_SIZE_POINTS",
+    "MNQ_TICK_VALUE_USD",
     "MOVE_STOP_TO_ENTRY",
     "OPEN_POSITION_SIGNAL_POLICY",
     "PNL_BASED_SIZING",
@@ -2155,20 +2654,26 @@ __all__ = [
     "QUEUE_SIGNAL_UNTIL_FLAT",
     "REVERSE_POSITION",
     "RISK_PERCENT_SIZING",
+    "ROUNDING_POLICY",
     "SCALE_IN",
+    "SEPARATE_SLIPPAGE_CHARGE_USD",
+    "SEPARATE_SPREAD_CHARGE_USD",
     "SESSION_END",
     "SESSION_FILTER",
     "SESSION_START",
     "SIGNAL_DECISION_ON_CLOSED_BAR",
+    "SLIPPAGE_EMBEDDED_IN_EXECUTION_PRICE",
     "SLIPPAGE_MODELED",
     "SOURCE_CALENDAR_REQUIRED",
     "SOURCE_TRADING_HOURS_TEMPLATE",
+    "SPREAD_MODEL",
     "STOP_DISTANCE_SIZING",
     "STOP_INTRABAR_SLIPPAGE_MODELED",
     "STRATEGY_ENTRY_SESSION_FILTER_ENABLED",
     "STRATEGY_ID",
     "STRATEGY_TIMEZONE",
     "STRUCTURAL_STOP_FIRST",
+    "STRUCTURAL_STOP_SLIPPAGE_TICKS",
     "TAKE_PROFIT",
     "TAKE_PROFIT_ENABLED",
     "TAKE_PROFIT_MONETARY_AMOUNT",
@@ -2188,10 +2693,13 @@ __all__ = [
     "TRAILING_UPDATE_FREQUENCY",
     "UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS",
     "UNREALIZED_PNL_IS_REALIZED",
+    "USD_CENT",
     "VOLATILITY_SIZING",
     "WICK_CROSS_EMA20_ALLOWED",
     "BreakevenEvaluationResult",
     "ClosedBarEMA20",
+    "CostApplicationStatus",
+    "CostEventKind",
     "EMA20PositionExitResult",
     "EMA20SlopeResult",
     "EMAPullbackEntrySignalResult",
@@ -2225,8 +2733,12 @@ __all__ = [
     "StopEvaluationBar",
     "TakeProfitEvaluationResult",
     "TrailingStopEvaluationResult",
+    "V1CostedFillResult",
+    "V1RealizedTradePnL",
+    "apply_v1_execution_costs",
     "arbitrate_exit_at_open",
     "assemble_ema_pullback_entry_signal",
+    "calculate_v1_realized_trade_pnl",
     "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",
     "evaluate_disabled_breakeven",

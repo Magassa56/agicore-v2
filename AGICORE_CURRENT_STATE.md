@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -19,9 +19,11 @@ EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS ;
 EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS ;
+EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS ;
+EMA_PULLBACK_V1_MNQ_FORMALIZATION = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-end-of-data.
-Base GitHub vérifiée et récupérée : 0ca23d0a534640cb3ce78a0a9ffabbbd4a764655.
+Branche de vérification : feature/ema-pullback-v1-mnq-cost-model.
+Base GitHub vérifiée et récupérée : 3cfcc83a062abce86fb4ddc562abcca722ab625c.
 
 ## Acquis vérifiés
 
@@ -673,6 +675,45 @@ avec 6 169 tests et 6 warnings historiques en 77,56 s. Ruff ciblé, format Ruff,
 Action humaine unique : définir le modèle initial exact de commission, spread et slippage pour un
 aller-retour d'un MNQ, ainsi que l'unité et l'application à chaque fill, sans calibrage sur le PnL.
 
+## EMA_PULLBACK_V1_MNQ — modèle de coûts V1 figé
+
+La décision métier du 2026-09-27 fixe sans optimisation le modèle versionné
+`EMA_PULLBACK_V1_MNQ_COSTS_2026_09_27`. Chaque fill simulé réel paie `0.51 USD` de commission et
+reçoit exactement un tick MNQ de `0.25` point dans le sens défavorable. Le tarif est une hypothèse
+de coût V1 datée, jamais une valeur remplaçable silencieusement. Sa référence publique est la page
+[Apex Rithmic Commissions & Instruments](https://apextraderfunding.com/help-center/rithmic/rithmic-commissions-instruments/).
+
+Le multiplicateur de contrat nécessaire à l'unité du PnL est la spécification CME de `2.00 USD`
+par point MNQ, soit `0.50 USD` par tick ; référence :
+[CME Micro E-mini Nasdaq-100](https://www.cmegroup.com/markets/equities/nasdaq/micro-e-mini-nasdaq-100.html).
+Cette spécification d'instrument n'est ni un paramètre de stratégie ni une optimisation.
+
+Le prix bar-based causal reste enregistré comme `base_fill_price`. Le prix canonique de
+comptabilité est ensuite : LONG entry `+1 tick`, SHORT entry `-1 tick`, LONG exit `-1 tick`, SHORT
+exit `+1 tick`. Un stop normal part du stop structurel ; un gap-through part de l'Open observé.
+Le spread est `ABSORBED_IN_FIXED_SLIPPAGE`, sans débit Bid/Ask séparé. Le PnL net utilise les prix
+déjà slippés, convertis par le multiplicateur MNQ, puis retire seulement les commissions des fills.
+
+Les entrées rejetées, signaux ignorés, ordres expirés et marques non réalisées de fin de flux ne
+reçoivent ni commission ni slippage. Une position ouverte en fin de flux est marquée depuis son
+entrée déjà slippée, mais la marque ne crée aucun nouveau coût. Prix hors grille, coût négatif,
+slippage favorable, spread caché et second débit de slippage sont refusés fail-closed. Tous les
+prix utilisent `Decimal` sur la grille de `0.25` ; les USD utilisent deux décimales `ROUND_HALF_UP`.
+
+Preuves locales : 28 nouveaux cas portent le fichier synthétique à 285 tests PASS ; 292 régressions
+stratégie/replay ciblées et 307 tests contrat/filiation/OOS passent. La suite complète passe avec
+6 197 tests et 6 warnings historiques en 74,95 s. Ruff ciblé, format Ruff, `py_compile` et
+`git diff --check` passent.
+
+`EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = PASS`.
+
+`BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED`.
+Action humaine unique : figer avant tout replay les métriques et seuils du protocole exploratoire
+sur `EXPOSED_DEVELOPMENT`, sans accès OOS, sans sélection rétroactive et sans revendication de
+performance indépendante.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -686,5 +727,6 @@ Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le 
 initial, l'absence explicite de take-profit, breakeven et trailing stop ainsi que la priorité entre
 les deux sorties existantes, l'absence de filtre stratégique de session et le refus des nouveaux
 signaux pendant une position ouverte ainsi que la taille fixe d'un MNQ sont désormais formalisés.
-La comptabilité non réalisée de fin de flux est également figée. Les frais et le slippage restent
-à définir avant toute mesure de performance ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.
+La comptabilité non réalisée et le modèle versionné de coûts sont désormais figés. Aucun replay
+historique de cette stratégie ni seuil de performance n'est encore approuvé ; cette stratégie
+demeure distincte de EMA19/50 V3 rejetée.

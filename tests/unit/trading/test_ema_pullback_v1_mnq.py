@@ -22,10 +22,17 @@ from agicore.trading.ema_pullback_v1_mnq import (
     BREAKEVEN_R_MULTIPLE_TRIGGER,
     BREAKEVEN_TRIGGER,
     CLOSE_AND_REVERSE,
+    COMMISSION_PER_SIDE_USD,
+    COMMISSION_SOURCE_URL,
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
+    COST_MODEL_CLASSIFICATION,
+    COST_MODEL_ID,
+    COST_MODEL_REFERENCE_DATE,
+    COST_MODEL_VERSION,
     DEFERRED_ENTRY,
     DST_RULE,
     EARLIEST_EXECUTION_BAR_OFFSET,
+    EMA20_EXIT_SLIPPAGE_TICKS,
     EMA_SEED_CONVENTION,
     EMA_SLOPE_LOOKBACK_BARS,
     EMA_SLOPE_REQUIRED,
@@ -33,9 +40,12 @@ from agicore.trading.ema_pullback_v1_mnq import (
     END_OF_DATA_FORCED_EXIT,
     END_OF_DATA_POSITION_POLICY,
     END_OF_DATA_SYNTHETIC_FILL,
+    ENTRY_SLIPPAGE_TICKS,
     EXECUTION_PRICE_SOURCE,
     EXECUTION_SIGNAL_TIME,
     EXIT_PRIORITY,
+    EXPLICIT_BID_ASK_SPREAD_CHARGE,
+    FEE_APPLICATION,
     GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN,
     INITIAL_POSITION_SIZE,
     INITIAL_STOP_BUFFER_POINTS,
@@ -57,6 +67,10 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MAX_PULLBACK_DISTANCE_POINTS,
     MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
+    MNQ_CONTRACT_SPEC_SOURCE_URL,
+    MNQ_POINT_VALUE_USD,
+    MNQ_TICK_SIZE_POINTS,
+    MNQ_TICK_VALUE_USD,
     MOVE_STOP_TO_ENTRY,
     OPEN_POSITION_SIGNAL_POLICY,
     PNL_BASED_SIZING,
@@ -69,7 +83,10 @@ from agicore.trading.ema_pullback_v1_mnq import (
     QUEUE_SIGNAL_UNTIL_FLAT,
     REVERSE_POSITION,
     RISK_PERCENT_SIZING,
+    ROUNDING_POLICY,
     SCALE_IN,
+    SEPARATE_SLIPPAGE_CHARGE_USD,
+    SEPARATE_SPREAD_CHARGE_USD,
     SESSION_END,
     SESSION_FILTER,
     SESSION_START,
@@ -77,11 +94,13 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SLIPPAGE_MODELED,
     SOURCE_CALENDAR_REQUIRED,
     SOURCE_TRADING_HOURS_TEMPLATE,
+    SPREAD_MODEL,
     STOP_DISTANCE_SIZING,
     STOP_INTRABAR_SLIPPAGE_MODELED,
     STRATEGY_ENTRY_SESSION_FILTER_ENABLED,
     STRATEGY_TIMEZONE,
     STRUCTURAL_STOP_FIRST,
+    STRUCTURAL_STOP_SLIPPAGE_TICKS,
     TAKE_PROFIT,
     TAKE_PROFIT_ENABLED,
     TAKE_PROFIT_MONETARY_AMOUNT,
@@ -104,6 +123,8 @@ from agicore.trading.ema_pullback_v1_mnq import (
     WICK_CROSS_EMA20_ALLOWED,
     BreakevenEvaluationResult,
     ClosedBarEMA20,
+    CostApplicationStatus,
+    CostEventKind,
     EMA20PositionExitResult,
     EMAPullbackEntrySignalResult,
     EndOfDataPositionResult,
@@ -131,7 +152,11 @@ from agicore.trading.ema_pullback_v1_mnq import (
     StopEvaluationBar,
     TakeProfitEvaluationResult,
     TrailingStopEvaluationResult,
+    V1CostedFillResult,
+    V1RealizedTradePnL,
+    apply_v1_execution_costs,
     arbitrate_exit_at_open,
+    calculate_v1_realized_trade_pnl,
     construct_initial_structural_stop,
     evaluate_disabled_breakeven,
     evaluate_disabled_session_filter,
@@ -319,7 +344,7 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert EXECUTION_SIGNAL_TIME == "CLOSE_T"
     assert EXECUTION_PRICE_SOURCE == "OPEN_T_PLUS_1"
     assert BAR_BASED_EXECUTION_MODEL is True
-    assert SLIPPAGE_MODELED is False
+    assert SLIPPAGE_MODELED is True
     assert BID_ASK_SPREAD_MODELED is False
     assert LATENCY_MODELED is False
     assert TICK_REALISTIC_FILL_MODELED is False
@@ -328,7 +353,7 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert INITIAL_STOP_BUFFER_POINTS == Decimal("0.25")
     assert INITIAL_STOP_IS_IMMUTABLE is True
     assert GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN is True
-    assert STOP_INTRABAR_SLIPPAGE_MODELED is False
+    assert STOP_INTRABAR_SLIPPAGE_MODELED is True
     assert TAKE_PROFIT == "NONE"
     assert TAKE_PROFIT_ENABLED is False
     assert TAKE_PROFIT_PRICE is None
@@ -2785,6 +2810,7 @@ def _end_of_data_result(
     final_close: str,
     sequence: int = 50,
 ) -> EndOfDataPositionResult:
+    entry_execution = _protected_position(side)
     return evaluate_end_of_data_position(
         final_valid_bar=_bar(
             sequence,
@@ -2794,7 +2820,8 @@ def _end_of_data_result(
             ema20="100",
         ),
         position=_fixed_size_open(side),
-        entry_execution=_protected_position(side),
+        entry_execution=entry_execution,
+        costed_entry_fill=apply_v1_execution_costs(entry_execution),
         realized_pnl=Decimal(12),
         realized_equity=Decimal(100),
         closed_trade_count=3,
@@ -2804,10 +2831,10 @@ def _end_of_data_result(
 @pytest.mark.parametrize(
     ("side", "final_close", "expected_unrealized"),
     [
-        (PullbackSide.LONG, "105", Decimal("3.75")),
-        (PullbackSide.LONG, "100", Decimal("-1.25")),
-        (PullbackSide.SHORT, "95", Decimal("3.75")),
-        (PullbackSide.SHORT, "100", Decimal("-1.25")),
+        (PullbackSide.LONG, "105", Decimal("3.50")),
+        (PullbackSide.LONG, "100", Decimal("-1.50")),
+        (PullbackSide.SHORT, "95", Decimal("3.50")),
+        (PullbackSide.SHORT, "100", Decimal("-1.50")),
     ],
 )
 def test_open_position_is_marked_at_final_close_without_realizing_gain_or_loss(
@@ -2854,9 +2881,11 @@ def test_end_of_data_constants_forbid_forced_or_synthetic_exit() -> None:
 
 @pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
 def test_end_of_data_mark_uses_close_not_high_low_or_ema20(side: PullbackSide) -> None:
+    entry_execution = _protected_position(side)
     arguments = {
         "position": _fixed_size_open(side),
-        "entry_execution": _protected_position(side),
+        "entry_execution": entry_execution,
+        "costed_entry_fill": apply_v1_execution_costs(entry_execution),
         "realized_pnl": Decimal(12),
         "realized_equity": Decimal(100),
         "closed_trade_count": 3,
@@ -2879,6 +2908,7 @@ def test_flat_end_of_data_reports_zero_unrealized_and_no_open_position() -> None
         final_valid_bar=_bar(50, low="99", high="101", close="100"),
         position=None,
         entry_execution=None,
+        costed_entry_fill=None,
         realized_pnl=Decimal(12),
         realized_equity=Decimal(100),
         closed_trade_count=3,
@@ -2912,28 +2942,34 @@ def test_end_of_data_result_rejects_hidden_realization_or_fill(
         replace(_end_of_data_result(PullbackSide.LONG, final_close="105"), **override)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("missing", ["position", "entry_execution"])
+@pytest.mark.parametrize("missing", ["position", "entry_execution", "costed_entry_fill"])
 def test_end_of_data_rejects_partial_open_position_state(missing: str) -> None:
+    entry_execution = _protected_position(PullbackSide.LONG)
     arguments = {
         "final_valid_bar": _bar(50, low="99", high="101", close="100"),
         "position": _fixed_size_open(PullbackSide.LONG),
-        "entry_execution": _protected_position(PullbackSide.LONG),
+        "entry_execution": entry_execution,
+        "costed_entry_fill": apply_v1_execution_costs(entry_execution),
         "realized_pnl": Decimal(12),
         "realized_equity": Decimal(100),
         "closed_trade_count": 3,
     }
     arguments[missing] = None
 
-    with pytest.raises(PullbackContractError, match="requires position and entry fill"):
+    with pytest.raises(
+        PullbackContractError, match="requires position, entry fill, and costed entry"
+    ):
         evaluate_end_of_data_position(**arguments)  # type: ignore[arg-type]
 
 
 def test_end_of_data_rejects_mark_before_entry_fill() -> None:
+    entry_execution = _protected_position(PullbackSide.LONG)
     with pytest.raises(PullbackContractError, match="causal filled entry"):
         evaluate_end_of_data_position(
             final_valid_bar=_bar(20, low="99", high="101", close="100"),
             position=_fixed_size_open(PullbackSide.LONG),
-            entry_execution=_protected_position(PullbackSide.LONG),
+            entry_execution=entry_execution,
+            costed_entry_fill=apply_v1_execution_costs(entry_execution),
             realized_pnl=Decimal(12),
             realized_equity=Decimal(100),
             closed_trade_count=3,
@@ -2951,6 +2987,7 @@ def test_end_of_data_reporting_is_deterministic_and_has_no_lookahead(side: Pullb
         "final_valid_bar",
         "position",
         "entry_execution",
+        "costed_entry_fill",
         "realized_pnl",
         "realized_equity",
         "closed_trade_count",
@@ -2961,3 +2998,368 @@ def test_end_of_data_result_is_frozen() -> None:
     result = _end_of_data_result(PullbackSide.LONG, final_close="105")
     with pytest.raises(FrozenInstanceError):
         result.synthetic_fill = True  # type: ignore[misc]
+
+
+def test_v1_cost_contract_is_versioned_and_exact() -> None:
+    assert COST_MODEL_ID == "EMA_PULLBACK_V1_MNQ_COSTS_2026_09_27"
+    assert COST_MODEL_VERSION == "1.0"
+    assert COST_MODEL_REFERENCE_DATE == "2026-09-27"
+    assert COST_MODEL_CLASSIFICATION == "VERSIONED_V1_COST_ASSUMPTION"
+    assert COMMISSION_PER_SIDE_USD == Decimal("0.51")
+    assert ENTRY_SLIPPAGE_TICKS == 1
+    assert EMA20_EXIT_SLIPPAGE_TICKS == 1
+    assert STRUCTURAL_STOP_SLIPPAGE_TICKS == 1
+    assert MNQ_TICK_SIZE_POINTS == Decimal("0.25")
+    assert MNQ_POINT_VALUE_USD == Decimal("2.00")
+    assert MNQ_TICK_VALUE_USD == Decimal("0.5000")
+    assert SPREAD_MODEL == "ABSORBED_IN_FIXED_SLIPPAGE"
+    assert EXPLICIT_BID_ASK_SPREAD_CHARGE is False
+    assert FEE_APPLICATION == "EACH_FILL"
+    assert ROUNDING_POLICY == "DECIMAL_EXACT_TICK_GRID_AND_USD_CENTS_HALF_UP"
+    assert SEPARATE_SLIPPAGE_CHARGE_USD == Decimal("0.00")
+    assert SEPARATE_SPREAD_CHARGE_USD == Decimal("0.00")
+    assert COMMISSION_SOURCE_URL.startswith("https://apextraderfunding.com/")
+    assert MNQ_CONTRACT_SPEC_SOURCE_URL.startswith("https://www.cmegroup.com/")
+
+
+@pytest.mark.parametrize(
+    ("side", "expected_price"),
+    [
+        (PullbackSide.LONG, Decimal("100.25")),
+        (PullbackSide.SHORT, Decimal("99.75")),
+    ],
+)
+def test_entry_fill_embeds_one_adverse_tick_and_one_commission(
+    side: PullbackSide,
+    expected_price: Decimal,
+) -> None:
+    raw = simulate_next_bar_market_execution(
+        decision=_qualified_entry(side),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("100.00"))],
+    )
+
+    result = apply_v1_execution_costs(raw)
+
+    assert result.status is CostApplicationStatus.FILLED
+    assert result.event_kind is CostEventKind.ENTRY
+    assert result.base_fill_price == Decimal("100.00")
+    assert result.execution_price == expected_price
+    assert result.slippage_ticks == 1
+    assert result.slippage_points == Decimal("0.25")
+    assert result.commission_usd == Decimal("0.51")
+
+
+@pytest.mark.parametrize(
+    ("side", "expected_price"),
+    [
+        (PullbackSide.LONG, Decimal("99.75")),
+        (PullbackSide.SHORT, Decimal("100.25")),
+    ],
+)
+def test_ema20_exit_fill_embeds_one_adverse_tick_and_one_commission(
+    side: PullbackSide,
+    expected_price: Decimal,
+) -> None:
+    raw = simulate_next_bar_market_execution(
+        decision=_qualified_exit(side),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("100.00"))],
+    )
+
+    result = apply_v1_execution_costs(raw)
+
+    assert result.event_kind is CostEventKind.EMA20_EXIT
+    assert result.base_fill_price == Decimal("100.00")
+    assert result.execution_price == expected_price
+    assert result.commission_usd == Decimal("0.51")
+
+
+@pytest.mark.parametrize(
+    ("side", "bar", "expected_base", "expected_execution"),
+    [
+        (
+            PullbackSide.LONG,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("99.50"),
+                low=Decimal("98.75"),
+                high=Decimal("100.00"),
+            ),
+            Decimal("98.75"),
+            Decimal("98.50"),
+        ),
+        (
+            PullbackSide.SHORT,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("100.50"),
+                low=Decimal("100.00"),
+                high=Decimal("101.25"),
+            ),
+            Decimal("101.25"),
+            Decimal("101.50"),
+        ),
+    ],
+)
+def test_normal_structural_stop_uses_stop_base_then_adverse_slippage(
+    side: PullbackSide,
+    bar: StopEvaluationBar,
+    expected_base: Decimal,
+    expected_execution: Decimal,
+) -> None:
+    raw = evaluate_initial_stop_on_bar(position=_protected_position(side), bar=bar)
+
+    result = apply_v1_execution_costs(raw)
+
+    assert raw.fill_source is InitialStopFillSource.STOP_PRICE
+    assert result.event_kind is CostEventKind.STRUCTURAL_STOP
+    assert result.base_fill_price == expected_base
+    assert result.execution_price == expected_execution
+    assert result.commission_usd == Decimal("0.51")
+
+
+@pytest.mark.parametrize(
+    ("side", "bar", "expected_base", "expected_execution"),
+    [
+        (
+            PullbackSide.LONG,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("98.50"),
+                low=Decimal("98.00"),
+                high=Decimal("99.00"),
+            ),
+            Decimal("98.50"),
+            Decimal("98.25"),
+        ),
+        (
+            PullbackSide.SHORT,
+            StopEvaluationBar(
+                sequence=22,
+                open=Decimal("101.50"),
+                low=Decimal("101.00"),
+                high=Decimal("102.00"),
+            ),
+            Decimal("101.50"),
+            Decimal("101.75"),
+        ),
+    ],
+)
+def test_gap_through_stop_uses_open_base_then_adverse_slippage(
+    side: PullbackSide,
+    bar: StopEvaluationBar,
+    expected_base: Decimal,
+    expected_execution: Decimal,
+) -> None:
+    raw = evaluate_initial_stop_on_bar(position=_protected_position(side), bar=bar)
+
+    result = apply_v1_execution_costs(raw)
+
+    assert raw.fill_source is InitialStopFillSource.BAR_OPEN_GAP
+    assert result.base_fill_price == expected_base
+    assert result.execution_price == expected_execution
+
+
+def _costed_next_bar_fill(
+    *,
+    side: PullbackSide,
+    entry: bool,
+    base_fill_price: str,
+) -> V1CostedFillResult:
+    decision = _qualified_entry(side) if entry else _qualified_exit(side)
+    raw = simulate_next_bar_market_execution(
+        decision=decision,
+        decision_bar=_bar(20, low="90", high="110", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal(base_fill_price))],
+    )
+    return apply_v1_execution_costs(raw)
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_each_fill_commission_and_net_pnl_do_not_double_count_slippage_or_spread(
+    side: PullbackSide,
+) -> None:
+    entry = _costed_next_bar_fill(side=side, entry=True, base_fill_price="100.00")
+    exit_fill = _costed_next_bar_fill(
+        side=side,
+        entry=False,
+        base_fill_price="102.00" if side is PullbackSide.LONG else "98.00",
+    )
+
+    result = calculate_v1_realized_trade_pnl(entry_fill=entry, exit_fill=exit_fill)
+
+    assert entry.commission_usd == exit_fill.commission_usd == Decimal("0.51")
+    assert result.gross_price_pnl_points == Decimal("1.50")
+    assert result.gross_price_pnl_usd == Decimal("3.00")
+    assert result.total_commission_usd == Decimal("1.02")
+    assert result.net_realized_pnl_usd == Decimal("1.98")
+    assert result.slippage_already_embedded is True
+    assert result.separate_slippage_charge_usd == Decimal("0.00")
+    assert result.separate_spread_charge_usd == Decimal("0.00")
+
+
+def test_rejected_entry_has_no_commission_or_slippage() -> None:
+    rejected = simulate_entry_with_initial_structural_stop(
+        decision=_qualified_entry(PullbackSide.LONG),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        required_touch_bar=_bar(18, low="100", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("99.50"))],
+    )
+
+    result = apply_v1_execution_costs(rejected)
+
+    assert rejected.status is SimulatedExecutionStatus.REJECT_ENTRY
+    assert result.status is CostApplicationStatus.NO_FILL
+    assert result.execution_price is None
+    assert result.commission_usd == Decimal("0.00")
+    assert result.slippage_ticks == 0
+
+
+def test_expired_order_without_fill_has_no_commission_or_slippage() -> None:
+    expired = simulate_next_bar_market_execution(
+        decision=_qualified_entry(PullbackSide.SHORT),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=22, open=Decimal("100.00"))],
+    )
+
+    result = apply_v1_execution_costs(expired)
+
+    assert result.status is CostApplicationStatus.NO_FILL
+    assert result.fill_quantity == 0
+    assert result.commission_usd == Decimal("0.00")
+    assert result.separate_slippage_charge_usd == Decimal("0.00")
+
+
+def test_ignored_signal_has_no_commission_or_slippage() -> None:
+    policy = evaluate_open_position_signal_policy(
+        candidate_signal=_qualified_entry(PullbackSide.SHORT, sequence=22),
+        decision_bar=_bar(22, low="99", high="101", close="100"),
+        position_at_close=_protected_position(PullbackSide.LONG),
+    )
+
+    result = apply_v1_execution_costs(policy)
+
+    assert policy.action is OpenPositionSignalAction.IGNORE
+    assert result.event_kind is CostEventKind.IGNORED_SIGNAL
+    assert result.status is CostApplicationStatus.NO_FILL
+    assert result.commission_usd == Decimal("0.00")
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_end_of_data_unrealized_mark_has_no_new_cost(side: PullbackSide) -> None:
+    mark = _end_of_data_result(side, final_close="100")
+
+    result = apply_v1_execution_costs(mark)
+
+    assert result.event_kind is CostEventKind.END_OF_DATA_MARK
+    assert result.status is CostApplicationStatus.NO_FILL
+    assert result.base_fill_price is None
+    assert result.execution_price is None
+    assert result.commission_usd == Decimal("0.00")
+    assert result.slippage_ticks == 0
+
+
+def test_off_tick_grid_base_fill_is_rejected_fail_closed() -> None:
+    raw = simulate_next_bar_market_execution(
+        decision=_qualified_entry(PullbackSide.LONG),
+        decision_bar=_bar(20, low="99", high="101", close="100"),
+        available_bar_opens=[NextBarOpen(sequence=21, open=Decimal("100.10"))],
+    )
+
+    with pytest.raises(PullbackContractError, match="exact MNQ tick grid"):
+        apply_v1_execution_costs(raw)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"commission_per_side_usd": Decimal("-0.01")},
+        {"commission_usd": Decimal("-0.01")},
+        {"slippage_ticks": -1},
+        {"spread_model": "EXPLICIT_BID_ASK"},
+        {"explicit_bid_ask_spread_charge": True},
+        {"separate_spread_charge_usd": Decimal("0.25")},
+        {"separate_slippage_charge_usd": Decimal("0.50")},
+    ],
+)
+def test_cost_result_rejects_incompatible_or_hidden_cost_configuration(
+    override: dict[str, object],
+) -> None:
+    result = _costed_next_bar_fill(
+        side=PullbackSide.LONG,
+        entry=True,
+        base_fill_price="100.00",
+    )
+
+    with pytest.raises(PullbackContractError):
+        replace(result, **override)  # type: ignore[arg-type]
+
+
+def test_favorable_slippage_is_rejected_fail_closed() -> None:
+    result = _costed_next_bar_fill(
+        side=PullbackSide.LONG,
+        entry=True,
+        base_fill_price="100.00",
+    )
+
+    with pytest.raises(PullbackContractError, match="strictly adverse"):
+        replace(result, execution_price=Decimal("99.75"))
+
+
+def test_cost_application_is_deterministic_and_has_no_lookahead() -> None:
+    decision = _qualified_exit(PullbackSide.LONG)
+    decision_bar = _bar(20, low="99", high="101", close="100")
+    low_future = (
+        NextBarOpen(sequence=21, open=Decimal("100.00")),
+        NextBarOpen(sequence=22, open=Decimal("1.00")),
+    )
+    high_future = (
+        NextBarOpen(sequence=21, open=Decimal("100.00")),
+        NextBarOpen(sequence=22, open=Decimal("1000.00")),
+    )
+
+    low = apply_v1_execution_costs(
+        simulate_next_bar_market_execution(
+            decision=decision,
+            decision_bar=decision_bar,
+            available_bar_opens=low_future,
+        )
+    )
+    high = apply_v1_execution_costs(
+        simulate_next_bar_market_execution(
+            decision=decision,
+            decision_bar=decision_bar,
+            available_bar_opens=high_future,
+        )
+    )
+
+    assert low == high
+    assert set(signature(apply_v1_execution_costs).parameters) == {"event"}
+
+
+def test_realized_trade_result_is_immutable_and_deterministic() -> None:
+    entry = _costed_next_bar_fill(
+        side=PullbackSide.LONG,
+        entry=True,
+        base_fill_price="100.00",
+    )
+    exit_fill = _costed_next_bar_fill(
+        side=PullbackSide.LONG,
+        entry=False,
+        base_fill_price="102.00",
+    )
+
+    first = calculate_v1_realized_trade_pnl(entry_fill=entry, exit_fill=exit_fill)
+    second = calculate_v1_realized_trade_pnl(entry_fill=entry, exit_fill=exit_fill)
+
+    assert first == second
+    assert isinstance(first, V1RealizedTradePnL)
+    with pytest.raises(PullbackContractError, match="slipped prices minus commissions only"):
+        replace(
+            first,
+            total_commission_usd=Decimal("0.00"),
+            net_realized_pnl_usd=Decimal("3.00"),
+        )
+    with pytest.raises(FrozenInstanceError):
+        first.net_realized_pnl_usd = Decimal(0)  # type: ignore[misc]
