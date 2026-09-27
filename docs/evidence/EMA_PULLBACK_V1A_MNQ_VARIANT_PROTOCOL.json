@@ -1,0 +1,61 @@
+{
+  "schema_version": "agicore.ema-pullback-development-variant.v1",
+  "variant_id": "EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK",
+  "frozen_at_utc": "2026-09-27T18:54:12Z",
+  "classification": "PRECOMMITTED_SINGLE_HYPOTHESIS_EXPOSED_DEVELOPMENT_VARIANT",
+  "hypothesis": "Reject near-flat EMA20 conditions to reduce whipsaw trades, clustered losses and drawdown.",
+  "parent_strategy_id": "EMA_PULLBACK_V1_MNQ",
+  "parent_result": {
+    "verdict": "NO_GO_BASELINE",
+    "result_sha256": "4351d82e2b965b75843b0e24545358c80e2dc544a0549d085ceb8e93f4ceb3f6",
+    "retention": "IMMUTABLE"
+  },
+  "single_strategy_delta": {
+    "field": "minimum_absolute_ema20_slope_points_per_bar",
+    "lookback_bars": 3,
+    "formula": "(EMA20[t] - EMA20[t-3]) / 3",
+    "baseline_value": "0.0",
+    "variant_value": "0.25",
+    "long_comparison": "slope >= +0.25",
+    "short_comparison": "slope <= -0.25",
+    "comparators_at_boundary": "INCLUSIVE",
+    "rounding_before_comparison": "FORBIDDEN"
+  },
+  "unchanged_contract": {
+    "t_minus_2_pullback_rule": "UNCHANGED",
+    "macd": "UNCHANGED",
+    "ema20_exit": "UNCHANGED",
+    "initial_structural_stop": "UNCHANGED",
+    "take_profit": "NONE",
+    "breakeven": "NONE",
+    "trailing_stop": "NONE",
+    "session_filter": "NONE",
+    "position_size_mnq": 1,
+    "cost_model": "UNCHANGED",
+    "execution_model": "UNCHANGED",
+    "end_of_data_policy": "UNCHANGED"
+  },
+  "screening": {
+    "protocol_id": "EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_2026_09_27",
+    "protocol_sha256": "13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f",
+    "thresholds": "REUSED_EXACTLY_WITHOUT_RELAXATION",
+    "maximum_replay_count": 1,
+    "allowed_verdicts": [
+      "GO_TO_INDEPENDENT_VALIDATION",
+      "NO_GO_VARIANT",
+      "INSUFFICIENT_SAMPLE"
+    ]
+  },
+  "source_dataset": {
+    "dataset_id": "mnq-06-26-minute-last-development-3bd8c078-v1",
+    "source_raw_sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+    "exposure_state": "EXPOSED_DEVELOPMENT",
+    "oos_access_permitted": false
+  },
+  "experiment_guardrails": {
+    "second_slope_value_after_result": "FORBIDDEN_WITHOUT_NEW_HUMAN_DECISION",
+    "optimization": "FORBIDDEN",
+    "oos_access": "FORBIDDEN",
+    "performance_independence_claim": false
+  }
+}

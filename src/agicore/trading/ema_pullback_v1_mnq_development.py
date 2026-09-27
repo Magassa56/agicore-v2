@@ -52,6 +52,7 @@ class DevelopmentVerdict(StrEnum):
     INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"
     GO_TO_INDEPENDENT_VALIDATION = "GO_TO_INDEPENDENT_VALIDATION"
     NO_GO_BASELINE = "NO_GO_BASELINE"
+    NO_GO_VARIANT = "NO_GO_VARIANT"
 
 
 def _require_utc(value: datetime, field_name: str) -> None:
@@ -288,8 +289,16 @@ def evaluate_development_screening(
     dataset_role: str,
     protocol_sha256: str,
     oos_accessed: bool,
+    no_go_verdict: DevelopmentVerdict = DevelopmentVerdict.NO_GO_BASELINE,
 ) -> DevelopmentScreeningResult:
     """Apply the frozen thresholds mechanically to one DEVELOPMENT replay."""
+    if no_go_verdict not in (
+        DevelopmentVerdict.NO_GO_BASELINE,
+        DevelopmentVerdict.NO_GO_VARIANT,
+    ):
+        raise DevelopmentProtocolError(
+            "no_go_verdict must explicitly distinguish baseline from variant"
+        )
     trades = tuple(closed_trades)
     marked_equity = tuple(marked_equity_samples)
     _validate_replay_evidence(
@@ -349,7 +358,7 @@ def evaluate_development_screening(
     elif not failed:
         verdict = DevelopmentVerdict.GO_TO_INDEPENDENT_VALIDATION
     else:
-        verdict = DevelopmentVerdict.NO_GO_BASELINE
+        verdict = no_go_verdict
 
     return DevelopmentScreeningResult(
         protocol_id=PROTOCOL_ID,

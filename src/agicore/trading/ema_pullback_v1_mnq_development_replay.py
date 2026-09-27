@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -28,6 +29,7 @@ from .ema_pullback_v1_mnq import (
     USD_CENT,
     ClosedBarEMA20,
     CostApplicationStatus,
+    EMA20SlopeResult,
     EMAPullbackEntrySignalResult,
     EntrySignal,
     InitialStopFillSource,
@@ -59,6 +61,7 @@ from .ema_pullback_v1_mnq_development import (
     SOURCE_RAW_SHA256,
     DevelopmentClosedTrade,
     DevelopmentScreeningResult,
+    DevelopmentVerdict,
     MarkedEquitySample,
     evaluate_development_screening,
 )
@@ -183,6 +186,8 @@ class DevelopmentReplayResult:
     screening: DevelopmentScreeningResult
     open_position_at_end: bool
     unrealized_pnl_at_end_usd: Decimal
+    variant_id: str | None = None
+    variant_protocol_sha256: str | None = None
     replay_count: int = 1
     deterministic: bool = True
     oos_accessed: bool = False
@@ -368,6 +373,7 @@ def _candidate_entry_signal(
     closed_bars: tuple[ClosedBarEMA20, ...],
     macd: tuple[Decimal | None, ...],
     signal: tuple[Decimal | None, ...],
+    slope_evaluator: Callable[..., EMA20SlopeResult] = evaluate_ema20_slope,
 ) -> EMAPullbackEntrySignalResult | None:
     if sequence + 1 < MACD_REQUIRED_CLOSED_BARS:
         return None
@@ -403,7 +409,7 @@ def _candidate_entry_signal(
         preceding_bars=preceding,
         confirmation_bar=confirmation,
     )
-    slope = evaluate_ema20_slope(
+    slope = slope_evaluator(
         side=side,
         lookback_bar=preceding[0],
         confirmation_bar=confirmation,
@@ -436,8 +442,16 @@ def _run_bars(
     *,
     source_raw_sha256: str,
     source_size_bytes: int,
+    slope_evaluator: Callable[..., EMA20SlopeResult] = evaluate_ema20_slope,
+    runner_id: str = RUNNER_ID,
+    runner_version: str = RUNNER_VERSION,
+    variant_id: str | None = None,
+    variant_protocol_sha256: str | None = None,
+    no_go_verdict: DevelopmentVerdict = DevelopmentVerdict.NO_GO_BASELINE,
 ) -> DevelopmentReplayResult:
     """Run already-verified bars; public callers must use the hash-verifying wrapper."""
+    if (variant_id is None) is not (variant_protocol_sha256 is None):
+        raise DevelopmentReplayError("variant id and protocol hash must be supplied together")
     closed_bars = _prepare_closed_bars(bars)
     macd, signal = _prepare_macd(bars)
     evaluate_disabled_session_filter(
@@ -552,6 +566,7 @@ def _run_bars(
             closed_bars=closed_bars,
             macd=macd,
             signal=signal,
+            slope_evaluator=slope_evaluator,
         )
         if candidate is not None:
             qualified_signals += 1
@@ -595,15 +610,19 @@ def _run_bars(
         dataset_role=REQUIRED_DATASET_ROLE,
         protocol_sha256=PROTOCOL_SHA256,
         oos_accessed=False,
+        no_go_verdict=no_go_verdict,
     )
     run_payload = {
         "cost_model_id": COST_MODEL_ID,
         "dataset_id": DATASET_ID,
         "protocol_sha256": PROTOCOL_SHA256,
-        "runner_id": RUNNER_ID,
-        "runner_version": RUNNER_VERSION,
+        "runner_id": runner_id,
+        "runner_version": runner_version,
         "source_raw_sha256": source_raw_sha256,
     }
+    if variant_id is not None and variant_protocol_sha256 is not None:
+        run_payload["variant_id"] = variant_id
+        run_payload["variant_protocol_sha256"] = variant_protocol_sha256
     run_hash = hashlib.sha256(
         json.dumps(run_payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -620,8 +639,8 @@ def _run_bars(
     )
     return DevelopmentReplayResult(
         run_id=f"ema-pullback-development-{run_hash[:16]}",
-        runner_id=RUNNER_ID,
-        runner_version=RUNNER_VERSION,
+        runner_id=runner_id,
+        runner_version=runner_version,
         protocol_id=PROTOCOL_ID,
         protocol_sha256=PROTOCOL_SHA256,
         dataset_id=DATASET_ID,
@@ -639,6 +658,8 @@ def _run_bars(
         unrealized_pnl_at_end_usd=(
             marked_equity[-1].unrealized_pnl_usd if position is not None else Decimal("0.00")
         ),
+        variant_id=variant_id,
+        variant_protocol_sha256=variant_protocol_sha256,
     )
 
 
