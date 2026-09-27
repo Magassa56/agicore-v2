@@ -484,3 +484,20 @@
 - Aucun accès dataset/OOS, PnL, optimisation, Risk Engine, broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS` ; prochaine gate métier
   unique : `BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED
+
+- Reprise depuis `origin/main` au merge 0ca23d0a534640cb3ce78a0a9ffabbbd4a764655 de la
+  PR #264 ; branche dédiée `feature/ema-pullback-v1-mnq-end-of-data`, base propre.
+- Convention comptable sans optimisation : une position restante conserve
+  `OPEN_AT_END_OF_DATA`; aucun forced exit, synthetic fill, prix de sortie ou trade fermé.
+- Le PnL réalisé, l'equity réalisée et le nombre de trades fermés restent inchangés. Seul le
+  dernier Close source valide produit une marque informative et un PnL latent séparé en points MNQ.
+- L'état à plat rapporte zéro latent. Le contrat refuse état partiel, marque antérieure au fill,
+  réalisation/fill caché, cotation reconstruite et toute entrée de barre future.
+- Vingt-trois nouveaux cas portent le fichier synthétique à 257 tests PASS ; 264 régressions
+  stratégie/replay ciblées et 279 tests contrat/filiation/OOS passent. Suite complète :
+  6 169 passed, 6 warnings in 77.56s. Ruff ciblé, format Ruff, `py_compile` et diff-check PASS.
+- Aucun accès dataset/OOS, optimisation, Risk Engine, broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS` ; prochaine gate
+  unique : `BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED`.

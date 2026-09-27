@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -18,9 +18,10 @@ EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS ;
+EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-fixed-position-size.
-Base GitHub vérifiée et récupérée : bda3a848af32f7909540ecafa3eb35c05c799b12.
+Branche de vérification : feature/ema-pullback-v1-mnq-end-of-data.
+Base GitHub vérifiée et récupérée : 0ca23d0a534640cb3ce78a0a9ffabbbd4a764655.
 
 ## Acquis vérifiés
 
@@ -642,6 +643,36 @@ Action humaine unique : décider le statut exact d'une position encore ouverte l
 développement se termine — la conserver ouverte/non réalisée sans fill inventé, l'exclure des
 métriques fermées, ou définir une liquidation causale explicite compatible avec le modèle t+1.
 
+## EMA_PULLBACK_V1_MNQ — position ouverte non réalisée en fin de flux
+
+La décision métier du 2026-09-27 fixe sans optimisation
+`END_OF_DATA_POSITION_POLICY = KEEP_OPEN_UNREALIZED`. Une position LONG ou SHORT encore ouverte
+après la dernière barre valide reste `OPEN_AT_END_OF_DATA`. Aucun ordre, fill, prix de sortie ou
+trade fermé n'est créé au dernier Close, au dernier Open, à une cotation connue ou reconstruite.
+
+Pour le reporting uniquement, le dernier `Close` valide devient `mark_price`. Le PnL latent est
+calculé en points MNQ normalisés depuis le prix d'entrée rempli et reste séparé du PnL et de
+l'equity réalisés. `realized_pnl_change = 0`, `closed_trade_count_change = 0`,
+`unrealized_pnl_is_realized = false` et le latent n'affecte aucune métrique de trades fermés.
+`marked_equity_at_end` additionne le latent uniquement dans le rapport informatif distinct.
+
+Si la stratégie est déjà à plat, `unrealized_pnl_at_end = 0` et
+`open_position_at_end = false`. L'évaluateur ne reçoit aucune barre future et refuse une marque
+antérieure au fill d'entrée, un état partiel ou toute réalisation/fill caché.
+
+Preuves locales : 23 nouveaux cas portent le fichier synthétique à 257 tests PASS. Ils couvrent
+LONG/SHORT, gains/pertes latents, absence de fill et de trade fermé, invariance du réalisé, marque
+au seul dernier Close, état à plat, causalité, immutabilité et déterminisme. Les 264 régressions
+stratégie/replay ciblées et les 279 tests contrat/filiation/OOS passent. La suite complète passe
+avec 6 169 tests et 6 warnings historiques en 77,56 s. Ruff ciblé, format Ruff, `py_compile` et
+`git diff --check` passent.
+
+`EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED`.
+Action humaine unique : définir le modèle initial exact de commission, spread et slippage pour un
+aller-retour d'un MNQ, ainsi que l'unité et l'application à chaque fill, sans calibrage sur le PnL.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -655,5 +686,5 @@ Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le 
 initial, l'absence explicite de take-profit, breakeven et trailing stop ainsi que la priorité entre
 les deux sorties existantes, l'absence de filtre stratégique de session et le refus des nouveaux
 signaux pendant une position ouverte ainsi que la taille fixe d'un MNQ sont désormais formalisés.
-Le traitement d'une position encore ouverte à la fin du flux reste à décider avant l'évaluation ;
-cette stratégie demeure distincte de EMA19/50 V3 rejetée.
+La comptabilité non réalisée de fin de flux est également figée. Les frais et le slippage restent
+à définir avant toute mesure de performance ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.

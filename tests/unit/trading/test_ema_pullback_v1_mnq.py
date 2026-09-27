@@ -29,6 +29,10 @@ from agicore.trading.ema_pullback_v1_mnq import (
     EMA_SEED_CONVENTION,
     EMA_SLOPE_LOOKBACK_BARS,
     EMA_SLOPE_REQUIRED,
+    END_OF_DATA_ACCOUNTING_UNIT,
+    END_OF_DATA_FORCED_EXIT,
+    END_OF_DATA_POSITION_POLICY,
+    END_OF_DATA_SYNTHETIC_FILL,
     EXECUTION_PRICE_SOURCE,
     EXECUTION_SIGNAL_TIME,
     EXIT_PRIORITY,
@@ -94,12 +98,16 @@ from agicore.trading.ema_pullback_v1_mnq import (
     TRAILING_STOP,
     TRAILING_STOP_ENABLED,
     TRAILING_UPDATE_FREQUENCY,
+    UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS,
+    UNREALIZED_PNL_IS_REALIZED,
     VOLATILITY_SIZING,
     WICK_CROSS_EMA20_ALLOWED,
     BreakevenEvaluationResult,
     ClosedBarEMA20,
     EMA20PositionExitResult,
     EMAPullbackEntrySignalResult,
+    EndOfDataPositionResult,
+    EndOfDataPositionState,
     EntrySignal,
     ExitPriorityExecutionResult,
     FixedPositionSizeResult,
@@ -132,6 +140,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
+    evaluate_end_of_data_position,
     evaluate_fixed_position_size,
     evaluate_initial_stop_on_bar,
     evaluate_macd_confirmation,
@@ -2768,3 +2777,187 @@ def test_fixed_position_size_is_immutable_and_deterministic(side: PullbackSide) 
 
     with pytest.raises(FrozenInstanceError):
         first.signed_contracts = 2  # type: ignore[misc]
+
+
+def _end_of_data_result(
+    side: PullbackSide,
+    *,
+    final_close: str,
+    sequence: int = 50,
+) -> EndOfDataPositionResult:
+    return evaluate_end_of_data_position(
+        final_valid_bar=_bar(
+            sequence,
+            low="50",
+            high="150",
+            close=final_close,
+            ema20="100",
+        ),
+        position=_fixed_size_open(side),
+        entry_execution=_protected_position(side),
+        realized_pnl=Decimal(12),
+        realized_equity=Decimal(100),
+        closed_trade_count=3,
+    )
+
+
+@pytest.mark.parametrize(
+    ("side", "final_close", "expected_unrealized"),
+    [
+        (PullbackSide.LONG, "105", Decimal("3.75")),
+        (PullbackSide.LONG, "100", Decimal("-1.25")),
+        (PullbackSide.SHORT, "95", Decimal("3.75")),
+        (PullbackSide.SHORT, "100", Decimal("-1.25")),
+    ],
+)
+def test_open_position_is_marked_at_final_close_without_realizing_gain_or_loss(
+    side: PullbackSide,
+    final_close: str,
+    expected_unrealized: Decimal,
+) -> None:
+    result = _end_of_data_result(side, final_close=final_close)
+
+    assert result.position_state is EndOfDataPositionState.OPEN_AT_END_OF_DATA
+    assert result.position_side is side
+    assert result.open_position_at_end is True
+    assert result.mark_price == Decimal(final_close)
+    assert result.mark_bar_sequence == 50
+    assert result.unrealized_pnl_at_end == expected_unrealized
+    assert result.marked_equity_at_end == Decimal(100) + expected_unrealized
+    assert result.realized_pnl == Decimal(12)
+    assert result.realized_pnl_change == 0
+    assert result.realized_equity == Decimal(100)
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_end_of_data_never_creates_a_fill_or_closed_trade(side: PullbackSide) -> None:
+    result = _end_of_data_result(side, final_close="100")
+
+    assert result.end_of_data_position_policy == "KEEP_OPEN_UNREALIZED"
+    assert result.forced_exit is False
+    assert result.synthetic_fill is False
+    assert result.fill_price is None
+    assert result.closed_trade_count == 3
+    assert result.closed_trade_count_change == 0
+    assert result.unrealized_pnl_is_realized is False
+    assert result.unrealized_pnl_affects_closed_trade_metrics is False
+
+
+def test_end_of_data_constants_forbid_forced_or_synthetic_exit() -> None:
+    assert END_OF_DATA_POSITION_POLICY == "KEEP_OPEN_UNREALIZED"
+    assert END_OF_DATA_ACCOUNTING_UNIT == "MNQ_POINTS"
+    assert END_OF_DATA_FORCED_EXIT is False
+    assert END_OF_DATA_SYNTHETIC_FILL is False
+    assert UNREALIZED_PNL_IS_REALIZED is False
+    assert UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS is False
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_end_of_data_mark_uses_close_not_high_low_or_ema20(side: PullbackSide) -> None:
+    arguments = {
+        "position": _fixed_size_open(side),
+        "entry_execution": _protected_position(side),
+        "realized_pnl": Decimal(12),
+        "realized_equity": Decimal(100),
+        "closed_trade_count": 3,
+    }
+    narrow = evaluate_end_of_data_position(
+        final_valid_bar=_bar(50, low="99", high="101", close="100", ema20="100"),
+        **arguments,
+    )
+    wide = evaluate_end_of_data_position(
+        final_valid_bar=_bar(50, low="1", high="1000", close="100", ema20="500"),
+        **arguments,
+    )
+
+    assert narrow == wide
+    assert narrow.mark_price == Decimal(100)
+
+
+def test_flat_end_of_data_reports_zero_unrealized_and_no_open_position() -> None:
+    result = evaluate_end_of_data_position(
+        final_valid_bar=_bar(50, low="99", high="101", close="100"),
+        position=None,
+        entry_execution=None,
+        realized_pnl=Decimal(12),
+        realized_equity=Decimal(100),
+        closed_trade_count=3,
+    )
+
+    assert result.position_state is EndOfDataPositionState.FLAT
+    assert result.position_side is None
+    assert result.signed_contracts == 0
+    assert result.open_position_at_end is False
+    assert result.unrealized_pnl_at_end == 0
+    assert result.marked_equity_at_end == result.realized_equity == Decimal(100)
+    assert result.closed_trade_count_change == 0
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"forced_exit": True},
+        {"synthetic_fill": True},
+        {"fill_price": Decimal(100)},
+        {"realized_pnl_change": Decimal(1)},
+        {"closed_trade_count_change": 1},
+        {"unrealized_pnl_is_realized": True},
+        {"unrealized_pnl_affects_closed_trade_metrics": True},
+    ],
+)
+def test_end_of_data_result_rejects_hidden_realization_or_fill(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(PullbackContractError):
+        replace(_end_of_data_result(PullbackSide.LONG, final_close="105"), **override)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("missing", ["position", "entry_execution"])
+def test_end_of_data_rejects_partial_open_position_state(missing: str) -> None:
+    arguments = {
+        "final_valid_bar": _bar(50, low="99", high="101", close="100"),
+        "position": _fixed_size_open(PullbackSide.LONG),
+        "entry_execution": _protected_position(PullbackSide.LONG),
+        "realized_pnl": Decimal(12),
+        "realized_equity": Decimal(100),
+        "closed_trade_count": 3,
+    }
+    arguments[missing] = None
+
+    with pytest.raises(PullbackContractError, match="requires position and entry fill"):
+        evaluate_end_of_data_position(**arguments)  # type: ignore[arg-type]
+
+
+def test_end_of_data_rejects_mark_before_entry_fill() -> None:
+    with pytest.raises(PullbackContractError, match="causal filled entry"):
+        evaluate_end_of_data_position(
+            final_valid_bar=_bar(20, low="99", high="101", close="100"),
+            position=_fixed_size_open(PullbackSide.LONG),
+            entry_execution=_protected_position(PullbackSide.LONG),
+            realized_pnl=Decimal(12),
+            realized_equity=Decimal(100),
+            closed_trade_count=3,
+        )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_end_of_data_reporting_is_deterministic_and_has_no_lookahead(side: PullbackSide) -> None:
+    first = _end_of_data_result(side, final_close="100")
+    _bar(51, low="1", high="1000", close="900", ema20="700")
+    second = _end_of_data_result(side, final_close="100")
+
+    assert first == second
+    assert set(signature(evaluate_end_of_data_position).parameters) == {
+        "final_valid_bar",
+        "position",
+        "entry_execution",
+        "realized_pnl",
+        "realized_equity",
+        "closed_trade_count",
+    }
+
+
+def test_end_of_data_result_is_frozen() -> None:
+    result = _end_of_data_result(PullbackSide.LONG, final_close="105")
+    with pytest.raises(FrozenInstanceError):
+        result.synthetic_fill = True  # type: ignore[misc]
