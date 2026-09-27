@@ -12,6 +12,8 @@ upstream ``CME US Index Futures ETH`` source calendar remains mandatory, and eve
 closed valid source bar keeps entries and both existing exits eligible.
 While a position is open at a close, all new entry signals are discarded, including
 those formed on the close that schedules a next-bar EMA20 exit.
+Each accepted entry requests exactly one MNQ contract; the strategy never varies this
+quantity from risk, volatility, stop distance, PnL, or prior trade outcomes.
 """
 
 from __future__ import annotations
@@ -109,6 +111,15 @@ REVERSE_POSITION = False
 CLOSE_AND_REVERSE = False
 QUEUE_SIGNAL_UNTIL_FLAT = False
 DEFERRED_ENTRY = False
+POSITION_SIZE_MODE = "FIXED"
+INITIAL_POSITION_SIZE = 1
+MAX_POSITION_SIZE = 1
+RISK_PERCENT_SIZING = False
+VOLATILITY_SIZING = False
+STOP_DISTANCE_SIZING = False
+PNL_BASED_SIZING = False
+MARTINGALE = False
+ANTI_MARTINGALE = False
 
 
 class PullbackContractError(ValueError):
@@ -202,6 +213,15 @@ class PositionState(StrEnum):
     FLAT = "FLAT"
     LONG = "LONG"
     SHORT = "SHORT"
+
+
+class PositionSizeTransition(StrEnum):
+    """Lifecycle transition represented by the fixed one-contract result."""
+
+    ENTRY = "ENTRY"
+    HOLD = "HOLD"
+    EXIT = "EXIT"
+    FLAT = "FLAT"
 
 
 @dataclass(frozen=True)
@@ -835,6 +855,206 @@ def evaluate_open_position_signal_policy(
         decision_bar_sequence=decision_bar.sequence,
         accepted_signal=candidate_signal if action is OpenPositionSignalAction.ALLOW else None,
         pending_ema20_exit=pending_ema20_exit is not None,
+    )
+
+
+@dataclass(frozen=True)
+class FixedPositionSizeResult:
+    """Fail-closed signed MNQ position under the fixed one-contract V1 rule."""
+
+    transition: PositionSizeTransition
+    position_state: PositionState
+    side: PullbackSide | None
+    signed_contracts: int
+    absolute_contracts: int
+    requested_entry_contracts: int
+    instrument: str = INSTRUMENT
+    position_size_mode: str = POSITION_SIZE_MODE
+    initial_position_size: int = INITIAL_POSITION_SIZE
+    max_position_size: int = MAX_POSITION_SIZE
+    risk_percent_sizing: bool = RISK_PERCENT_SIZING
+    volatility_sizing: bool = VOLATILITY_SIZING
+    stop_distance_sizing: bool = STOP_DISTANCE_SIZING
+    pnl_based_sizing: bool = PNL_BASED_SIZING
+    martingale: bool = MARTINGALE
+    anti_martingale: bool = ANTI_MARTINGALE
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.transition, PositionSizeTransition) or not isinstance(
+            self.position_state, PositionState
+        ):
+            raise PullbackContractError("position size transition and state must be explicit")
+        if (
+            self.instrument != INSTRUMENT
+            or self.position_size_mode != POSITION_SIZE_MODE
+            or type(self.initial_position_size) is not int
+            or self.initial_position_size != INITIAL_POSITION_SIZE
+            or type(self.max_position_size) is not int
+            or self.max_position_size != MAX_POSITION_SIZE
+        ):
+            raise PullbackContractError("V1 position size must remain fixed at exactly one MNQ")
+        if (
+            self.risk_percent_sizing is not False
+            or self.volatility_sizing is not False
+            or self.stop_distance_sizing is not False
+            or self.pnl_based_sizing is not False
+            or self.martingale is not False
+            or self.anti_martingale is not False
+        ):
+            raise PullbackContractError("V1 cannot enable hidden or dynamic position sizing")
+        if (
+            type(self.signed_contracts) is not int
+            or type(self.absolute_contracts) is not int
+            or self.signed_contracts not in (-MAX_POSITION_SIZE, 0, MAX_POSITION_SIZE)
+            or self.absolute_contracts != abs(self.signed_contracts)
+        ):
+            raise PullbackContractError("absolute V1 position cannot exceed one MNQ contract")
+        if type(
+            self.requested_entry_contracts
+        ) is not int or self.requested_entry_contracts not in (
+            0,
+            INITIAL_POSITION_SIZE,
+        ):
+            raise PullbackContractError("entry request must be zero or exactly one MNQ contract")
+
+        if self.signed_contracts == 0:
+            if (
+                self.position_state is not PositionState.FLAT
+                or self.side is not None
+                or self.transition not in (PositionSizeTransition.EXIT, PositionSizeTransition.FLAT)
+                or self.requested_entry_contracts != 0
+            ):
+                raise PullbackContractError("zero contracts must represent a coherent flat state")
+            return
+
+        expected_side = PullbackSide.LONG if self.signed_contracts > 0 else PullbackSide.SHORT
+        if (
+            self.side is not expected_side
+            or self.position_state is not PositionState(expected_side.value)
+            or self.transition not in (PositionSizeTransition.ENTRY, PositionSizeTransition.HOLD)
+            or self.requested_entry_contracts
+            != (INITIAL_POSITION_SIZE if self.transition is PositionSizeTransition.ENTRY else 0)
+        ):
+            raise PullbackContractError("signed quantity, side, state, and transition must agree")
+
+
+def evaluate_fixed_position_size(
+    *,
+    signal_policy: OpenPositionSignalPolicyResult | None,
+    entry_execution: ProtectedEntryExecutionResult | None = None,
+    open_position: FixedPositionSizeResult | None = None,
+    closing_exit: ExitPriorityExecutionResult | InitialStopBarExecutionResult | None = None,
+) -> FixedPositionSizeResult:
+    """Apply entry, hold, and exit transitions under the exact one-MNQ baseline.
+
+    The API intentionally accepts no balance, PnL, volatility, stop-distance, risk
+    percentage, or trade-history input.  An allowed flat-state signal plus its exact
+    next-bar fill opens one signed contract; an ignored signal preserves the existing
+    one-contract position; and a verified closing fill returns the position to zero.
+    """
+    if open_position is None:
+        if closing_exit is not None:
+            raise PullbackContractError("cannot close a position when the strategy is already flat")
+        if not isinstance(signal_policy, OpenPositionSignalPolicyResult):
+            raise PullbackContractError("flat sizing requires the current entry-signal policy")
+        if signal_policy.position_state is not PositionState.FLAT:
+            raise PullbackContractError("flat sizing requires a flat signal-policy state")
+        if signal_policy.action is OpenPositionSignalAction.NO_SIGNAL:
+            if entry_execution is not None:
+                raise PullbackContractError("an entry fill requires a fresh allowed signal")
+            return FixedPositionSizeResult(
+                transition=PositionSizeTransition.FLAT,
+                position_state=PositionState.FLAT,
+                side=None,
+                signed_contracts=0,
+                absolute_contracts=0,
+                requested_entry_contracts=0,
+            )
+        if (
+            signal_policy.action is not OpenPositionSignalAction.ALLOW
+            or not isinstance(signal_policy.accepted_signal, EMAPullbackEntrySignalResult)
+            or not isinstance(signal_policy.accepted_signal.side, PullbackSide)
+        ):
+            raise PullbackContractError("one-contract entry requires a fresh allowed signal")
+        side = signal_policy.accepted_signal.side
+        if (
+            not isinstance(entry_execution, ProtectedEntryExecutionResult)
+            or entry_execution.side is not side
+            or entry_execution.status is not SimulatedExecutionStatus.FILLED
+            or entry_execution.position_opened is not True
+            or entry_execution.entry_price is None
+            or entry_execution.decision_bar_sequence != signal_policy.decision_bar_sequence
+            or entry_execution.execution_bar_sequence != signal_policy.decision_bar_sequence + 1
+            or not isinstance(entry_execution.initial_stop, InitialStructuralStop)
+            or entry_execution.initial_stop.side is not side
+        ):
+            raise PullbackContractError(
+                "one-contract position requires its exact next-bar entry fill"
+            )
+        signed_contracts = (
+            INITIAL_POSITION_SIZE if side is PullbackSide.LONG else -INITIAL_POSITION_SIZE
+        )
+        return FixedPositionSizeResult(
+            transition=PositionSizeTransition.ENTRY,
+            position_state=PositionState(side.value),
+            side=side,
+            signed_contracts=signed_contracts,
+            absolute_contracts=INITIAL_POSITION_SIZE,
+            requested_entry_contracts=INITIAL_POSITION_SIZE,
+        )
+
+    if (
+        not isinstance(open_position, FixedPositionSizeResult)
+        or open_position.signed_contracts == 0
+        or open_position.side is None
+        or open_position.position_state is PositionState.FLAT
+    ):
+        raise PullbackContractError("position sizing transition requires one open MNQ contract")
+    if entry_execution is not None:
+        raise PullbackContractError("an open position cannot accept another entry fill")
+
+    if closing_exit is not None:
+        if signal_policy is not None:
+            raise PullbackContractError(
+                "a closing fill and close-time entry policy cannot be combined"
+            )
+        if isinstance(closing_exit, ExitPriorityExecutionResult):
+            valid_close = closing_exit.position_closed is True
+            closing_side = closing_exit.side
+        elif isinstance(closing_exit, InitialStopBarExecutionResult):
+            valid_close = (
+                closing_exit.status is InitialStopTriggerStatus.STOP_TRIGGERED
+                and closing_exit.position_closed is True
+                and closing_exit.fill_price is not None
+            )
+            closing_side = closing_exit.side
+        else:
+            raise PullbackContractError("position size exit requires a verified V1 closing fill")
+        if not valid_close or closing_side is not open_position.side:
+            raise PullbackContractError("closing fill must match the open one-contract position")
+        return FixedPositionSizeResult(
+            transition=PositionSizeTransition.EXIT,
+            position_state=PositionState.FLAT,
+            side=None,
+            signed_contracts=0,
+            absolute_contracts=0,
+            requested_entry_contracts=0,
+        )
+
+    if (
+        not isinstance(signal_policy, OpenPositionSignalPolicyResult)
+        or signal_policy.action is not OpenPositionSignalAction.IGNORE
+        or signal_policy.position_state is not open_position.position_state
+        or signal_policy.accepted_signal is not None
+    ):
+        raise PullbackContractError("open position must ignore every new entry signal")
+    return FixedPositionSizeResult(
+        transition=PositionSizeTransition.HOLD,
+        position_state=open_position.position_state,
+        side=open_position.side,
+        signed_contracts=open_position.signed_contracts,
+        absolute_contracts=open_position.absolute_contracts,
+        requested_entry_contracts=0,
     )
 
 
@@ -1671,6 +1891,7 @@ def simulate_next_bar_market_execution(
 __all__ = [
     "ADD_TO_POSITION",
     "ALLOWED_WEEKDAYS",
+    "ANTI_MARTINGALE",
     "BAR_BASED_EXECUTION_MODEL",
     "BID_ASK_SPREAD_MODELED",
     "BREAKEVEN",
@@ -1693,6 +1914,7 @@ __all__ = [
     "EXECUTION_SIGNAL_TIME",
     "EXIT_PRIORITY",
     "GAP_THROUGH_STOP_FILLS_AT_BAR_OPEN",
+    "INITIAL_POSITION_SIZE",
     "INITIAL_STOP_BUFFER_POINTS",
     "INITIAL_STOP_BUFFER_TICKS",
     "INITIAL_STOP_IS_IMMUTABLE",
@@ -1708,19 +1930,24 @@ __all__ = [
     "MACD_SIGNAL_LINE_MA_TYPE",
     "MACD_SIGNAL_PERIOD",
     "MACD_SLOW_PERIOD",
+    "MARTINGALE",
+    "MAX_POSITION_SIZE",
     "MAX_PULLBACK_DISTANCE_POINTS",
     "MAX_PULLBACK_DISTANCE_TICKS",
     "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
     "MNQ_TICK_SIZE_POINTS",
     "MOVE_STOP_TO_ENTRY",
     "OPEN_POSITION_SIGNAL_POLICY",
+    "PNL_BASED_SIZING",
     "POSITION_EXIT_EQUALITY_TRIGGERS_EXIT",
     "POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT",
+    "POSITION_SIZE_MODE",
     "PULLBACK_LOOKBACK_BARS",
     "PULLBACK_PROXIMITY_QUALIFIES",
     "PULLBACK_REQUIRED_TOUCH_BAR_OFFSET",
     "QUEUE_SIGNAL_UNTIL_FLAT",
     "REVERSE_POSITION",
+    "RISK_PERCENT_SIZING",
     "SCALE_IN",
     "SESSION_END",
     "SESSION_FILTER",
@@ -1729,6 +1956,7 @@ __all__ = [
     "SLIPPAGE_MODELED",
     "SOURCE_CALENDAR_REQUIRED",
     "SOURCE_TRADING_HOURS_TEMPLATE",
+    "STOP_DISTANCE_SIZING",
     "STOP_INTRABAR_SLIPPAGE_MODELED",
     "STRATEGY_ENTRY_SESSION_FILTER_ENABLED",
     "STRATEGY_ID",
@@ -1751,6 +1979,7 @@ __all__ = [
     "TRAILING_STOP",
     "TRAILING_STOP_ENABLED",
     "TRAILING_UPDATE_FREQUENCY",
+    "VOLATILITY_SIZING",
     "WICK_CROSS_EMA20_ALLOWED",
     "BreakevenEvaluationResult",
     "ClosedBarEMA20",
@@ -1759,6 +1988,7 @@ __all__ = [
     "EMAPullbackEntrySignalResult",
     "EntrySignal",
     "ExitPriorityExecutionResult",
+    "FixedPositionSizeResult",
     "InitialStopBarExecutionResult",
     "InitialStopFillSource",
     "InitialStopTriggerStatus",
@@ -1771,6 +2001,7 @@ __all__ = [
     "OpenPositionSignalPolicyResult",
     "PositionExitAction",
     "PositionExitReason",
+    "PositionSizeTransition",
     "PositionState",
     "ProtectedEntryExecutionResult",
     "PullbackContractError",
@@ -1794,6 +2025,7 @@ __all__ = [
     "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",
     "evaluate_ema_pullback_entry_signal",
+    "evaluate_fixed_position_size",
     "evaluate_initial_stop_on_bar",
     "evaluate_macd_confirmation",
     "evaluate_open_position_signal_policy",

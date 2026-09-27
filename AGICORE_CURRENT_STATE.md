@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -17,9 +17,10 @@ EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS ;
+EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-open-position-signals.
-Base GitHub vérifiée et récupérée : ab0baf5d8852fa463b2450a697521d751ffbc95c.
+Branche de vérification : feature/ema-pullback-v1-mnq-fixed-position-size.
+Base GitHub vérifiée et récupérée : bda3a848af32f7909540ecafa3eb35c05c799b12.
 
 ## Acquis vérifiés
 
@@ -610,6 +611,37 @@ Action humaine unique : choisir la taille initiale exacte d'une nouvelle positio
 fixe de contrats entre 1 et 2, ou formule exacte déjà approuvée), sans changer le Risk Engine ni
 la limite maximale de deux contrats et sans optimiser sur les données.
 
+## EMA_PULLBACK_V1_MNQ — taille fixe d'un contrat MNQ
+
+La décision métier du 2026-09-27 fixe sans optimisation `POSITION_SIZE_MODE = FIXED`,
+`INITIAL_POSITION_SIZE = 1 MNQ` et `MAX_POSITION_SIZE = 1 MNQ`. Après un fill causal exact à
+`Open[t+1]`, une entrée LONG produit `+1 MNQ` et une entrée SHORT `-1 MNQ`. Aucun état de position
+n'est créé au seul signal de `Close[t]` si le fill suivant n'est pas établi.
+
+Le contrat ne reçoit ni solde, ni PnL, ni volatilité, ni distance du stop, ni pourcentage de risque,
+ni historique de trades. Risk-percent sizing, volatility sizing, stop-distance sizing, PnL sizing,
+martingale et anti-martingale sont explicitement désactivés et refusés fail-closed. Pendant une
+position ouverte, la politique `IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT` conserve exactement `+1` ou
+`-1` sans second fill, pyramiding ou inversion. Un fill de sortie V1 vérifié remet la taille à zéro.
+
+Le plafond général de deux MNQ reste une contrainte supérieure externe du Risk Engine ; il n'est
+ni modifié ni utilisé pour élargir la demande de cette stratégie, qui reste strictement à un MNQ.
+Une comparaison future avec deux MNQ ou un sizing piloté par le Risk Engine devra constituer une
+expérience séparée après mesure de cette baseline, sans modifier rétroactivement le contrat V1.
+
+Preuves locales avant CI : 28 nouveaux cas portent le fichier synthétique à 234 tests PASS ; les
+241 tests stratégie/replay ciblés et les 256 tests contrat/filiation/OOS passent. Suite complète :
+6 146 tests PASS, 6 warnings historiques en 76,91 s. Ruff ciblé, format Ruff, `py_compile` et
+`git diff --check` passent. Les cas couvrent LONG/SHORT, refus de ±2, modes cachés, indépendance
+PnL/stop/volatilité, absence de pyramiding, sorties vers zéro et déterminisme.
+
+`EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED`.
+Action humaine unique : décider le statut exact d'une position encore ouverte lorsque le flux
+développement se termine — la conserver ouverte/non réalisée sans fill inventé, l'exclure des
+métriques fermées, ou définir une liquidation causale explicite compatible avec le modèle t+1.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -622,5 +654,6 @@ de la base reste nécessaire pour détecter le rollback cohérent de toute la ba
 Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le stop structurel
 initial, l'absence explicite de take-profit, breakeven et trailing stop ainsi que la priorité entre
 les deux sorties existantes, l'absence de filtre stratégique de session et le refus des nouveaux
-signaux pendant une position ouverte sont désormais formalisés. La taille initiale d'une position
-MNQ reste à décider avant l'évaluation ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.
+signaux pendant une position ouverte ainsi que la taille fixe d'un MNQ sont désormais formalisés.
+Le traitement d'une position encore ouverte à la fin du flux reste à décider avant l'évaluation ;
+cette stratégie demeure distincte de EMA19/50 V3 rejetée.
