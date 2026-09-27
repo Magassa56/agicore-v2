@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
 from decimal import Decimal
+from inspect import signature
 
 import pytest
 
 from agicore.trading.ema_pullback_v1_mnq import (
+    ALLOWED_WEEKDAYS,
     BAR_BASED_EXECUTION_MODEL,
     BID_ASK_SPREAD_MODELED,
     BREAKEVEN,
@@ -18,6 +20,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     BREAKEVEN_R_MULTIPLE_TRIGGER,
     BREAKEVEN_TRIGGER,
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
+    DST_RULE,
     EARLIEST_EXECUTION_BAR_OFFSET,
     EMA_SEED_CONVENTION,
     EMA_SLOPE_LOOKBACK_BARS,
@@ -49,9 +52,16 @@ from agicore.trading.ema_pullback_v1_mnq import (
     PULLBACK_LOOKBACK_BARS,
     PULLBACK_PROXIMITY_QUALIFIES,
     PULLBACK_REQUIRED_TOUCH_BAR_OFFSET,
+    SESSION_END,
+    SESSION_FILTER,
+    SESSION_START,
     SIGNAL_DECISION_ON_CLOSED_BAR,
     SLIPPAGE_MODELED,
+    SOURCE_CALENDAR_REQUIRED,
+    SOURCE_TRADING_HOURS_TEMPLATE,
     STOP_INTRABAR_SLIPPAGE_MODELED,
+    STRATEGY_ENTRY_SESSION_FILTER_ENABLED,
+    STRATEGY_TIMEZONE,
     STRUCTURAL_STOP_FIRST,
     TAKE_PROFIT,
     TAKE_PROFIT_ENABLED,
@@ -85,6 +95,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     ProtectedEntryExecutionResult,
     PullbackContractError,
     PullbackSide,
+    SessionFilterEvaluationResult,
     SimulatedExecutionStatus,
     SimulatedOrderPurpose,
     SimulatedOrderType,
@@ -94,6 +105,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     arbitrate_exit_at_open,
     construct_initial_structural_stop,
     evaluate_disabled_breakeven,
+    evaluate_disabled_session_filter,
     evaluate_disabled_take_profit,
     evaluate_disabled_trailing_stop,
     evaluate_ema20_position_exit,
@@ -311,6 +323,15 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert TRAILING_STEP is None
     assert TRAILING_UPDATE_FREQUENCY is None
     assert TRAILING_REFERENCE is None
+    assert SESSION_FILTER == "NONE"
+    assert STRATEGY_ENTRY_SESSION_FILTER_ENABLED is False
+    assert ALLOWED_WEEKDAYS is None
+    assert SESSION_START is None
+    assert SESSION_END is None
+    assert STRATEGY_TIMEZONE is None
+    assert DST_RULE is None
+    assert SOURCE_TRADING_HOURS_TEMPLATE == "CME US Index Futures ETH"
+    assert SOURCE_CALENDAR_REQUIRED is True
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -2074,3 +2095,193 @@ def test_disabled_trailing_stop_is_deterministic(side: PullbackSide) -> None:
 
     assert first == second
     assert first.active_stop is second.active_stop is position.initial_stop
+
+
+@pytest.mark.parametrize("source_bar_sequence", [0, 1, 6, 7, 1000, 1000000])
+def test_every_closed_valid_source_bar_allows_entry(source_bar_sequence: int) -> None:
+    result = evaluate_disabled_session_filter(
+        source_bar_sequence=source_bar_sequence,
+        source_bar_closed=True,
+        source_bar_valid=True,
+        source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+    )
+
+    assert result.entry_allowed is True
+    assert result.source_bar_sequence == source_bar_sequence
+    assert result.source_bar_closed is True
+    assert result.source_bar_valid is True
+
+
+@pytest.mark.parametrize("source_bar_sequence", [0, 1, 1000])
+def test_both_existing_exits_remain_active_on_every_valid_source_bar(
+    source_bar_sequence: int,
+) -> None:
+    result = evaluate_disabled_session_filter(
+        source_bar_sequence=source_bar_sequence,
+        source_bar_closed=True,
+        source_bar_valid=True,
+        source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+    )
+
+    assert result.structural_stop_active is True
+    assert result.ema20_exit_active is True
+
+
+def test_session_contract_exposes_no_hidden_time_weekday_timezone_or_dst_filter() -> None:
+    result = evaluate_disabled_session_filter(
+        source_bar_sequence=20,
+        source_bar_closed=True,
+        source_bar_valid=True,
+        source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+    )
+
+    assert result.session_filter == "NONE"
+    assert result.strategy_entry_session_filter_enabled is False
+    assert result.allowed_weekdays is None
+    assert result.session_start is None
+    assert result.session_end is None
+    assert result.strategy_timezone is None
+    assert result.dst_rule is None
+
+
+def test_session_evaluator_has_no_machine_clock_or_calendar_input() -> None:
+    parameters = set(signature(evaluate_disabled_session_filter).parameters)
+
+    assert parameters == {
+        "source_bar_sequence",
+        "source_bar_closed",
+        "source_bar_valid",
+        "source_trading_hours_template",
+    }
+    assert parameters.isdisjoint(
+        {
+            "timestamp",
+            "datetime",
+            "weekday",
+            "local_time",
+            "timezone",
+            "dst",
+            "rth",
+            "eth",
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"strategy_entry_session_filter_enabled": True},
+        {"allowed_weekdays": (0, 1, 2, 3, 4)},
+        {"session_start": "09:30"},
+        {"session_end": "16:00"},
+        {"strategy_timezone": "America/Chicago"},
+        {"dst_rule": "US"},
+    ],
+)
+def test_session_contract_rejects_hidden_strategy_filter(override: dict[str, object]) -> None:
+    with pytest.raises(PullbackContractError, match="must remain explicitly disabled"):
+        SessionFilterEvaluationResult(
+            source_bar_sequence=20,
+            source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+            **override,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"entry_allowed": False},
+        {"structural_stop_active": False},
+        {"ema20_exit_active": False},
+    ],
+)
+def test_session_contract_rejects_hidden_entry_or_exit_suppression(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(PullbackContractError, match="cannot disable V1 entries or exits"):
+        SessionFilterEvaluationResult(
+            source_bar_sequence=20,
+            source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+            **override,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_bar_closed", "source_bar_valid", "template"),
+    [
+        (False, True, SOURCE_TRADING_HOURS_TEMPLATE),
+        (True, False, SOURCE_TRADING_HOURS_TEMPLATE),
+        (True, True, "Default 24 x 7"),
+    ],
+)
+def test_session_filter_cannot_bypass_source_calendar(
+    source_bar_closed: bool,
+    source_bar_valid: bool,
+    template: str,
+) -> None:
+    with pytest.raises(PullbackContractError):
+        evaluate_disabled_session_filter(
+            source_bar_sequence=20,
+            source_bar_closed=source_bar_closed,
+            source_bar_valid=source_bar_valid,
+            source_trading_hours_template=template,
+        )
+
+
+@pytest.mark.parametrize("source_bar_sequence", [-1, True, Decimal(1)])
+def test_session_filter_rejects_invalid_source_bar_sequence(
+    source_bar_sequence: object,
+) -> None:
+    with pytest.raises(PullbackContractError, match="non-negative integer"):
+        evaluate_disabled_session_filter(
+            source_bar_sequence=source_bar_sequence,  # type: ignore[arg-type]
+            source_bar_closed=True,
+            source_bar_valid=True,
+            source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+        )
+
+
+def test_session_result_is_frozen() -> None:
+    result = evaluate_disabled_session_filter(
+        source_bar_sequence=20,
+        source_bar_closed=True,
+        source_bar_valid=True,
+        source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        result.entry_allowed = False  # type: ignore[misc]
+
+
+def test_future_bar_observation_cannot_mutate_prior_session_result() -> None:
+    baseline = evaluate_disabled_session_filter(
+        source_bar_sequence=20,
+        source_bar_closed=True,
+        source_bar_valid=True,
+        source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+    )
+
+    evaluate_disabled_session_filter(
+        source_bar_sequence=1000000,
+        source_bar_closed=True,
+        source_bar_valid=True,
+        source_trading_hours_template=SOURCE_TRADING_HOURS_TEMPLATE,
+    )
+
+    assert baseline.source_bar_sequence == 20
+    assert baseline.entry_allowed is True
+    assert baseline.structural_stop_active is True
+    assert baseline.ema20_exit_active is True
+
+
+def test_disabled_session_filter_is_deterministic() -> None:
+    arguments = {
+        "source_bar_sequence": 20,
+        "source_bar_closed": True,
+        "source_bar_valid": True,
+        "source_trading_hours_template": SOURCE_TRADING_HOURS_TEMPLATE,
+    }
+
+    assert evaluate_disabled_session_filter(**arguments) == evaluate_disabled_session_filter(
+        **arguments
+    )

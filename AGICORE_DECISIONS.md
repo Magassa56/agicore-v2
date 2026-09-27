@@ -454,3 +454,25 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    ni accès OOS, ni métrique de performance, ni modification du Risk Engine, ni broker ou ordre réel.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — SESSION_FILTER_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — aucun filtre stratégique de session (approuvé le 2026-09-27)
+
+1. **Mode** : `SESSION_FILTER = NONE`, `strategy_entry_session_filter_enabled = false`; jours,
+   début, fin, timezone stratégique et règle DST stratégique restent `null`.
+2. **Frontière source** : cette règle ne contourne pas le calendrier amont. Seules les barres
+   clôturées et valides du template exact `CME US Index Futures ETH` sont admissibles.
+3. **Entrées** : toute barre source admissible peut produire un signal si tous les autres
+   prédicats déjà approuvés qualifient ; aucune heure, aucun jour ou RTH/ETH supplémentaire n'est
+   filtré par la stratégie.
+4. **Sorties** : `STRUCTURAL_STOP` et `EMA20_EXIT` restent actifs sur chaque barre source valide,
+   sans désactivation hors d'une fenêtre stratégique inexistante.
+5. **Horloge et DST** : l'évaluateur ne reçoit ni timestamp, ni jour, ni heure locale, ni timezone,
+   ni règle DST. Il n'effectue aucune conversion et ne dépend pas de la timezone de la machine.
+6. **Fail-closed** : barre non clôturée, barre source invalide, autre template, filtre caché ou
+   suppression d'une entrée/sortie sont refusés.
+7. **Baseline V1** : `STRUCTURAL_STOP_FIRST`, `TAKE_PROFIT = NONE`, `BREAKEVEN = NONE`,
+   `TRAILING_STOP = NONE` et `SESSION_FILTER = NONE`.
+8. **Origine et portée** : cette décision initiale n'est issue d'aucune optimisation et n'autorise
+   ni accès OOS, ni métrique de performance, ni modification du Risk Engine, ni broker ou ordre réel.
+9. **Verdict** : `EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED`.

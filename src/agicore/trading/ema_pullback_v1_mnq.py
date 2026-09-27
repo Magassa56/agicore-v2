@@ -7,7 +7,9 @@ deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions
 mapped to an offline bar-based simulated fill at ``Open[t+1]``.  The initial structural
 stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit,
 breakeven, or trailing stop; exit priority at one shared bar open is structural stop
-first, then a pending EMA20 exit.
+first, then a pending EMA20 exit.  V1 adds no strategy-level session filter: the
+upstream ``CME US Index Futures ETH`` source calendar remains mandatory, and every
+closed valid source bar keeps entries and both existing exits eligible.
 """
 
 from __future__ import annotations
@@ -89,6 +91,15 @@ TRAILING_DISTANCE = None
 TRAILING_STEP = None
 TRAILING_UPDATE_FREQUENCY = None
 TRAILING_REFERENCE = None
+SESSION_FILTER = "NONE"
+STRATEGY_ENTRY_SESSION_FILTER_ENABLED = False
+ALLOWED_WEEKDAYS = None
+SESSION_START = None
+SESSION_END = None
+STRATEGY_TIMEZONE = None
+DST_RULE = None
+SOURCE_TRADING_HOURS_TEMPLATE = "CME US Index Futures ETH"
+SOURCE_CALENDAR_REQUIRED = True
 
 
 class PullbackContractError(ValueError):
@@ -467,6 +478,65 @@ class TrailingStopEvaluationResult:
             or self.trailing_reference is not None
         ):
             raise PullbackContractError("V1 trailing stop contract must remain explicitly disabled")
+
+
+@dataclass(frozen=True)
+class SessionFilterEvaluationResult:
+    """Eligibility on one closed bar already admitted by the source calendar.
+
+    Strategy V1 owns no clock, weekday, timezone, DST, RTH, or ETH filtering logic.
+    The explicit source fields prevent ``SESSION_FILTER = NONE`` from bypassing the
+    upstream Trading Hours calendar.  Both existing exits remain eligible everywhere
+    an entry may be evaluated.
+    """
+
+    source_bar_sequence: int
+    source_trading_hours_template: str
+    source_bar_closed: bool = True
+    source_bar_valid: bool = True
+    entry_allowed: bool = True
+    structural_stop_active: bool = True
+    ema20_exit_active: bool = True
+    source_calendar_required: bool = SOURCE_CALENDAR_REQUIRED
+    session_filter: str = SESSION_FILTER
+    strategy_entry_session_filter_enabled: bool = STRATEGY_ENTRY_SESSION_FILTER_ENABLED
+    allowed_weekdays: None = ALLOWED_WEEKDAYS
+    session_start: None = SESSION_START
+    session_end: None = SESSION_END
+    strategy_timezone: None = STRATEGY_TIMEZONE
+    dst_rule: None = DST_RULE
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.source_bar_sequence, bool)
+            or not isinstance(self.source_bar_sequence, int)
+            or self.source_bar_sequence < 0
+        ):
+            raise PullbackContractError("source bar sequence must be a non-negative integer")
+        if self.source_trading_hours_template != SOURCE_TRADING_HOURS_TEMPLATE:
+            raise PullbackContractError("source Trading Hours template must remain exact")
+        if (
+            self.source_bar_closed is not True
+            or self.source_bar_valid is not True
+            or self.source_calendar_required is not True
+        ):
+            raise PullbackContractError("strategy requires a closed valid source-calendar bar")
+        if (
+            self.entry_allowed is not True
+            or self.structural_stop_active is not True
+            or self.ema20_exit_active is not True
+        ):
+            raise PullbackContractError("session filtering cannot disable V1 entries or exits")
+        if (
+            self.session_filter != SESSION_FILTER
+            or self.strategy_entry_session_filter_enabled is not False
+            or self.allowed_weekdays is not None
+            or self.session_start is not None
+            or self.session_end is not None
+            or self.strategy_timezone is not None
+            or self.dst_rule is not None
+        ):
+            raise PullbackContractError("V1 session filter must remain explicitly disabled")
 
 
 @dataclass(frozen=True)
@@ -1055,6 +1125,29 @@ def evaluate_disabled_trailing_stop(
     )
 
 
+def evaluate_disabled_session_filter(
+    *,
+    source_bar_sequence: int,
+    source_bar_closed: bool,
+    source_bar_valid: bool,
+    source_trading_hours_template: str,
+) -> SessionFilterEvaluationResult:
+    """Admit every closed valid source bar without consulting a strategy clock.
+
+    The caller must first establish that the bar belongs to the governed source stream
+    and its ``CME US Index Futures ETH`` calendar.  This function intentionally accepts
+    no timestamp, weekday, local timezone, or DST input, and it performs no conversion.
+    Consequently it cannot hide an additional strategy session boundary or look ahead
+    to another bar.  It returns entry eligibility and keeps both V1 exits active.
+    """
+    return SessionFilterEvaluationResult(
+        source_bar_sequence=source_bar_sequence,
+        source_trading_hours_template=source_trading_hours_template,
+        source_bar_closed=source_bar_closed,
+        source_bar_valid=source_bar_valid,
+    )
+
+
 def construct_initial_structural_stop(
     *,
     decision: EMAPullbackEntrySignalResult,
@@ -1391,6 +1484,7 @@ def simulate_next_bar_market_execution(
 
 
 __all__ = [
+    "ALLOWED_WEEKDAYS",
     "BAR_BASED_EXECUTION_MODEL",
     "BID_ASK_SPREAD_MODELED",
     "BREAKEVEN",
@@ -1401,6 +1495,7 @@ __all__ = [
     "BREAKEVEN_R_MULTIPLE_TRIGGER",
     "BREAKEVEN_TRIGGER",
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
+    "DST_RULE",
     "EARLIEST_EXECUTION_BAR_OFFSET",
     "EMA_PERIOD",
     "EMA_SEED_CONVENTION",
@@ -1435,10 +1530,17 @@ __all__ = [
     "PULLBACK_LOOKBACK_BARS",
     "PULLBACK_PROXIMITY_QUALIFIES",
     "PULLBACK_REQUIRED_TOUCH_BAR_OFFSET",
+    "SESSION_END",
+    "SESSION_FILTER",
+    "SESSION_START",
     "SIGNAL_DECISION_ON_CLOSED_BAR",
     "SLIPPAGE_MODELED",
+    "SOURCE_CALENDAR_REQUIRED",
+    "SOURCE_TRADING_HOURS_TEMPLATE",
     "STOP_INTRABAR_SLIPPAGE_MODELED",
+    "STRATEGY_ENTRY_SESSION_FILTER_ENABLED",
     "STRATEGY_ID",
+    "STRATEGY_TIMEZONE",
     "STRUCTURAL_STOP_FIRST",
     "TAKE_PROFIT",
     "TAKE_PROFIT_ENABLED",
@@ -1479,6 +1581,7 @@ __all__ = [
     "PullbackContractError",
     "PullbackPredicateResult",
     "PullbackSide",
+    "SessionFilterEvaluationResult",
     "SimulatedExecutionStatus",
     "SimulatedOrderPurpose",
     "SimulatedOrderType",
@@ -1490,6 +1593,7 @@ __all__ = [
     "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",
     "evaluate_disabled_breakeven",
+    "evaluate_disabled_session_filter",
     "evaluate_disabled_take_profit",
     "evaluate_disabled_trailing_stop",
     "evaluate_ema20_position_exit",

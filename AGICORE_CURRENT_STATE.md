@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — SESSION_FILTER_RULE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -15,9 +15,10 @@ EMA_PULLBACK_V1_MNQ_TAKE_PROFIT_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS ;
 EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS ;
+EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-no-trailing-stop.
-Base GitHub vérifiée et récupérée : 957b1926612d00f8b48c7b5cb4acb983e0cb1205.
+Branche de vérification : feature/ema-pullback-v1-mnq-no-session-filter.
+Base GitHub vérifiée et récupérée : cb26964639130a7f4a1e00a331c4c920dbbec699.
 
 ## Acquis vérifiés
 
@@ -548,6 +549,37 @@ Action humaine unique : déclarer soit `SESSION_FILTER = NONE`, soit les jours, 
 et règles de frontière exacts autorisant les nouvelles entrées, ainsi que le comportement des
 sorties d'une position déjà ouverte hors de cette fenêtre, sans optimisation sur les données.
 
+## EMA_PULLBACK_V1_MNQ — absence de filtre de session figée
+
+La décision métier du 2026-09-27 fixe sans optimisation `SESSION_FILTER = NONE`,
+`strategy_entry_session_filter_enabled = false` et des valeurs nulles pour jours autorisés,
+heure de début, heure de fin, timezone stratégique et règle DST stratégique.
+
+Cette absence de filtre stratégique ne remplace pas le calendrier source. L'évaluateur exige une
+barre clôturée et valide déjà admise par le template exact `CME US Index Futures ETH`; une barre
+non clôturée, invalide ou attribuée à un autre template est refusée fail-closed. Il ne reçoit aucun
+timestamp, jour, heure locale, timezone, DST, RTH ou ETH et ne peut donc ajouter une frontière
+cachée ni dépendre de l'horloge de la machine.
+
+Toute barre source valide peut laisser une entrée qualifiée poursuivre le pipeline. Pour une
+position ouverte, `STRUCTURAL_STOP` et `EMA20_EXIT` restent actifs sur chaque barre source valide.
+Le contrat refuse toute suppression horaire d'une entrée ou d'une sortie. Il conserve
+`STRUCTURAL_STOP_FIRST`, `TAKE_PROFIT = NONE`, `BREAKEVEN = NONE` et `TRAILING_STOP = NONE`.
+
+Preuves locales : vingt-neuf nouveaux cas portent le fichier synthétique à 177 tests PASS en
+0,45 s. Ils couvrent toute séquence de barre valide, absence de filtre temps/jour/timezone/DST,
+refus du contournement du calendrier source, sorties toujours actives, immutabilité, causalité et
+répétabilité. Les 181 tests contrat/confidentialité passent en 0,17 s et les 223 régressions
+stratégie/replay en 0,38 s. La suite complète passe avec 6 089 tests et 6 warnings historiques en
+78,59 s. Ruff ciblé, format Ruff et `py_compile` passent.
+
+`EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED`.
+Action humaine unique : définir ce que V1 fait d'un nouveau signal de même sens ou de sens opposé
+alors qu'une position est déjà ouverte — l'ignorer jusqu'au retour à plat, renforcer la position,
+ou fermer/inverser — sans optimisation sur les données.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -559,5 +591,6 @@ les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre c
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
 Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le stop structurel
 initial, l'absence explicite de take-profit, breakeven et trailing stop ainsi que la priorité entre
-les deux sorties existantes sont désormais formalisés. Le filtre de session reste à décider avant
+les deux sorties existantes et l'absence de filtre stratégique de session sont désormais
+formalisés. La politique des nouveaux signaux pendant une position ouverte reste à décider avant
 l'évaluation ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.
