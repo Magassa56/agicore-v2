@@ -519,3 +519,22 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    broker ou ordre réel.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS` ; prochaine gate métier
    unique : `BLOCKED_HUMAN_GATE — END_OF_DATA_POSITION_POLICY_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — conserver ouverte la position de fin de flux (approuvé le 2026-09-27)
+
+1. **Politique** : `END_OF_DATA_POSITION_POLICY = KEEP_OPEN_UNREALIZED`. Une position restante
+   garde l'état `OPEN_AT_END_OF_DATA`; ce traitement est comptable et non une règle de trading.
+2. **Aucune liquidation** : `forced_exit = false`, `synthetic_fill = false`, sans prix de fill au
+   dernier Close/Open, au dernier Bid/Ask ou à une valeur reconstruite.
+3. **Réalisé inchangé** : `realized_pnl_change = 0`, `closed_trade_count_change = 0`; la position
+   n'est pas un trade fermé et son PnL latent ne rejoint aucune métrique de trades fermés.
+4. **Marque informative** : seul le `Close` de la dernière barre source valide marque la position.
+   Le PnL latent en points MNQ est calculé depuis le fill d'entrée causal et reste non réalisé.
+5. **Equity séparée** : l'equity réalisée reste intacte ; `marked_equity_at_end` ajoute le latent
+   uniquement dans le rapport distinct avec `open_position_at_end = true`.
+6. **État à plat** : sans position, le latent vaut zéro et `open_position_at_end = false`.
+7. **Fail-closed** : état partiel, barre finale antérieure au fill, réalisation, fill ou trade fermé
+   caché sont refusés. L'API n'accepte aucune barre future, cotation ou prix reconstruit.
+8. **Portée** : convention déterministe initiale sans optimisation, OOS, broker ni ordre réel.
+9. **Verdict** : `EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS` ; prochaine gate
+   unique : `BLOCKED_HUMAN_GATE — FEES_AND_SLIPPAGE_MODEL_REQUIRED`.

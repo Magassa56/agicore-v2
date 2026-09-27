@@ -120,6 +120,12 @@ STOP_DISTANCE_SIZING = False
 PNL_BASED_SIZING = False
 MARTINGALE = False
 ANTI_MARTINGALE = False
+END_OF_DATA_POSITION_POLICY = "KEEP_OPEN_UNREALIZED"
+END_OF_DATA_ACCOUNTING_UNIT = "MNQ_POINTS"
+END_OF_DATA_FORCED_EXIT = False
+END_OF_DATA_SYNTHETIC_FILL = False
+UNREALIZED_PNL_IS_REALIZED = False
+UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS = False
 
 
 class PullbackContractError(ValueError):
@@ -222,6 +228,13 @@ class PositionSizeTransition(StrEnum):
     HOLD = "HOLD"
     EXIT = "EXIT"
     FLAT = "FLAT"
+
+
+class EndOfDataPositionState(StrEnum):
+    """Position state reported after the final valid closed source bar."""
+
+    FLAT = "FLAT"
+    OPEN_AT_END_OF_DATA = "OPEN_AT_END_OF_DATA"
 
 
 @dataclass(frozen=True)
@@ -1055,6 +1068,196 @@ def evaluate_fixed_position_size(
         signed_contracts=open_position.signed_contracts,
         absolute_contracts=open_position.absolute_contracts,
         requested_entry_contracts=0,
+    )
+
+
+@dataclass(frozen=True)
+class EndOfDataPositionResult:
+    """Informational final-close mark with no synthetic position-closing event."""
+
+    position_state: EndOfDataPositionState
+    position_side: PullbackSide | None
+    signed_contracts: int
+    entry_price: Decimal | None
+    mark_price: Decimal
+    mark_bar_sequence: int
+    realized_pnl: Decimal
+    realized_pnl_change: Decimal
+    unrealized_pnl_at_end: Decimal
+    realized_equity: Decimal
+    marked_equity_at_end: Decimal
+    closed_trade_count: int
+    closed_trade_count_change: int
+    open_position_at_end: bool
+    end_of_data_position_policy: str = END_OF_DATA_POSITION_POLICY
+    accounting_unit: str = END_OF_DATA_ACCOUNTING_UNIT
+    forced_exit: bool = END_OF_DATA_FORCED_EXIT
+    synthetic_fill: bool = END_OF_DATA_SYNTHETIC_FILL
+    fill_price: None = None
+    unrealized_pnl_is_realized: bool = UNREALIZED_PNL_IS_REALIZED
+    unrealized_pnl_affects_closed_trade_metrics: bool = UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.position_state, EndOfDataPositionState):
+            raise PullbackContractError("end-of-data position state must be explicit")
+        if (
+            self.end_of_data_position_policy != END_OF_DATA_POSITION_POLICY
+            or self.accounting_unit != END_OF_DATA_ACCOUNTING_UNIT
+            or self.forced_exit is not False
+            or self.synthetic_fill is not False
+            or self.fill_price is not None
+            or self.unrealized_pnl_is_realized is not False
+            or self.unrealized_pnl_affects_closed_trade_metrics is not False
+        ):
+            raise PullbackContractError("end-of-data accounting cannot fabricate a realized exit")
+        if type(self.mark_bar_sequence) is not int or self.mark_bar_sequence < 0:
+            raise PullbackContractError("end-of-data mark sequence must be non-negative")
+        for field_name in (
+            "mark_price",
+            "realized_pnl",
+            "realized_pnl_change",
+            "unrealized_pnl_at_end",
+            "realized_equity",
+            "marked_equity_at_end",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, Decimal) or not value.is_finite():
+                raise PullbackContractError(f"{field_name} must be a finite Decimal")
+        if self.mark_price < 0:
+            raise PullbackContractError("end-of-data mark price must be non-negative")
+        if self.realized_pnl_change != Decimal(0):
+            raise PullbackContractError("end-of-data marking cannot change realized PnL")
+        if (
+            type(self.closed_trade_count) is not int
+            or self.closed_trade_count < 0
+            or type(self.closed_trade_count_change) is not int
+            or self.closed_trade_count_change != 0
+        ):
+            raise PullbackContractError("end-of-data marking cannot add a closed trade")
+        if self.marked_equity_at_end != self.realized_equity + self.unrealized_pnl_at_end:
+            raise PullbackContractError(
+                "marked equity must separate realized and unrealized values"
+            )
+        if type(self.open_position_at_end) is not bool:
+            raise PullbackContractError("open_position_at_end must be bool")
+        if type(self.signed_contracts) is not int or self.signed_contracts not in (-1, 0, 1):
+            raise PullbackContractError("end-of-data signed position must be zero or one MNQ")
+
+        if not self.open_position_at_end:
+            if (
+                self.position_state is not EndOfDataPositionState.FLAT
+                or self.position_side is not None
+                or self.signed_contracts != 0
+                or self.entry_price is not None
+                or self.unrealized_pnl_at_end != Decimal(0)
+            ):
+                raise PullbackContractError("flat end-of-data accounting must remain exactly flat")
+            return
+
+        if (
+            self.position_state is not EndOfDataPositionState.OPEN_AT_END_OF_DATA
+            or not isinstance(self.position_side, PullbackSide)
+            or type(self.signed_contracts) is not int
+            or self.signed_contracts != (1 if self.position_side is PullbackSide.LONG else -1)
+            or not isinstance(self.entry_price, Decimal)
+            or not self.entry_price.is_finite()
+            or self.entry_price < 0
+        ):
+            raise PullbackContractError("open end-of-data state must retain exactly one MNQ")
+        expected_unrealized = (self.mark_price - self.entry_price) * self.signed_contracts
+        if self.unrealized_pnl_at_end != expected_unrealized:
+            raise PullbackContractError("unrealized PnL must use only the final valid close")
+
+
+def evaluate_end_of_data_position(
+    *,
+    final_valid_bar: ClosedBarEMA20,
+    position: FixedPositionSizeResult | None,
+    entry_execution: ProtectedEntryExecutionResult | None,
+    realized_pnl: Decimal,
+    realized_equity: Decimal,
+    closed_trade_count: int,
+) -> EndOfDataPositionResult:
+    """Report final state without a forced exit, fill, or closed-trade mutation.
+
+    Values use normalized MNQ points until the separate fees/slippage accounting
+    model is approved.  Only ``final_valid_bar.close`` marks an open position; High,
+    Low, Open, EMA20, reconstructed quotes, and unavailable future bars are excluded.
+    """
+    if not isinstance(final_valid_bar, ClosedBarEMA20):
+        raise PullbackContractError("end-of-data reporting requires the final valid closed bar")
+    for field_name, value in (
+        ("realized_pnl", realized_pnl),
+        ("realized_equity", realized_equity),
+    ):
+        if not isinstance(value, Decimal) or not value.is_finite():
+            raise PullbackContractError(f"{field_name} must be a finite Decimal")
+    if type(closed_trade_count) is not int or closed_trade_count < 0:
+        raise PullbackContractError("closed_trade_count must be a non-negative integer")
+
+    mark_price = final_valid_bar.close
+    if position is None and entry_execution is None:
+        unrealized_pnl_at_end = Decimal(0)
+        return EndOfDataPositionResult(
+            position_state=EndOfDataPositionState.FLAT,
+            position_side=None,
+            signed_contracts=0,
+            entry_price=None,
+            mark_price=mark_price,
+            mark_bar_sequence=final_valid_bar.sequence,
+            realized_pnl=realized_pnl,
+            realized_pnl_change=Decimal(0),
+            unrealized_pnl_at_end=unrealized_pnl_at_end,
+            realized_equity=realized_equity,
+            marked_equity_at_end=realized_equity,
+            closed_trade_count=closed_trade_count,
+            closed_trade_count_change=0,
+            open_position_at_end=False,
+        )
+    if position is None or entry_execution is None:
+        raise PullbackContractError("open end-of-data reporting requires position and entry fill")
+    if (
+        not isinstance(position, FixedPositionSizeResult)
+        or position.position_state is PositionState.FLAT
+        or position.transition not in (PositionSizeTransition.ENTRY, PositionSizeTransition.HOLD)
+        or position.side is None
+        or abs(position.signed_contracts) != 1
+    ):
+        raise PullbackContractError("end-of-data reporting requires one open MNQ position")
+    if (
+        not isinstance(entry_execution, ProtectedEntryExecutionResult)
+        or entry_execution.status is not SimulatedExecutionStatus.FILLED
+        or entry_execution.position_opened is not True
+        or entry_execution.side is not position.side
+        or entry_execution.order_type is not SimulatedOrderType.MARKET
+        or entry_execution.entry_price is None
+        or not isinstance(entry_execution.entry_price, Decimal)
+        or not entry_execution.entry_price.is_finite()
+        or entry_execution.entry_price < 0
+        or entry_execution.execution_bar_sequence is None
+        or entry_execution.execution_bar_sequence != entry_execution.decision_bar_sequence + 1
+        or entry_execution.execution_bar_sequence > final_valid_bar.sequence
+        or not isinstance(entry_execution.initial_stop, InitialStructuralStop)
+        or entry_execution.initial_stop.side is not position.side
+    ):
+        raise PullbackContractError("end-of-data position requires its causal filled entry")
+
+    unrealized_pnl_at_end = (mark_price - entry_execution.entry_price) * position.signed_contracts
+    return EndOfDataPositionResult(
+        position_state=EndOfDataPositionState.OPEN_AT_END_OF_DATA,
+        position_side=position.side,
+        signed_contracts=position.signed_contracts,
+        entry_price=entry_execution.entry_price,
+        mark_price=mark_price,
+        mark_bar_sequence=final_valid_bar.sequence,
+        realized_pnl=realized_pnl,
+        realized_pnl_change=Decimal(0),
+        unrealized_pnl_at_end=unrealized_pnl_at_end,
+        realized_equity=realized_equity,
+        marked_equity_at_end=realized_equity + unrealized_pnl_at_end,
+        closed_trade_count=closed_trade_count,
+        closed_trade_count_change=0,
+        open_position_at_end=True,
     )
 
 
@@ -1910,6 +2113,10 @@ __all__ = [
     "EMA_SEED_CONVENTION",
     "EMA_SLOPE_LOOKBACK_BARS",
     "EMA_SLOPE_REQUIRED",
+    "END_OF_DATA_ACCOUNTING_UNIT",
+    "END_OF_DATA_FORCED_EXIT",
+    "END_OF_DATA_POSITION_POLICY",
+    "END_OF_DATA_SYNTHETIC_FILL",
     "EXECUTION_PRICE_SOURCE",
     "EXECUTION_SIGNAL_TIME",
     "EXIT_PRIORITY",
@@ -1979,6 +2186,8 @@ __all__ = [
     "TRAILING_STOP",
     "TRAILING_STOP_ENABLED",
     "TRAILING_UPDATE_FREQUENCY",
+    "UNREALIZED_PNL_AFFECTS_CLOSED_TRADE_METRICS",
+    "UNREALIZED_PNL_IS_REALIZED",
     "VOLATILITY_SIZING",
     "WICK_CROSS_EMA20_ALLOWED",
     "BreakevenEvaluationResult",
@@ -1986,6 +2195,8 @@ __all__ = [
     "EMA20PositionExitResult",
     "EMA20SlopeResult",
     "EMAPullbackEntrySignalResult",
+    "EndOfDataPositionResult",
+    "EndOfDataPositionState",
     "EntrySignal",
     "ExitPriorityExecutionResult",
     "FixedPositionSizeResult",
@@ -2025,6 +2236,7 @@ __all__ = [
     "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",
     "evaluate_ema_pullback_entry_signal",
+    "evaluate_end_of_data_position",
     "evaluate_fixed_position_size",
     "evaluate_initial_stop_on_bar",
     "evaluate_macd_confirmation",
