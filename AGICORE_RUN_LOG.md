@@ -520,3 +520,32 @@
 - Aucun dataset/OOS, replay historique, optimisation, Risk Engine, broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS` et formalisation V1 `PASS` ;
   prochaine gate : `BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING
+
+- Le protocole a été fusionné avant résultats par PR #267 : head
+  `cfb4b2c10884a5a88960df99565de0e2106bed90`, CI #216/run `36340320865` success, merge
+  `e26748e56e0805ed020c57a74c7c17e15ae8ef5e`.
+- Protocole canonique SHA-256
+  `13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f`, lié au seul RAW propre
+  `EXPOSED_DEVELOPMENT` SHA-256
+  `3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a`.
+- Runner figé avant résultat au commit `e56f57f72f64f41dc84a5a6a0569b38cded60bf1`, module
+  SHA-256 `26711662c3ea2d3df7e92dafe4cee3b972862eeefb642e6147123d5a912b3765`.
+  Avant replay : 14 tests runner, 336 tests ciblés et 6 226 tests complets PASS, 6 warnings.
+- Le RAW vérifié contient 52 431 barres, 2 791 485 octets, six champs par ligne, sans timestamp
+  dupliqué/non croissant, valeur hors grille ni OHLCV incohérent. Aucun prix ou ligne n'est publié.
+- Une première invocation shell a échoué sur `ModuleNotFoundError` avant import, lecture du RAW ou
+  appel du runner. L'unique exécution effective est le run
+  `ema-pullback-development-8bfe99a3f4beec32`, achevé à `2026-09-27T18:34:15.444381Z`.
+- Résultat total : 1 372 trades clôturés ; PnL net `4 138.56 USD` ; profit factor
+  `1.166145174693789066734111356` ; drawdown marqué `2 501.21 USD` ; 23 pertes consécutives.
+- S1/S2/S3 : 257/464/651 trades ; PnL `197.86` / `4 276.72` / `-336.02 USD` ; profit factor
+  `1.050196870369994520103103245` / `1.550261445981554677206851120` /
+  `0.9745351810395393567181439677`. S3 enfreint le plancher de `-200.00 USD`.
+- Verdict mécanique : `NO_GO_BASELINE`. Échecs : drawdown, pertes consécutives, stabilité
+  segmentaire. Aucun ajustement de seuil, OOS, optimisation, Risk Engine, broker ou ordre réel.
+- Rapport assaini SHA-256
+  `4351d82e2b965b75843b0e24545358c80e2dc544a0549d085ceb8e93f4ceb3f6`, zéro prix/RAW exposé.
+- Gate suivante :
+  `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_MNQ_NO_GO_VARIANT_DECISION_REQUIRED`.
