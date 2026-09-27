@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED ;
+Statut : READY_FOR_SINGLE_EXPOSED_DEVELOPMENT_REPLAY ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -21,9 +21,11 @@ EMA_PULLBACK_V1_MNQ_FIXED_POSITION_SIZE_ONE_MNQ = PASS ;
 EMA_PULLBACK_V1_MNQ_END_OF_DATA_KEEP_OPEN_UNREALIZED = PASS ;
 EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS ;
 EMA_PULLBACK_V1_MNQ_FORMALIZATION = PASS ;
+EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_PROTOCOL = PASS ;
+EMA_PULLBACK_V1_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_RUN ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-cost-model.
-Base GitHub vérifiée et récupérée : 3cfcc83a062abce86fb4ddc562abcca722ab625c.
+Branche de vérification : feature/ema-pullback-v1-mnq-development-protocol.
+Base GitHub vérifiée et récupérée : b172b14fa3c1d5dec1dbd745c40681674a61f5b7.
 
 ## Acquis vérifiés
 
@@ -709,10 +711,33 @@ stratégie/replay ciblées et 307 tests contrat/filiation/OOS passent. La suite 
 
 `EMA_PULLBACK_V1_MNQ_FORMALIZATION = PASS`.
 
-`BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED`.
-Action humaine unique : figer avant tout replay les métriques et seuils du protocole exploratoire
-sur `EXPOSED_DEVELOPMENT`, sans accès OOS, sans sélection rétroactive et sans revendication de
-performance indépendante.
+`EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_PROTOCOL = PASS`.
+
+Le protocole préengagé canonique est
+`docs/evidence/EMA_PULLBACK_V1_MNQ_DEVELOPMENT_PROTOCOL.json`, SHA-256
+`13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f`. Il lie la baseline,
+le modèle de coûts et le dataset propre
+`mnq-06-26-minute-last-development-3bd8c078-v1` / `EXPOSED_DEVELOPMENT` avant toute lecture
+de résultat. Le compteur de replay de ce protocole reste à zéro.
+
+Les seuils inclusifs sont : 100 trades clôturés, PnL net réalisé d'au moins `200.00 USD`,
+profit factor net d'au moins `1.15`, drawdown mark-to-market d'au plus `750.00 USD` et au plus
+8 pertes consécutives. Les trois tiers sont fixés par durée calendaire contiguë ; un trade clôturé
+est attribué par timestamp de fill de sortie. Chaque tiers exige 15 clôtures, au moins deux tiers
+strictement profitables, aucun profit factor inférieur à `0.80` et aucun PnL inférieur à
+`-200.00 USD`. La convention projet sans perte est `+Infinity` si le numérateur est positif,
+sinon zéro.
+
+`GO_TO_INDEPENDENT_VALIDATION` reste un simple résultat de screening DEVELOPMENT : il ne valide
+ni stratégie, ni rentabilité, ni paper trading, ni aptitude Apex. Après le premier replay, les
+seuils sont immuables ; un échec est conservé et toute modification de stratégie devient une
+nouvelle variante explicite. OOS reste fermé.
+
+Prochaine phase interne : valider le runner déterministe contre ce protocole, puis exécuter une
+seule fois le RAW propre exact. Aucun résultat de marché n'a été lu pendant ce préengagement.
+Preuves avant replay : 15 tests du protocole, 300 tests protocole + contrat EMA, 322 tests ciblés
+avec filiation/OOS et suite complète de 6 212 tests PASS (6 warnings historiques). Ruff,
+`py_compile`, validation JSON et `git diff --check` passent.
 
 ## Limites du produit
 

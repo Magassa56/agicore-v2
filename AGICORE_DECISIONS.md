@@ -561,3 +561,33 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
 10. **Portée** : baseline déterministe sans optimisation, sans OOS, Risk Engine, broker ni ordre réel.
 11. **Verdict** : `EMA_PULLBACK_V1_MNQ_FEES_AND_SLIPPAGE_MODEL = PASS` et formalisation V1 `PASS` ;
     prochaine gate : `BLOCKED_HUMAN_GATE — BASELINE_DEVELOPMENT_REPLAY_PROTOCOL_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — protocole de screening DEVELOPMENT préengagé (approuvé le 2026-09-27)
+
+1. **Artefact immuable** : `EMA_PULLBACK_V1_MNQ_DEVELOPMENT_PROTOCOL.json`, SHA-256
+   `13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f`, est enregistré avant
+   tout replay ou lecture de résultat.
+2. **Source unique** : dataset `mnq-06-26-minute-last-development-3bd8c078-v1`, RAW SHA-256
+   `3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a`, exclusivement
+   `EXPOSED_DEVELOPMENT`. OOS est interdit.
+3. **Seuils totaux inclusifs** : au moins 100 trades réellement clôturés, PnL net réalisé
+   `>= 200.00 USD`, profit factor net `>= 1.15`, drawdown marqué `<= 750.00 USD`, pertes
+   consécutives `<= 8`.
+4. **Coûts et comptabilité** : le PnL des trades est net après prix déjà slippés et commissions
+   `EACH_FILL`; positions ouvertes, fills synthétiques et latent final sont exclus du réalisé.
+   Le drawdown utilise chronologiquement l'equity réalisée plus le latent marqué à chaque Close.
+5. **Profit factor** : gains nets positifs divisés par la valeur absolue des pertes nettes. La
+   convention déterministe existante du projet vaut `+Infinity` sans perte si les gains sont
+   positifs, sinon zéro.
+6. **Stabilité** : trois tiers contigus de durée calendaire égale, définis avant résultats. Les
+   trades clôturés sont attribués par timestamp de fill de sortie ; aucun tri par PnL ou nombre de
+   trades. Chaque tiers exige 15 clôtures, deux tiers strictement profitables, profit factor
+   `>= 0.80` et PnL `>= -200.00 USD`.
+7. **Verdict** : moins de 100 clôtures ou un tiers sous 15 donne `INSUFFICIENT_SAMPLE`. Tous les
+   seuils et la stabilité donnent `GO_TO_INDEPENDENT_VALIDATION`; tout autre cas suffisamment
+   échantillonné donne `NO_GO_BASELINE`.
+8. **Gouvernance** : `GO` n'est ni validation, ni preuve de rentabilité, ni aptitude Apex. Le
+   premier replay verrouille définitivement ces seuils ; un échec reste archivé et tout changement
+   de stratégie exige une nouvelle variante/version explicite.
+9. **État** : protocole `PASS`, replay `NOT_RUN`. La prochaine phase interne est la validation du
+   runner puis l'unique replay DEVELOPMENT déterministe, sans OOS.

@@ -1,0 +1,91 @@
+{
+  "schema_version": "agicore.ema-pullback-development-screening.v1",
+  "protocol_id": "EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_2026_09_27",
+  "frozen_at_utc": "2026-09-27T18:16:41Z",
+  "classification": "PRECOMMITTED_EXPLORATORY_DEVELOPMENT_SCREENING",
+  "strategy_contract_id": "EMA_PULLBACK_V1_MNQ",
+  "cost_model_id": "EMA_PULLBACK_V1_MNQ_COSTS_2026_09_27",
+  "source_dataset": {
+    "dataset_id": "mnq-06-26-minute-last-development-3bd8c078-v1",
+    "source_raw_sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+    "role": "DEVELOPMENT",
+    "exposure_state": "EXPOSED_DEVELOPMENT",
+    "oos_access_permitted": false
+  },
+  "execution": {
+    "maximum_replay_count_for_this_protocol": 1,
+    "deterministic_replay_required": true,
+    "thresholds_must_be_recorded_before_replay": true,
+    "threshold_changes_after_first_replay": "FORBIDDEN",
+    "failed_baseline_result_retention": "REQUIRED",
+    "strategy_change_requires_new_explicit_variant": true
+  },
+  "total_screening_thresholds": {
+    "minimum_closed_trades": 100,
+    "minimum_net_pnl_usd": "200.00",
+    "minimum_profit_factor": "1.15",
+    "maximum_drawdown_usd": "750.00",
+    "maximum_consecutive_losses": 8,
+    "comparators_at_boundary": "INCLUSIVE"
+  },
+  "metric_contract": {
+    "net_realized_pnl": "SUM_OF_NET_PNL_OF_ACTUALLY_CLOSED_TRADES_ONLY",
+    "included_costs": [
+      "SLIPPAGE_EMBEDDED_IN_FILL_PRICES",
+      "COMMISSIONS_REMOVED_EACH_FILL"
+    ],
+    "excluded_from_net_realized_pnl": [
+      "UNREALIZED_PNL_AT_END",
+      "SYNTHETIC_FILLS",
+      "OPEN_POSITIONS_NOT_CLOSED"
+    ],
+    "profit_factor_numerator": "SUM_OF_POSITIVE_NET_CLOSED_TRADE_PNL_AFTER_COSTS",
+    "profit_factor_denominator": "ABS_SUM_OF_NEGATIVE_NET_CLOSED_TRADE_PNL_AFTER_COSTS",
+    "profit_factor_zero_loss_convention": "POSITIVE_INFINITY_IF_NUMERATOR_POSITIVE_ELSE_ZERO",
+    "marked_equity": "REALIZED_EQUITY_PLUS_UNREALIZED_PNL_MARKED_AT_EACH_CLOSE",
+    "marked_equity_starting_baseline_usd": "0.00",
+    "maximum_drawdown": "MAX_RUNNING_PEAK_MINUS_MARKED_EQUITY_ON_CHRONOLOGICAL_CLOSES",
+    "latent_pnl_becomes_realized": false,
+    "loss_streak_rule": "NET_TRADE_PNL_LT_ZERO_INCREMENTS; NET_TRADE_PNL_GTE_ZERO_RESETS"
+  },
+  "segment_contract": {
+    "labels": [
+      "DEVELOPMENT_S1",
+      "DEVELOPMENT_S2",
+      "DEVELOPMENT_S3"
+    ],
+    "split_basis": "THREE_CONTIGUOUS_EQUAL_ELAPSED_TIME_THIRDS_FROM_FIRST_TO_LAST_SOURCE_TIMESTAMP",
+    "boundary_policy": "S1_AND_S2_HALF_OPEN; S3_INCLUDES_FINAL_TIMESTAMP",
+    "closed_trade_attribution": "EXIT_FILL_TIMESTAMP",
+    "reordering": "FORBIDDEN",
+    "pnl_or_trade_count_based_segmentation": "FORBIDDEN",
+    "minimum_closed_trades_per_segment": 15,
+    "minimum_profitable_segment_count": 2,
+    "profitable_segment_definition": "NET_REALIZED_PNL_USD_GT_ZERO",
+    "minimum_segment_profit_factor": "0.80",
+    "minimum_segment_net_pnl_usd": "-200.00",
+    "comparators_at_boundary": "INCLUSIVE",
+    "undersized_segment_status": "INSUFFICIENT_SAMPLE"
+  },
+  "verdict_contract": {
+    "evaluation_order": [
+      "TOTAL_CLOSED_TRADES",
+      "SEGMENT_CLOSED_TRADES",
+      "TOTAL_THRESHOLDS_AND_SEGMENT_STABILITY"
+    ],
+    "insufficient_sample": "TOTAL_LT_100_OR_ANY_SEGMENT_LT_15",
+    "go": "ALL_TOTAL_THRESHOLDS_PASS_AND_SEGMENT_STABILITY_PASS",
+    "otherwise": "NO_GO_BASELINE",
+    "go_label": "GO_TO_INDEPENDENT_VALIDATION",
+    "go_is_strategy_validation": false,
+    "go_is_profitability_proof": false,
+    "go_is_apex_readiness": false
+  },
+  "prohibited_claims": [
+    "STRATEGY_VALIDATED",
+    "PROFITABILITY_DEMONSTRATED",
+    "OOS_EVIDENCE",
+    "PAPER_TRADING_VALIDATED",
+    "APEX_OR_REAL_TRADING_READY"
+  ]
+}
