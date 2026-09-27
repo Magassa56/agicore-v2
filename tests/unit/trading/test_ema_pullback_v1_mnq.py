@@ -9,6 +9,7 @@ from inspect import signature
 import pytest
 
 from agicore.trading.ema_pullback_v1_mnq import (
+    ADD_TO_POSITION,
     ALLOWED_WEEKDAYS,
     BAR_BASED_EXECUTION_MODEL,
     BID_ASK_SPREAD_MODELED,
@@ -19,7 +20,9 @@ from agicore.trading.ema_pullback_v1_mnq import (
     BREAKEVEN_PRICE,
     BREAKEVEN_R_MULTIPLE_TRIGGER,
     BREAKEVEN_TRIGGER,
+    CLOSE_AND_REVERSE,
     CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED,
+    DEFERRED_ENTRY,
     DST_RULE,
     EARLIEST_EXECUTION_BAR_OFFSET,
     EMA_SEED_CONVENTION,
@@ -47,11 +50,15 @@ from agicore.trading.ema_pullback_v1_mnq import (
     MAX_PULLBACK_DISTANCE_TICKS,
     MINIMUM_EMA_SLOPE_POINTS_PER_BAR,
     MOVE_STOP_TO_ENTRY,
+    OPEN_POSITION_SIGNAL_POLICY,
     POSITION_EXIT_EQUALITY_TRIGGERS_EXIT,
     POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT,
     PULLBACK_LOOKBACK_BARS,
     PULLBACK_PROXIMITY_QUALIFIES,
     PULLBACK_REQUIRED_TOUCH_BAR_OFFSET,
+    QUEUE_SIGNAL_UNTIL_FLAT,
+    REVERSE_POSITION,
+    SCALE_IN,
     SESSION_END,
     SESSION_FILTER,
     SESSION_START,
@@ -90,8 +97,11 @@ from agicore.trading.ema_pullback_v1_mnq import (
     InitialStopTriggerStatus,
     MACDStatus,
     NextBarOpen,
+    OpenPositionSignalAction,
+    OpenPositionSignalPolicyResult,
     PositionExitAction,
     PositionExitReason,
+    PositionState,
     ProtectedEntryExecutionResult,
     PullbackContractError,
     PullbackSide,
@@ -113,6 +123,7 @@ from agicore.trading.ema_pullback_v1_mnq import (
     evaluate_ema_pullback_entry_signal,
     evaluate_initial_stop_on_bar,
     evaluate_macd_confirmation,
+    evaluate_open_position_signal_policy,
     evaluate_pullback_confirmation,
     initial_stop_triggered_by_market_price,
     simulate_entry_with_initial_structural_stop,
@@ -2285,3 +2296,245 @@ def test_disabled_session_filter_is_deterministic() -> None:
     assert evaluate_disabled_session_filter(**arguments) == evaluate_disabled_session_filter(
         **arguments
     )
+
+
+def _signal_policy_bar(sequence: int) -> ClosedBarEMA20:
+    return _bar(sequence, low="99", high="101", close="100")
+
+
+def _signal_policy_exit(side: PullbackSide) -> ExitPriorityExecutionResult:
+    return arbitrate_exit_at_open(
+        position=_protected_position(side),
+        pending_ema20_exit=_qualified_exit(side, sequence=22),
+        execution_bar=NextBarOpen(sequence=23, open=Decimal(100)),
+    )
+
+
+@pytest.mark.parametrize("position_side", [PullbackSide.LONG, PullbackSide.SHORT])
+@pytest.mark.parametrize("same_direction", [True, False])
+def test_open_position_ignores_same_and_opposite_direction_signals(
+    position_side: PullbackSide, same_direction: bool
+) -> None:
+    candidate_side = (
+        position_side
+        if same_direction
+        else PullbackSide.SHORT
+        if position_side is PullbackSide.LONG
+        else PullbackSide.LONG
+    )
+    result = evaluate_open_position_signal_policy(
+        candidate_signal=_qualified_entry(candidate_side, sequence=22),
+        decision_bar=_signal_policy_bar(22),
+        position_at_close=_protected_position(position_side),
+    )
+
+    assert result.position_state is PositionState(position_side.value)
+    assert result.action is OpenPositionSignalAction.IGNORE
+    assert result.accepted_signal is None
+    assert result.queued_signal is None
+    assert result.add_to_position is result.scale_in is False
+    assert result.reverse_position is result.close_and_reverse is False
+    assert result.queue_signal_until_flat is result.deferred_entry is False
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_pending_ema20_exit_does_not_make_position_flat_at_decision_close(
+    side: PullbackSide,
+) -> None:
+    position = _protected_position(side)
+    exit_decision = _qualified_exit(side, sequence=22)
+    result = evaluate_open_position_signal_policy(
+        candidate_signal=_qualified_entry(side, sequence=22),
+        decision_bar=_signal_policy_bar(22),
+        position_at_close=position,
+        pending_ema20_exit=exit_decision,
+    )
+
+    assert result.pending_ema20_exit is True
+    assert result.action is OpenPositionSignalAction.IGNORE
+    assert result.accepted_signal is result.queued_signal is None
+    assert result.position_state is PositionState(side.value)
+    assert position.position_opened is True
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_flat_after_filled_exit_only_accepts_newly_formed_signal(
+    side: PullbackSide,
+) -> None:
+    prior_exit = _signal_policy_exit(side)
+    assert prior_exit.execution_bar_sequence == 23
+    with pytest.raises(PullbackContractError, match="old signal"):
+        evaluate_open_position_signal_policy(
+            candidate_signal=_qualified_entry(side, sequence=22),
+            decision_bar=_signal_policy_bar(22),
+            position_at_close=None,
+            last_exit=prior_exit,
+        )
+
+    new_signal = _qualified_entry(side, sequence=23)
+    result = evaluate_open_position_signal_policy(
+        candidate_signal=new_signal,
+        decision_bar=_signal_policy_bar(23),
+        position_at_close=None,
+        last_exit=prior_exit,
+    )
+    assert result.position_state is PositionState.FLAT
+    assert result.action is OpenPositionSignalAction.ALLOW
+    assert result.accepted_signal is new_signal
+    assert result.queued_signal is None
+    assert result.pending_ema20_exit is False
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_flat_after_structural_stop_requires_new_signal(side: PullbackSide) -> None:
+    position = _protected_position(side)
+    stop_price = position.initial_stop.stop_price
+    stop_bar = StopEvaluationBar(
+        sequence=23,
+        open=Decimal(100),
+        low=stop_price if side is PullbackSide.LONG else Decimal(99),
+        high=stop_price if side is PullbackSide.SHORT else Decimal(101),
+    )
+    prior_exit = evaluate_initial_stop_on_bar(position=position, bar=stop_bar)
+    assert prior_exit.position_closed is True
+
+    result = evaluate_open_position_signal_policy(
+        candidate_signal=_qualified_entry(side, sequence=23),
+        decision_bar=_signal_policy_bar(23),
+        position_at_close=None,
+        last_exit=prior_exit,
+    )
+    assert result.action is OpenPositionSignalAction.ALLOW
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_flat_without_new_signal_never_replays_previous_one(side: PullbackSide) -> None:
+    result = evaluate_open_position_signal_policy(
+        candidate_signal=None,
+        decision_bar=_signal_policy_bar(23),
+        position_at_close=None,
+        last_exit=_signal_policy_exit(side),
+    )
+
+    assert result.action is OpenPositionSignalAction.NO_SIGNAL
+    assert result.accepted_signal is result.queued_signal is None
+
+
+def test_initial_flat_state_allows_a_new_signal_without_exit_history() -> None:
+    candidate = _qualified_entry(PullbackSide.LONG, sequence=20)
+    result = evaluate_open_position_signal_policy(
+        candidate_signal=candidate,
+        decision_bar=_signal_policy_bar(20),
+        position_at_close=None,
+    )
+    assert result.accepted_signal is candidate
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"add_to_position": True},
+        {"scale_in": True},
+        {"reverse_position": True},
+        {"close_and_reverse": True},
+        {"queue_signal_until_flat": True},
+        {"deferred_entry": True},
+        {"queued_signal": "hidden order"},
+    ],
+)
+def test_open_position_policy_rejects_hidden_position_changes_or_queued_entries(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(PullbackContractError, match="cannot add, reverse, defer, or queue"):
+        OpenPositionSignalPolicyResult(
+            position_state=PositionState.LONG,
+            action=OpenPositionSignalAction.IGNORE,
+            decision_bar_sequence=22,
+            accepted_signal=None,
+            **override,  # type: ignore[arg-type]
+        )
+
+
+def test_open_position_policy_flags_are_explicitly_disabled() -> None:
+    assert OPEN_POSITION_SIGNAL_POLICY == "IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT"
+    assert (
+        ADD_TO_POSITION,
+        SCALE_IN,
+        REVERSE_POSITION,
+        CLOSE_AND_REVERSE,
+        QUEUE_SIGNAL_UNTIL_FLAT,
+        DEFERRED_ENTRY,
+    ) == (False,) * 6
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_unfilled_exit_does_not_prove_return_to_flat(side: PullbackSide) -> None:
+    position = _protected_position(side)
+    untouched = evaluate_initial_stop_on_bar(
+        position=position,
+        bar=StopEvaluationBar(sequence=22, open=Decimal(100), low=Decimal(99), high=Decimal(101)),
+    )
+    assert untouched.position_closed is False
+    with pytest.raises(PullbackContractError, match="filled closing exit"):
+        evaluate_open_position_signal_policy(
+            candidate_signal=_qualified_entry(side, sequence=22),
+            decision_bar=_signal_policy_bar(22),
+            position_at_close=None,
+            last_exit=untouched,
+        )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_pending_exit_must_match_open_side_and_current_close(side: PullbackSide) -> None:
+    other = PullbackSide.SHORT if side is PullbackSide.LONG else PullbackSide.LONG
+    for invalid_exit in (_qualified_exit(other, sequence=22), _qualified_exit(side, sequence=21)):
+        with pytest.raises(PullbackContractError, match="pending exit"):
+            evaluate_open_position_signal_policy(
+                candidate_signal=_qualified_entry(side, sequence=22),
+                decision_bar=_signal_policy_bar(22),
+                position_at_close=_protected_position(side),
+                pending_ema20_exit=invalid_exit,
+            )
+
+
+def test_open_and_filled_exit_simultaneously_is_rejected() -> None:
+    with pytest.raises(PullbackContractError, match="cannot be open"):
+        evaluate_open_position_signal_policy(
+            candidate_signal=_qualified_entry(PullbackSide.LONG, sequence=23),
+            decision_bar=_signal_policy_bar(23),
+            position_at_close=_protected_position(PullbackSide.LONG),
+            last_exit=_signal_policy_exit(PullbackSide.LONG),
+        )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_open_position_result_is_immutable_deterministic_and_causal(side: PullbackSide) -> None:
+    arguments = {
+        "candidate_signal": _qualified_entry(side, sequence=22),
+        "decision_bar": _signal_policy_bar(22),
+        "position_at_close": _protected_position(side),
+    }
+    first = evaluate_open_position_signal_policy(**arguments)
+    assert first == evaluate_open_position_signal_policy(**arguments)
+
+    _signal_policy_bar(23)  # Future observations cannot enter this closed-bar evaluation.
+    assert first == evaluate_open_position_signal_policy(**arguments)
+    with pytest.raises(FrozenInstanceError):
+        first.queued_signal = "deferred"  # type: ignore[misc]
+
+    with pytest.raises(PullbackContractError, match="exact closed bar"):
+        evaluate_open_position_signal_policy(
+            candidate_signal=_qualified_entry(side, sequence=23),
+            decision_bar=_signal_policy_bar(22),
+            position_at_close=_protected_position(side),
+        )
+
+
+def test_open_position_signal_policy_has_no_future_bar_input() -> None:
+    assert set(signature(evaluate_open_position_signal_policy).parameters) == {
+        "candidate_signal",
+        "decision_bar",
+        "position_at_close",
+        "last_exit",
+        "pending_ema20_exit",
+    }

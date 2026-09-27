@@ -476,3 +476,25 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    ni accès OOS, ni métrique de performance, ni modification du Risk Engine, ni broker ou ordre réel.
 9. **Verdict** : `EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — ignorer les signaux pendant une position ouverte (approuvé le 2026-09-27)
+
+1. **Mode** : `OPEN_POSITION_SIGNAL_POLICY = IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT`.
+   À `Close[t]`, tant qu'une position LONG ou SHORT est réellement ouverte, tout nouveau signal
+   d'entrée de même sens ou opposé est ignoré.
+2. **Aucune modification de position** : `add_to_position = false`, `scale_in = false`,
+   `reverse_position = false` et `close_and_reverse = false` ; ni pyramiding ni inversion implicite.
+3. **Aucune entrée reportée** : `queue_signal_until_flat = false`, `deferred_entry = false`.
+   Le résultat ne conserve aucun signal ignoré, prix d'exécution ou ordre en attente.
+4. **Sortie en attente** : une sortie EMA20 décidée à `Close[t]` ne ferme pas encore la position.
+   Le signal d'entrée apparu à cette même clôture est ignoré, même si l'ordre de sortie doit être
+   exécuté à `Open[t+1]`.
+5. **Retour à plat** : seul le fill constaté d'une sortie existante permet l'état `FLAT`. Une
+   nouvelle entrée exige un nouveau signal causal sur une clôture ultérieure, jamais la reprise
+   d'un signal apparu pendant l'ancienne position.
+6. **Exits inchangés** : `STRUCTURAL_STOP`, `EMA20_EXIT` et `STRUCTURAL_STOP_FIRST` restent
+   identiques ; `TAKE_PROFIT`, `BREAKEVEN`, `TRAILING_STOP` et `SESSION_FILTER` restent `NONE`.
+7. **Portée** : décision déterministe initiale sans optimisation ; ni OOS, ni PnL, ni Risk Engine,
+   ni broker, ni ordre réel. La taille initiale d'une position n'est pas décidée ici.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS` ; prochaine gate métier
+   unique : `BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED`.

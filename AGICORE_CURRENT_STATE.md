@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -16,9 +16,10 @@ EMA_PULLBACK_V1_MNQ_EXIT_PRIORITY = PASS ;
 EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS ;
 EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS ;
+EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-no-session-filter.
-Base GitHub vérifiée et récupérée : cb26964639130a7f4a1e00a331c4c920dbbec699.
+Branche de vérification : feature/ema-pullback-v1-mnq-open-position-signals.
+Base GitHub vérifiée et récupérée : ab0baf5d8852fa463b2450a697521d751ffbc95c.
 
 ## Acquis vérifiés
 
@@ -580,6 +581,35 @@ Action humaine unique : définir ce que V1 fait d'un nouveau signal de même sen
 alors qu'une position est déjà ouverte — l'ignorer jusqu'au retour à plat, renforcer la position,
 ou fermer/inverser — sans optimisation sur les données.
 
+## EMA_PULLBACK_V1_MNQ — nouveaux signaux ignorés tant que la position est ouverte
+
+La décision métier du 2026-09-27 fixe sans optimisation
+`OPEN_POSITION_SIGNAL_POLICY = IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT`.
+À `Close[t]`, une position effectivement ouverte, LONG ou SHORT, fait ignorer tout nouveau signal
+d'entrée, de même sens ou opposé. Ni ajout/pyramiding, ni renforcement, ni inversion, ni fermeture
+et inversion, ni file d'attente ou exécution différée ne sont autorisés.
+
+Une sortie EMA20 décidée à `Close[t]` reste en attente jusqu'à son éventuel fill à `Open[t+1]` :
+le signal d'entrée formé à cette clôture est ignoré. Le retour à `FLAT` exige un fill de sortie
+réellement enregistré, au stop structurel ou selon la priorité de sortie déjà établie. Un signal
+de la clôture antérieure ne peut être réutilisé après cette fermeture ; une nouvelle entrée
+requiert un nouveau signal formé sur une clôture au moins égale à la barre du fill.
+
+Le résultat du prédicat est immuable et ne conserve ni signal ignoré, ni ordre différé. Les deux
+sorties existantes et leurs priorités restent inchangées ; le calendrier source ETH reste obligatoire.
+La formalisation est purement offline et ne choisit pas le nombre de contrats ni une métrique de PnL.
+
+Preuves locales : 29 nouveaux cas portent le fichier synthétique à 206 tests PASS ; les 213 tests
+stratégie/replay ciblés passent. Suite complète : 6 118 tests PASS, 6 warnings historiques en
+79,84 s. Ruff ciblé, format Ruff, `py_compile` et `git diff --check` passent.
+
+`EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS`.
+
+`EMA_PULLBACK_V1_MNQ_FORMALIZATION = BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED`.
+Action humaine unique : choisir la taille initiale exacte d'une nouvelle position MNQ (nombre
+fixe de contrats entre 1 et 2, ou formule exacte déjà approuvée), sans changer le Risk Engine ni
+la limite maximale de deux contrats et sans optimiser sur les données.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -591,6 +621,6 @@ les sinks obligatoires conservent leur propre contrat d'idempotence. Une ancre c
 de la base reste nécessaire pour détecter le rollback cohérent de toute la base SQLite.
 Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le stop structurel
 initial, l'absence explicite de take-profit, breakeven et trailing stop ainsi que la priorité entre
-les deux sorties existantes et l'absence de filtre stratégique de session sont désormais
-formalisés. La politique des nouveaux signaux pendant une position ouverte reste à décider avant
-l'évaluation ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.
+les deux sorties existantes, l'absence de filtre stratégique de session et le refus des nouveaux
+signaux pendant une position ouverte sont désormais formalisés. La taille initiale d'une position
+MNQ reste à décider avant l'évaluation ; cette stratégie demeure distincte de EMA19/50 V3 rejetée.
