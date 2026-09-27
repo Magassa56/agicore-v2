@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from decimal import Decimal
 
 import pytest
@@ -62,6 +62,13 @@ from agicore.trading.ema_pullback_v1_mnq import (
     TAKE_PROFIT_R_MULTIPLE,
     TAKE_PROFIT_TICKS,
     TICK_REALISTIC_FILL_MODELED,
+    TRAILING_ACTIVATION,
+    TRAILING_DISTANCE,
+    TRAILING_REFERENCE,
+    TRAILING_STEP,
+    TRAILING_STOP,
+    TRAILING_STOP_ENABLED,
+    TRAILING_UPDATE_FREQUENCY,
     WICK_CROSS_EMA20_ALLOWED,
     BreakevenEvaluationResult,
     ClosedBarEMA20,
@@ -83,10 +90,12 @@ from agicore.trading.ema_pullback_v1_mnq import (
     SimulatedOrderType,
     StopEvaluationBar,
     TakeProfitEvaluationResult,
+    TrailingStopEvaluationResult,
     arbitrate_exit_at_open,
     construct_initial_structural_stop,
     evaluate_disabled_breakeven,
     evaluate_disabled_take_profit,
+    evaluate_disabled_trailing_stop,
     evaluate_ema20_position_exit,
     evaluate_ema20_slope,
     evaluate_ema_pullback_entry_signal,
@@ -212,6 +221,33 @@ def _evaluate_no_breakeven(
     return position, result
 
 
+def _evaluate_no_trailing(
+    side: PullbackSide,
+    *,
+    observed_high: str = "102",
+    observed_low: str = "98",
+    observed_close: str = "100",
+    observed_ema20: str = "100",
+    favorable_ticks: str = "0",
+    favorable_r_multiple: str = "0",
+    unrealized_pnl: str = "0",
+    elapsed_closed_bars: int = 0,
+) -> tuple[ProtectedEntryExecutionResult, TrailingStopEvaluationResult]:
+    position = _protected_position(side)
+    result = evaluate_disabled_trailing_stop(
+        position=position,
+        observed_high=Decimal(observed_high),
+        observed_low=Decimal(observed_low),
+        observed_close=Decimal(observed_close),
+        observed_ema20=Decimal(observed_ema20),
+        favorable_ticks=Decimal(favorable_ticks),
+        favorable_r_multiple=Decimal(favorable_r_multiple),
+        unrealized_pnl=Decimal(unrealized_pnl),
+        elapsed_closed_bars=elapsed_closed_bars,
+    )
+    return position, result
+
+
 def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert PULLBACK_LOOKBACK_BARS == 3
     assert PULLBACK_REQUIRED_TOUCH_BAR_OFFSET == 2
@@ -268,6 +304,13 @@ def test_contract_freezes_owner_declared_initial_parameters() -> None:
     assert BREAKEVEN_R_MULTIPLE_TRIGGER is None
     assert BREAKEVEN_MONETARY_PNL_TRIGGER is None
     assert BREAKEVEN_DURATION_BARS_TRIGGER is None
+    assert TRAILING_STOP == "NONE"
+    assert TRAILING_STOP_ENABLED is False
+    assert TRAILING_ACTIVATION is None
+    assert TRAILING_DISTANCE is None
+    assert TRAILING_STEP is None
+    assert TRAILING_UPDATE_FREQUENCY is None
+    assert TRAILING_REFERENCE is None
 
 
 def test_long_qualifies_after_prior_pullback_and_strict_close_above_ema20() -> None:
@@ -1815,6 +1858,219 @@ def test_disabled_breakeven_is_deterministic(side: PullbackSide) -> None:
 
     first = evaluate_disabled_breakeven(**arguments)
     second = evaluate_disabled_breakeven(**arguments)
+
+    assert first == second
+    assert first.active_stop is second.active_stop is position.initial_stop
+
+
+@pytest.mark.parametrize(
+    ("side", "observed_high", "observed_low", "observed_close"),
+    [
+        (PullbackSide.LONG, "150", "100", "140"),
+        (PullbackSide.SHORT, "100", "50", "60"),
+    ],
+)
+def test_new_highs_or_lows_never_move_initial_stop(
+    side: PullbackSide,
+    observed_high: str,
+    observed_low: str,
+    observed_close: str,
+) -> None:
+    position, result = _evaluate_no_trailing(
+        side,
+        observed_high=observed_high,
+        observed_low=observed_low,
+        observed_close=observed_close,
+        favorable_ticks="200",
+        favorable_r_multiple="10",
+        unrealized_pnl="5000",
+        elapsed_closed_bars=100,
+    )
+
+    assert result.position_side is side
+    assert result.initial_stop is position.initial_stop
+    assert result.active_stop is position.initial_stop
+    assert result.active_stop.stop_price == position.initial_stop.stop_price
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_large_profit_never_activates_trailing_stop(side: PullbackSide) -> None:
+    position, result = _evaluate_no_trailing(
+        side,
+        observed_high="1000001",
+        observed_low="0",
+        observed_close="1000000" if side is PullbackSide.LONG else "1",
+        observed_ema20="500000",
+        favorable_ticks="1000000",
+        favorable_r_multiple="1000000",
+        unrealized_pnl="1000000",
+        elapsed_closed_bars=1000000,
+    )
+
+    assert result.active_stop is position.initial_stop
+    assert result.trailing_stop_enabled is False
+    assert result.trailing_activation is None
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+@pytest.mark.parametrize(
+    ("favorable_ticks", "favorable_r_multiple"),
+    [("4", "1"), ("8", "2"), ("1000", "25")],
+)
+def test_one_r_two_r_or_any_tick_profit_never_activates_trailing(
+    side: PullbackSide,
+    favorable_ticks: str,
+    favorable_r_multiple: str,
+) -> None:
+    position, result = _evaluate_no_trailing(
+        side,
+        observed_high="1001",
+        observed_low="0",
+        observed_close="1000" if side is PullbackSide.LONG else "1",
+        favorable_ticks=favorable_ticks,
+        favorable_r_multiple=favorable_r_multiple,
+        unrealized_pnl="1000000",
+        elapsed_closed_bars=1000,
+    )
+
+    assert result.active_stop is position.initial_stop
+    assert result.trailing_activation is None
+    assert result.trailing_distance is None
+    assert result.trailing_step is None
+    assert result.trailing_reference is None
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_new_closed_bars_never_recalculate_initial_stop(side: PullbackSide) -> None:
+    position = _protected_position(side)
+    original_stop = position.initial_stop
+    first = evaluate_disabled_trailing_stop(
+        position=position,
+        observed_high=Decimal(120),
+        observed_low=Decimal(80),
+        observed_close=Decimal(110),
+        observed_ema20=Decimal(100),
+        favorable_ticks=Decimal(80),
+        favorable_r_multiple=Decimal(4),
+        unrealized_pnl=Decimal(2000),
+        elapsed_closed_bars=10,
+    )
+    second = evaluate_disabled_trailing_stop(
+        position=position,
+        observed_high=Decimal(200),
+        observed_low=Decimal(50),
+        observed_close=Decimal(150),
+        observed_ema20=Decimal(125),
+        favorable_ticks=Decimal(400),
+        favorable_r_multiple=Decimal(20),
+        unrealized_pnl=Decimal(10000),
+        elapsed_closed_bars=11,
+    )
+
+    assert first.active_stop is original_stop
+    assert second.active_stop is original_stop
+    assert position.initial_stop is original_stop
+
+
+def test_trailing_contract_exposes_no_hidden_configuration() -> None:
+    _, result = _evaluate_no_trailing(PullbackSide.LONG)
+
+    assert result.trailing_stop == "NONE"
+    assert result.initial_structural_stop_is_immutable is True
+    assert result.trailing_stop_enabled is False
+    assert result.trailing_activation is None
+    assert result.trailing_distance is None
+    assert result.trailing_step is None
+    assert result.trailing_update_frequency is None
+    assert result.trailing_reference is None
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"trailing_stop_enabled": True},
+        {"trailing_activation": "1R"},
+        {"trailing_distance": "8_TICKS"},
+        {"trailing_step": "1_TICK"},
+        {"trailing_update_frequency": "EACH_BAR"},
+        {"trailing_reference": "HIGH_LOW"},
+    ],
+)
+def test_trailing_contract_rejects_hidden_configuration(override: dict[str, object]) -> None:
+    position = _protected_position(PullbackSide.SHORT)
+    common = {
+        "position_side": PullbackSide.SHORT,
+        "initial_stop": position.initial_stop,
+        "active_stop": position.initial_stop,
+    }
+
+    with pytest.raises(PullbackContractError, match="must remain explicitly disabled"):
+        TrailingStopEvaluationResult(**common, **override)  # type: ignore[arg-type]
+
+
+def test_trailing_contract_rejects_equal_but_distinct_stop_object() -> None:
+    position = _protected_position(PullbackSide.LONG)
+
+    with pytest.raises(PullbackContractError, match="exact initial stop object"):
+        TrailingStopEvaluationResult(
+            position_side=PullbackSide.LONG,
+            initial_stop=position.initial_stop,
+            active_stop=replace(position.initial_stop),
+        )
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_future_observations_cannot_mutate_prior_trailing_result_or_stop(
+    side: PullbackSide,
+) -> None:
+    position = _protected_position(side)
+    original_stop = position.initial_stop
+    baseline = evaluate_disabled_trailing_stop(
+        position=position,
+        observed_high=Decimal(102),
+        observed_low=Decimal(98),
+        observed_close=Decimal(100),
+        observed_ema20=Decimal(100),
+        favorable_ticks=Decimal(0),
+        favorable_r_multiple=Decimal(0),
+        unrealized_pnl=Decimal(0),
+        elapsed_closed_bars=0,
+    )
+
+    evaluate_disabled_trailing_stop(
+        position=position,
+        observed_high=Decimal(1000000),
+        observed_low=Decimal(0),
+        observed_close=Decimal(500000),
+        observed_ema20=Decimal(250000),
+        favorable_ticks=Decimal(1000000),
+        favorable_r_multiple=Decimal(1000000),
+        unrealized_pnl=Decimal(1000000),
+        elapsed_closed_bars=1000000,
+    )
+
+    assert baseline.active_stop is original_stop
+    assert baseline.active_stop.stop_price == original_stop.stop_price
+    assert position.initial_stop is original_stop
+
+
+@pytest.mark.parametrize("side", [PullbackSide.LONG, PullbackSide.SHORT])
+def test_disabled_trailing_stop_is_deterministic(side: PullbackSide) -> None:
+    position = _protected_position(side)
+    arguments = {
+        "position": position,
+        "observed_high": Decimal(150),
+        "observed_low": Decimal(50),
+        "observed_close": Decimal(100),
+        "observed_ema20": Decimal(100),
+        "favorable_ticks": Decimal(200),
+        "favorable_r_multiple": Decimal(10),
+        "unrealized_pnl": Decimal(5000),
+        "elapsed_closed_bars": 100,
+    }
+
+    first = evaluate_disabled_trailing_stop(**arguments)
+    second = evaluate_disabled_trailing_stop(**arguments)
 
     assert first == second
     assert first.active_stop is second.active_stop is position.initial_stop

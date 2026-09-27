@@ -436,3 +436,21 @@ intégrée par PR #242. L'ancien arrêt avant commit est clos ; la Gate 5 est au
    ni broker ou ordre réel.
 8. **Verdict** : `EMA_PULLBACK_V1_MNQ_BREAKEVEN_NONE = PASS` ; prochaine gate métier unique :
    `BLOCKED_HUMAN_GATE — TRAILING_STOP_RULE_REQUIRED`.
+
+## EMA_PULLBACK_V1_MNQ — aucun trailing stop (approuvé le 2026-09-27)
+
+1. **Mode** : `TRAILING_STOP = NONE`, `trailing_stop_enabled = false`; activation, distance,
+   step, fréquence de mise à jour et référence restent `null` pour LONG comme pour SHORT.
+2. **Identité du stop** : le stop actif reste exactement la même instance immuable que le stop
+   structurel initial. Une copie égale en valeur ne satisfait pas le contrat.
+3. **Sources sans effet** : nouveaux High/Low, mouvement favorable, ticks, multiple `R`, PnL,
+   EMA20 et durée en position ne déplacent et ne recalculent jamais le stop.
+4. **Fail-closed** : toute activation, distance, step, fréquence ou référence trailing implicite
+   est refusée. Aucune observation ultérieure ne peut muter un résultat antérieur.
+5. **Sorties** : seules `STRUCTURAL_STOP` puis `EMA20_EXIT` restent autorisées, avec
+   `STRUCTURAL_STOP_FIRST` et une seule fermeture par position.
+6. **Baseline V1** : `TAKE_PROFIT = NONE`, `BREAKEVEN = NONE` et `TRAILING_STOP = NONE`.
+7. **Origine et portée** : cette décision initiale n'est issue d'aucune optimisation et n'autorise
+   ni accès OOS, ni métrique de performance, ni modification du Risk Engine, ni broker ou ordre réel.
+8. **Verdict** : `EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS` ; prochaine gate métier unique :
+   `BLOCKED_HUMAN_GATE — SESSION_FILTER_RULE_REQUIRED`.

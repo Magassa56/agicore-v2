@@ -5,9 +5,9 @@ does not compute EMA20, does not emit a broker-executable order, and never reads
 OOS data.  The EMA20 slope uses caller-supplied closed-bar EMA20 values; MACD reuses the
 deterministic replay EMA implementation.  Entry and primary EMA20-exit decisions can be
 mapped to an offline bar-based simulated fill at ``Open[t+1]``.  The initial structural
-stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit or
-breakeven; exit priority at one shared bar open is structural stop first, then a pending
-EMA20 exit.
+stop is frozen from the required ``t-2`` bar.  V1 explicitly has no take-profit,
+breakeven, or trailing stop; exit priority at one shared bar open is structural stop
+first, then a pending EMA20 exit.
 """
 
 from __future__ import annotations
@@ -82,6 +82,13 @@ BREAKEVEN_FAVORABLE_TICKS_TRIGGER = None
 BREAKEVEN_R_MULTIPLE_TRIGGER = None
 BREAKEVEN_MONETARY_PNL_TRIGGER = None
 BREAKEVEN_DURATION_BARS_TRIGGER = None
+TRAILING_STOP = "NONE"
+TRAILING_STOP_ENABLED = False
+TRAILING_ACTIVATION = None
+TRAILING_DISTANCE = None
+TRAILING_STEP = None
+TRAILING_UPDATE_FREQUENCY = None
+TRAILING_REFERENCE = None
 
 
 class PullbackContractError(ValueError):
@@ -422,6 +429,44 @@ class BreakevenEvaluationResult:
             or self.duration_bars_trigger is not None
         ):
             raise PullbackContractError("V1 breakeven contract must remain explicitly disabled")
+
+
+@dataclass(frozen=True)
+class TrailingStopEvaluationResult:
+    """Explicit proof that V1 never trails the original structural stop."""
+
+    position_side: PullbackSide
+    initial_stop: InitialStructuralStop
+    active_stop: InitialStructuralStop
+    trailing_stop: str = TRAILING_STOP
+    initial_structural_stop_is_immutable: bool = INITIAL_STRUCTURAL_STOP_IS_IMMUTABLE
+    trailing_stop_enabled: bool = TRAILING_STOP_ENABLED
+    trailing_activation: None = TRAILING_ACTIVATION
+    trailing_distance: None = TRAILING_DISTANCE
+    trailing_step: None = TRAILING_STEP
+    trailing_update_frequency: None = TRAILING_UPDATE_FREQUENCY
+    trailing_reference: None = TRAILING_REFERENCE
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.position_side, PullbackSide):
+            raise PullbackContractError("trailing position side must be explicitly LONG or SHORT")
+        if not isinstance(self.initial_stop, InitialStructuralStop):
+            raise PullbackContractError("trailing evaluation requires the initial structural stop")
+        if self.initial_stop.side is not self.position_side:
+            raise PullbackContractError("trailing position and initial stop sides must match")
+        if self.active_stop is not self.initial_stop:
+            raise PullbackContractError("trailing must retain the exact initial stop object")
+        if (
+            self.trailing_stop != TRAILING_STOP
+            or self.initial_structural_stop_is_immutable is not True
+            or self.trailing_stop_enabled is not False
+            or self.trailing_activation is not None
+            or self.trailing_distance is not None
+            or self.trailing_step is not None
+            or self.trailing_update_frequency is not None
+            or self.trailing_reference is not None
+        ):
+            raise PullbackContractError("V1 trailing stop contract must remain explicitly disabled")
 
 
 @dataclass(frozen=True)
@@ -943,6 +988,73 @@ def evaluate_disabled_breakeven(
     )
 
 
+def evaluate_disabled_trailing_stop(
+    *,
+    position: ProtectedEntryExecutionResult,
+    observed_high: Decimal,
+    observed_low: Decimal,
+    observed_close: Decimal,
+    observed_ema20: Decimal,
+    favorable_ticks: Decimal,
+    favorable_r_multiple: Decimal,
+    unrealized_pnl: Decimal,
+    elapsed_closed_bars: int,
+) -> TrailingStopEvaluationResult:
+    """Keep the exact initial stop regardless of closed-bar favorable observations.
+
+    The scalar observations expose every prohibited implicit trailing source: new highs
+    or lows, profit, ticks, ``R`` multiples, EMA20, and time.  No sequence or future bar
+    collection is accepted, so the rule cannot scan ahead.  None of these inputs may
+    replace, recalculate, or move the initial structural stop.
+    """
+    if not isinstance(position, ProtectedEntryExecutionResult):
+        raise PullbackContractError("trailing evaluation requires a protected entry result")
+    if (
+        position.status is not SimulatedExecutionStatus.FILLED
+        or position.position_opened is not True
+        or not isinstance(position.side, PullbackSide)
+    ):
+        raise PullbackContractError("trailing evaluation requires an opened position")
+    if (
+        not isinstance(position.initial_stop, InitialStructuralStop)
+        or position.initial_stop.side is not position.side
+        or position.initial_stop.immutable is not True
+    ):
+        raise PullbackContractError("trailing evaluation requires the immutable initial stop")
+    for field_name, value in (
+        ("observed_high", observed_high),
+        ("observed_low", observed_low),
+        ("observed_close", observed_close),
+        ("observed_ema20", observed_ema20),
+    ):
+        if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+            raise PullbackContractError(f"{field_name} must be a finite non-negative Decimal")
+    if observed_low > observed_high:
+        raise PullbackContractError("observed_low must not exceed observed_high")
+    if not observed_low <= observed_close <= observed_high:
+        raise PullbackContractError("observed_close must be inside the observed range")
+    for field_name, value in (
+        ("favorable_ticks", favorable_ticks),
+        ("favorable_r_multiple", favorable_r_multiple),
+    ):
+        if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+            raise PullbackContractError(f"{field_name} must be a finite non-negative Decimal")
+    if not isinstance(unrealized_pnl, Decimal) or not unrealized_pnl.is_finite():
+        raise PullbackContractError("unrealized_pnl must be a finite Decimal")
+    if (
+        isinstance(elapsed_closed_bars, bool)
+        or not isinstance(elapsed_closed_bars, int)
+        or elapsed_closed_bars < 0
+    ):
+        raise PullbackContractError("elapsed_closed_bars must be a non-negative integer")
+
+    return TrailingStopEvaluationResult(
+        position_side=position.side,
+        initial_stop=position.initial_stop,
+        active_stop=position.initial_stop,
+    )
+
+
 def construct_initial_structural_stop(
     *,
     decision: EMAPullbackEntrySignalResult,
@@ -1338,6 +1450,13 @@ __all__ = [
     "TAKE_PROFIT_TICKS",
     "TICK_REALISTIC_FILL_MODELED",
     "TIMEFRAME_MINUTES",
+    "TRAILING_ACTIVATION",
+    "TRAILING_DISTANCE",
+    "TRAILING_REFERENCE",
+    "TRAILING_STEP",
+    "TRAILING_STOP",
+    "TRAILING_STOP_ENABLED",
+    "TRAILING_UPDATE_FREQUENCY",
     "WICK_CROSS_EMA20_ALLOWED",
     "BreakevenEvaluationResult",
     "ClosedBarEMA20",
@@ -1365,12 +1484,14 @@ __all__ = [
     "SimulatedOrderType",
     "StopEvaluationBar",
     "TakeProfitEvaluationResult",
+    "TrailingStopEvaluationResult",
     "arbitrate_exit_at_open",
     "assemble_ema_pullback_entry_signal",
     "construct_initial_structural_stop",
     "distance_from_bar_range_to_ema20",
     "evaluate_disabled_breakeven",
     "evaluate_disabled_take_profit",
+    "evaluate_disabled_trailing_stop",
     "evaluate_ema20_position_exit",
     "evaluate_ema20_slope",
     "evaluate_ema_pullback_entry_signal",
