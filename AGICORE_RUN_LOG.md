@@ -431,3 +431,21 @@
   broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_TRAILING_STOP_NONE = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — SESSION_FILTER_RULE_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE
+
+- Reprise depuis `origin/main` au merge cb26964639130a7f4a1e00a331c4c920dbbec699 de la PR #261 ;
+  branche dédiée `feature/ema-pullback-v1-mnq-no-session-filter`, état initial propre.
+- Décision métier figée sans optimisation : `SESSION_FILTER = NONE`, aucun jour, horaire, fuseau
+  ou DST propre à la stratégie. L'évaluateur n'accepte aucune donnée temporelle.
+- Le calendrier source reste obligatoire : seules les barres clôturées et valides du template
+  exact `CME US Index Futures ETH` sont admises. Aucun filtre stratégique ne peut le contourner.
+- Toute barre source admissible laisse les entrées éligibles ; `STRUCTURAL_STOP` et `EMA20_EXIT`
+  restent actifs sur chacune d'elles. Toute suppression cachée est refusée fail-closed.
+- Vingt-neuf nouveaux cas portent le fichier synthétique à 177 tests PASS en 0,45 s. Les 181 tests
+  contrat/confidentialité passent en 0,17 s et les 223 régressions stratégie/replay en 0,38 s.
+  Suite complète : 6 089 passed, 6 warnings in 78.59s.
+- Ruff ciblé, format Ruff et `py_compile` PASS. Aucun accès dataset/OOS, optimisation, Risk Engine,
+  broker, compte ou ordre réel.
+- Verdict : `EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS` ; prochaine gate métier unique :
+  `BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED`.
