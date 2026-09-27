@@ -449,3 +449,20 @@
   broker, compte ou ordre réel.
 - Verdict : `EMA_PULLBACK_V1_MNQ_SESSION_FILTER_NONE = PASS` ; prochaine gate métier unique :
   `BLOCKED_HUMAN_GATE — OPEN_POSITION_SIGNAL_POLICY_REQUIRED`.
+
+## 2026-09-27 — EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY
+
+- Reprise depuis `origin/main` au merge ab0baf5d8852fa463b2450a697521d751ffbc95c de la
+  PR #262 ; branche dédiée `feature/ema-pullback-v1-mnq-open-position-signals`, base propre.
+- Décision métier sans optimisation : `IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT`. Même sens ou opposé,
+  chaque nouveau signal pendant une position ouverte est supprimé ; ni pyramiding, ni inversion,
+  ni file d'attente, ni entrée différée.
+- La sortie EMA20 encore en attente à `Close[t]` ne rend pas la position `FLAT`. Le retour à plat
+  exige un fill ; un ancien signal ignoré ne peut être rejoué après ce fill. Le stop structurel
+  et la sortie EMA20 conservent leurs modalités et leur priorité existantes.
+- Vingt-neuf nouveaux cas portent le fichier synthétique à 206 tests PASS. Les 213 tests
+  stratégie/replay ciblés passent. Aucun accès dataset/OOS, PnL, optimisation, Risk Engine,
+  broker, compte ou ordre réel. Suite complète : 6 118 passed, 6 warnings in 79.84s.
+  Ruff ciblé, format Ruff, `py_compile`, `git diff --check` PASS ; CI à vérifier sur la PR.
+- Verdict : `EMA_PULLBACK_V1_MNQ_OPEN_POSITION_SIGNAL_POLICY = PASS` ; prochaine gate métier
+  unique : `BLOCKED_HUMAN_GATE — POSITION_SIZE_RULE_REQUIRED`.

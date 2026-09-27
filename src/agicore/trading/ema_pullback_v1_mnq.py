@@ -10,6 +10,8 @@ breakeven, or trailing stop; exit priority at one shared bar open is structural 
 first, then a pending EMA20 exit.  V1 adds no strategy-level session filter: the
 upstream ``CME US Index Futures ETH`` source calendar remains mandatory, and every
 closed valid source bar keeps entries and both existing exits eligible.
+While a position is open at a close, all new entry signals are discarded, including
+those formed on the close that schedules a next-bar EMA20 exit.
 """
 
 from __future__ import annotations
@@ -100,6 +102,13 @@ STRATEGY_TIMEZONE = None
 DST_RULE = None
 SOURCE_TRADING_HOURS_TEMPLATE = "CME US Index Futures ETH"
 SOURCE_CALENDAR_REQUIRED = True
+OPEN_POSITION_SIGNAL_POLICY = "IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT"
+ADD_TO_POSITION = False
+SCALE_IN = False
+REVERSE_POSITION = False
+CLOSE_AND_REVERSE = False
+QUEUE_SIGNAL_UNTIL_FLAT = False
+DEFERRED_ENTRY = False
 
 
 class PullbackContractError(ValueError):
@@ -177,6 +186,22 @@ class PositionExitReason(StrEnum):
 
     STRUCTURAL_STOP = "STRUCTURAL_STOP"
     EMA20_EXIT = "EMA20_EXIT"
+
+
+class OpenPositionSignalAction(StrEnum):
+    """Eligibility of a fresh entry signal on the current closed bar."""
+
+    ALLOW = "ALLOW"
+    IGNORE = "IGNORE"
+    NO_SIGNAL = "NO_SIGNAL"
+
+
+class PositionState(StrEnum):
+    """Actual position state at the entry-decision close."""
+
+    FLAT = "FLAT"
+    LONG = "LONG"
+    SHORT = "SHORT"
 
 
 @dataclass(frozen=True)
@@ -651,6 +676,166 @@ class ExitPriorityExecutionResult:
             )
         if not valid:
             raise PullbackContractError("exit reason, execution and cancellation must be coherent")
+
+
+@dataclass(frozen=True)
+class OpenPositionSignalPolicyResult:
+    """One close's entry eligibility; ignored signals cannot be replayed or queued."""
+
+    position_state: PositionState
+    action: OpenPositionSignalAction
+    decision_bar_sequence: int
+    accepted_signal: EMAPullbackEntrySignalResult | None
+    pending_ema20_exit: bool = False
+    queued_signal: None = None
+    add_to_position: bool = ADD_TO_POSITION
+    scale_in: bool = SCALE_IN
+    reverse_position: bool = REVERSE_POSITION
+    close_and_reverse: bool = CLOSE_AND_REVERSE
+    queue_signal_until_flat: bool = QUEUE_SIGNAL_UNTIL_FLAT
+    deferred_entry: bool = DEFERRED_ENTRY
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.position_state, PositionState) or not isinstance(
+            self.action, OpenPositionSignalAction
+        ):
+            raise PullbackContractError("position state and entry action must be explicit")
+        if (
+            type(self.decision_bar_sequence) is not int
+            or self.decision_bar_sequence < 0
+            or type(self.pending_ema20_exit) is not bool
+        ):
+            raise PullbackContractError("entry policy requires a valid closed-bar sequence")
+        if (
+            self.queued_signal is not None
+            or self.add_to_position is not False
+            or self.scale_in is not False
+            or self.reverse_position is not False
+            or self.close_and_reverse is not False
+            or self.queue_signal_until_flat is not False
+            or self.deferred_entry is not False
+        ):
+            raise PullbackContractError("V1 cannot add, reverse, defer, or queue entry signals")
+        if self.action is OpenPositionSignalAction.ALLOW:
+            signal = self.accepted_signal
+            if (
+                self.position_state is not PositionState.FLAT
+                or self.pending_ema20_exit
+                or not isinstance(signal, EMAPullbackEntrySignalResult)
+                or not isinstance(signal.side, PullbackSide)
+                or signal.entry_signal_qualifies is not True
+                or signal.signal is not EntrySignal(signal.side.value)
+                or signal.confirmation_bar_sequence != self.decision_bar_sequence
+            ):
+                raise PullbackContractError("only a fresh qualified signal while flat is allowed")
+        elif (
+            self.accepted_signal is not None
+            or (self.action is OpenPositionSignalAction.IGNORE)
+            != (self.position_state is not PositionState.FLAT)
+            or (self.pending_ema20_exit and self.position_state is PositionState.FLAT)
+        ):
+            raise PullbackContractError("signals while open must be ignored, never deferred")
+
+
+def evaluate_open_position_signal_policy(
+    *,
+    candidate_signal: EMAPullbackEntrySignalResult | None,
+    decision_bar: ClosedBarEMA20,
+    position_at_close: ProtectedEntryExecutionResult | None,
+    last_exit: ExitPriorityExecutionResult | InitialStopBarExecutionResult | None = None,
+    pending_ema20_exit: EMA20PositionExitResult | None = None,
+) -> OpenPositionSignalPolicyResult:
+    """Discard new signals if the position is still open at ``Close[t]``.
+
+    A pending EMA20 exit cannot make the position flat before its actual next-bar
+    fill.  Once an exit has filled, only a freshly formed signal at or after that
+    execution bar's close may be considered.  No signal, order, or price is kept
+    for later execution.  Source-calendar eligibility remains an upstream gate.
+    """
+    if not isinstance(decision_bar, ClosedBarEMA20):
+        raise PullbackContractError("entry policy requires a closed decision bar")
+    if candidate_signal is not None:
+        if not isinstance(candidate_signal, EMAPullbackEntrySignalResult):
+            raise PullbackContractError("entry policy requires a qualified signal result")
+        if (
+            not isinstance(candidate_signal.side, PullbackSide)
+            or candidate_signal.entry_signal_qualifies is not True
+            or candidate_signal.signal is not EntrySignal(candidate_signal.side.value)
+            or candidate_signal.pullback_confirmation_qualifies is not True
+            or candidate_signal.ema20_slope_qualifies is not True
+            or candidate_signal.macd_cross_qualifies is not True
+            or candidate_signal.macd_status is not MACDStatus.READY
+            or candidate_signal.confirmation_bar_sequence != decision_bar.sequence
+        ):
+            raise PullbackContractError("entry signal must form on this exact closed bar")
+    if position_at_close is not None:
+        position = position_at_close
+        if (
+            not isinstance(position, ProtectedEntryExecutionResult)
+            or not isinstance(position.side, PullbackSide)
+            or position.status is not SimulatedExecutionStatus.FILLED
+            or position.position_opened is not True
+            or position.execution_bar_sequence is None
+            or position.execution_bar_sequence != position.decision_bar_sequence + 1
+            or position.execution_bar_sequence > decision_bar.sequence
+            or position.entry_price is None
+            or not isinstance(position.initial_stop, InitialStructuralStop)
+            or position.initial_stop.side is not position.side
+            or position.initial_stop.decision_bar_sequence != position.decision_bar_sequence
+        ):
+            raise PullbackContractError("open state requires an already filled protected position")
+        if last_exit is not None:
+            raise PullbackContractError("position cannot be open after a recorded closing fill")
+    elif last_exit is not None:
+        if isinstance(last_exit, ExitPriorityExecutionResult):
+            exit_bar_sequence = last_exit.execution_bar_sequence
+        elif (
+            isinstance(last_exit, InitialStopBarExecutionResult)
+            and last_exit.status is InitialStopTriggerStatus.STOP_TRIGGERED
+            and last_exit.position_closed is True
+            and last_exit.fill_price is not None
+        ):
+            exit_bar_sequence = last_exit.evaluated_bar_sequence
+        else:
+            raise PullbackContractError("flat transition requires a filled closing exit")
+        if (
+            type(exit_bar_sequence) is not int
+            or exit_bar_sequence < 0
+            or exit_bar_sequence > decision_bar.sequence
+        ):
+            raise PullbackContractError("an old signal cannot execute after returning to flat")
+
+    if pending_ema20_exit is not None and (
+        position_at_close is None
+        or not isinstance(pending_ema20_exit, EMA20PositionExitResult)
+        or not isinstance(pending_ema20_exit.position_side, PullbackSide)
+        or pending_ema20_exit.position_side is not position_at_close.side
+        or pending_ema20_exit.exit_qualifies is not True
+        or pending_ema20_exit.action
+        is not PositionExitAction(f"EXIT_{position_at_close.side.value}")
+        or pending_ema20_exit.decision_bar_sequence != decision_bar.sequence
+        or pending_ema20_exit.earliest_execution_bar_sequence != decision_bar.sequence + 1
+        or pending_ema20_exit.same_bar_execution_allowed is not False
+    ):
+        raise PullbackContractError("pending exit must be for this open position and close")
+
+    if position_at_close is not None:
+        state = PositionState(position_at_close.side.value)
+        action = OpenPositionSignalAction.IGNORE
+    else:
+        state = PositionState.FLAT
+        action = (
+            OpenPositionSignalAction.ALLOW
+            if candidate_signal is not None
+            else OpenPositionSignalAction.NO_SIGNAL
+        )
+    return OpenPositionSignalPolicyResult(
+        position_state=state,
+        action=action,
+        decision_bar_sequence=decision_bar.sequence,
+        accepted_signal=candidate_signal if action is OpenPositionSignalAction.ALLOW else None,
+        pending_ema20_exit=pending_ema20_exit is not None,
+    )
 
 
 def distance_from_bar_range_to_ema20(bar: ClosedBarEMA20) -> Decimal:
@@ -1484,6 +1669,7 @@ def simulate_next_bar_market_execution(
 
 
 __all__ = [
+    "ADD_TO_POSITION",
     "ALLOWED_WEEKDAYS",
     "BAR_BASED_EXECUTION_MODEL",
     "BID_ASK_SPREAD_MODELED",
@@ -1494,7 +1680,9 @@ __all__ = [
     "BREAKEVEN_PRICE",
     "BREAKEVEN_R_MULTIPLE_TRIGGER",
     "BREAKEVEN_TRIGGER",
+    "CLOSE_AND_REVERSE",
     "CONFIRMATION_CLOSE_CORRECT_SIDE_REQUIRED",
+    "DEFERRED_ENTRY",
     "DST_RULE",
     "EARLIEST_EXECUTION_BAR_OFFSET",
     "EMA_PERIOD",
@@ -1525,11 +1713,15 @@ __all__ = [
     "MINIMUM_EMA_SLOPE_POINTS_PER_BAR",
     "MNQ_TICK_SIZE_POINTS",
     "MOVE_STOP_TO_ENTRY",
+    "OPEN_POSITION_SIGNAL_POLICY",
     "POSITION_EXIT_EQUALITY_TRIGGERS_EXIT",
     "POSITION_EXIT_WICK_ONLY_TRIGGERS_EXIT",
     "PULLBACK_LOOKBACK_BARS",
     "PULLBACK_PROXIMITY_QUALIFIES",
     "PULLBACK_REQUIRED_TOUCH_BAR_OFFSET",
+    "QUEUE_SIGNAL_UNTIL_FLAT",
+    "REVERSE_POSITION",
+    "SCALE_IN",
     "SESSION_END",
     "SESSION_FILTER",
     "SESSION_START",
@@ -1575,8 +1767,11 @@ __all__ = [
     "MACDStatus",
     "NextBarExecutionResult",
     "NextBarOpen",
+    "OpenPositionSignalAction",
+    "OpenPositionSignalPolicyResult",
     "PositionExitAction",
     "PositionExitReason",
+    "PositionState",
     "ProtectedEntryExecutionResult",
     "PullbackContractError",
     "PullbackPredicateResult",
@@ -1601,6 +1796,7 @@ __all__ = [
     "evaluate_ema_pullback_entry_signal",
     "evaluate_initial_stop_on_bar",
     "evaluate_macd_confirmation",
+    "evaluate_open_position_signal_policy",
     "evaluate_pullback_confirmation",
     "initial_stop_triggered_by_market_price",
     "simulate_entry_with_initial_structural_stop",
