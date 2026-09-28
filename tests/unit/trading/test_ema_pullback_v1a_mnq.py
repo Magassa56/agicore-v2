@@ -34,6 +34,8 @@ from agicore.trading.ema_pullback_v1a_mnq import (
 
 ROOT = Path(__file__).resolve().parents[3]
 VARIANT_PROTOCOL = ROOT / "docs/evidence/EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL.json"
+VARIANT_RESULT = ROOT / "docs/evidence/EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_RESULT.json"
+BASELINE_RESULT = ROOT / "docs/evidence/EMA_PULLBACK_V1_MNQ_DEVELOPMENT_REPLAY_RESULT.json"
 START = datetime(2026, 1, 1, tzinfo=UTC)
 
 
@@ -273,3 +275,71 @@ def test_variant_runner_identity_is_distinct_and_bound_to_protocol(monkeypatch) 
     assert captured["variant_protocol_sha256"] == VARIANT_PROTOCOL_SHA256
     assert captured["no_go_verdict"] is DevelopmentVerdict.NO_GO_VARIANT
     assert captured["slope_evaluator"] is evaluate_v1a_ema20_slope
+
+
+def test_recorded_v1a_result_is_aggregate_fail_closed_and_matches_baseline() -> None:
+    result = json.loads(VARIANT_RESULT.read_bytes())
+    baseline_bytes = BASELINE_RESULT.read_bytes()
+    baseline = json.loads(baseline_bytes)
+
+    assert result["variant_id"] == VARIANT_ID
+    assert result["variant_protocol_sha256"] == VARIANT_PROTOCOL_SHA256
+    assert result["screening_protocol_sha256"] == PROTOCOL_SHA256
+    assert result["screening_thresholds_changed"] is False
+    assert result["replay_count"] == 1
+    assert result["verdict"] == "NO_GO_VARIANT"
+    assert result["failed_criteria"] == [
+        "maximum_drawdown_usd",
+        "maximum_consecutive_losses",
+        "segment_stability",
+    ]
+    assert result["criterion_evaluation"]["maximum_drawdown_usd_750_00"] == "FAIL"
+    assert result["criterion_evaluation"]["maximum_consecutive_losses_8"] == "FAIL"
+    assert result["criterion_evaluation"]["no_segment_net_pnl_below_minus_200_00"] == "FAIL"
+
+    metrics = result["metrics"]
+    counters = result["counters"]
+    segments = result["segments"]
+    assert sum(segment["closed_trades"] for segment in segments) == metrics["closed_trades"]
+    assert sum(Decimal(segment["net_realized_pnl_usd"]) for segment in segments) == Decimal(
+        metrics["net_realized_pnl_usd"]
+    )
+    assert (
+        counters["structural_stop_exit_count"] + counters["ema20_exit_count"]
+        == metrics["closed_trades"]
+    )
+    assert counters["total_actual_fills"] == metrics["closed_trades"] * 2
+
+    comparison = result["comparison_v1_vs_v1a"]
+    assert comparison["baseline"]["result_sha256"] == hashlib.sha256(baseline_bytes).hexdigest()
+    assert comparison["baseline"]["verdict"] == baseline["verdict"] == "NO_GO_BASELINE"
+    assert (
+        comparison["baseline"]["qualified_signals"]
+        == baseline["counters"]["qualified_entry_signals"]
+    )
+    assert comparison["variant"]["qualified_signals"] == counters["qualified_signals"]
+    assert comparison["variant"]["closed_trades"] == metrics["closed_trades"]
+    assert comparison["variant"]["net_realized_pnl_usd"] == metrics["net_realized_pnl_usd"]
+    assert comparison["variant"]["profit_factor"] == metrics["profit_factor"]
+    assert comparison["variant"]["maximum_drawdown_usd"] == metrics["maximum_drawdown_usd"]
+    assert (
+        comparison["variant"]["maximum_consecutive_losses"] == metrics["maximum_consecutive_losses"]
+    )
+
+    observed_keys: set[str] = set()
+    pending: list[object] = [result]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, dict):
+            observed_keys.update(current)
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    assert observed_keys.isdisjoint(
+        {"open", "high", "low", "close", "volume", "execution_price", "base_fill_price"}
+    )
+    assert result["oos_accessed"] is False
+    assert result["raw_rows_exposed"] == 0
+    assert result["prices_exposed"] == 0
+    assert result["independent_validation_authorized"] is False
+    assert result["additional_slope_test_authorized"] is False

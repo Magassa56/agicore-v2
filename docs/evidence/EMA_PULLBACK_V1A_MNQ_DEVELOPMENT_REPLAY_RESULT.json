@@ -1,0 +1,165 @@
+{
+  "report_type": "EMA_PULLBACK_V1A_MNQ_EXPOSED_DEVELOPMENT_SCREENING_RESULT",
+  "classification": "EXPLORATORY_NON_INDEPENDENT_DEVELOPMENT_RESULT",
+  "replay_completed_at_utc": "2026-09-28T16:57:52.116620Z",
+  "run_id": "ema-pullback-development-f76f2d17c5ea7ab8",
+  "runner_id": "EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_V1",
+  "runner_version": "1.0",
+  "runner_commit_sha": "92e6a5d3de8dd8bd13c2014d52f6ba63a3209d5b",
+  "runner_module_sha256": {
+    "variant": "9f8b88f5b5f476b9f00a7f096e5b74d4eda79771fbce03e166cea699d0305f59",
+    "shared_v1_runner": "bce9623717e8360f07da256e04671ad1b1bac2a198723a90990b3ff12f148f8b"
+  },
+  "variant_id": "EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK",
+  "hypothesis": "Reject near-flat EMA20 conditions to reduce whipsaw trades, clustered losses and drawdown.",
+  "variant_protocol_sha256": "1dc90028d9de807a28218075c09b7d9b32d2eb8cc86b41a84814107a898f77df",
+  "screening_protocol_id": "EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_2026_09_27",
+  "screening_protocol_sha256": "13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f",
+  "screening_thresholds_changed": false,
+  "dataset_id": "mnq-06-26-minute-last-development-3bd8c078-v1",
+  "dataset_role": "EXPOSED_DEVELOPMENT",
+  "source_raw_sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+  "source_size_bytes": 2791485,
+  "source_row_count": 52431,
+  "first_timestamp_utc": "2026-03-31T22:01:00Z",
+  "last_timestamp_utc": "2026-06-11T21:00:00Z",
+  "replay_count": 1,
+  "deterministic": true,
+  "counters": {
+    "qualified_signals": 1119,
+    "ignored_signals_while_open": 69,
+    "filled_entries": 1049,
+    "rejected_entries": 1,
+    "expired_entries": 0,
+    "structural_stop_exit_count": 200,
+    "ema20_exit_count": 849,
+    "expired_ema20_exits": 0,
+    "total_actual_fills": 2098
+  },
+  "metrics": {
+    "closed_trades": 1049,
+    "net_realized_pnl_usd": "3918.52",
+    "profit_factor": "1.183757573483896381609799103",
+    "maximum_drawdown_usd": "2167.82",
+    "maximum_consecutive_losses": 19,
+    "open_position_at_end": false,
+    "unrealized_pnl_at_end_usd": "0.00",
+    "marked_equity_sample_count": 52431
+  },
+  "segments": [
+    {
+      "label": "DEVELOPMENT_S1",
+      "closed_trades": 189,
+      "net_realized_pnl_usd": "-458.28",
+      "profit_factor": "0.8672721690927310746702656989",
+      "net_profitable": false
+    },
+    {
+      "label": "DEVELOPMENT_S2",
+      "closed_trades": 342,
+      "net_realized_pnl_usd": "3879.16",
+      "profit_factor": "1.607936861175452838645574421",
+      "net_profitable": true
+    },
+    {
+      "label": "DEVELOPMENT_S3",
+      "closed_trades": 518,
+      "net_realized_pnl_usd": "497.64",
+      "profit_factor": "1.043307840386536660760471892",
+      "net_profitable": true
+    }
+  ],
+  "criterion_evaluation": {
+    "minimum_closed_trades_100": "PASS",
+    "minimum_net_pnl_usd_200_00": "PASS",
+    "minimum_profit_factor_1_15": "PASS",
+    "maximum_drawdown_usd_750_00": "FAIL",
+    "maximum_consecutive_losses_8": "FAIL",
+    "each_segment_closed_trades_15": "PASS",
+    "at_least_2_of_3_segments_net_profitable": "PASS",
+    "no_segment_profit_factor_below_0_80": "PASS",
+    "no_segment_net_pnl_below_minus_200_00": "FAIL"
+  },
+  "segment_stability": "FAIL",
+  "failed_criteria": [
+    "maximum_drawdown_usd",
+    "maximum_consecutive_losses",
+    "segment_stability"
+  ],
+  "verdict": "NO_GO_VARIANT",
+  "comparison_v1_vs_v1a": {
+    "baseline": {
+      "variant_id": "EMA_PULLBACK_V1_MNQ",
+      "result_sha256": "4351d82e2b965b75843b0e24545358c80e2dc544a0549d085ceb8e93f4ceb3f6",
+      "verdict": "NO_GO_BASELINE",
+      "qualified_signals": 1471,
+      "closed_trades": 1372,
+      "net_realized_pnl_usd": "4138.56",
+      "profit_factor": "1.166145174693789066734111356",
+      "maximum_drawdown_usd": "2501.21",
+      "maximum_consecutive_losses": 23,
+      "segments": [
+        {
+          "label": "DEVELOPMENT_S1",
+          "closed_trades": 257,
+          "net_realized_pnl_usd": "197.86",
+          "profit_factor": "1.050196870369994520103103245"
+        },
+        {
+          "label": "DEVELOPMENT_S2",
+          "closed_trades": 464,
+          "net_realized_pnl_usd": "4276.72",
+          "profit_factor": "1.550261445981554677206851120"
+        },
+        {
+          "label": "DEVELOPMENT_S3",
+          "closed_trades": 651,
+          "net_realized_pnl_usd": "-336.02",
+          "profit_factor": "0.9745351810395393567181439677"
+        }
+      ],
+      "structural_stop_exit_count": 279,
+      "ema20_exit_count": 1093
+    },
+    "variant": {
+      "variant_id": "EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK",
+      "verdict": "NO_GO_VARIANT",
+      "qualified_signals": 1119,
+      "closed_trades": 1049,
+      "net_realized_pnl_usd": "3918.52",
+      "profit_factor": "1.183757573483896381609799103",
+      "maximum_drawdown_usd": "2167.82",
+      "maximum_consecutive_losses": 19,
+      "segments": [
+        {
+          "label": "DEVELOPMENT_S1",
+          "closed_trades": 189,
+          "net_realized_pnl_usd": "-458.28",
+          "profit_factor": "0.8672721690927310746702656989"
+        },
+        {
+          "label": "DEVELOPMENT_S2",
+          "closed_trades": 342,
+          "net_realized_pnl_usd": "3879.16",
+          "profit_factor": "1.607936861175452838645574421"
+        },
+        {
+          "label": "DEVELOPMENT_S3",
+          "closed_trades": 518,
+          "net_realized_pnl_usd": "497.64",
+          "profit_factor": "1.043307840386536660760471892"
+        }
+      ],
+      "structural_stop_exit_count": 200,
+      "ema20_exit_count": 849
+    }
+  },
+  "go_is_strategy_validation": false,
+  "go_is_profitability_proof": false,
+  "go_is_apex_readiness": false,
+  "independent_validation_authorized": false,
+  "additional_slope_test_authorized": false,
+  "oos_accessed": false,
+  "raw_rows_exposed": 0,
+  "prices_exposed": 0
+}
