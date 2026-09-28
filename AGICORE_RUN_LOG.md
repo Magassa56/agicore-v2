@@ -581,3 +581,40 @@
   6 237 tests complets PASS avec 6 warnings historiques. Aucun test ne relance le RAW privé.
 - Gate suivante :
   `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1A_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
+
+## 2026-09-28 — EMA_PULLBACK_V1B_MNQ_V1A_US_RTH_ENTRY_ONLY
+
+- V1B est l'unique expérience autorisée après les verdicts immuables `NO_GO_BASELINE` de V1 et
+  `NO_GO_VARIANT` de V1A. Son delta unique est le filtre des nouvelles entrées du lundi au vendredi,
+  de 08:30 inclus à 15:00 exclu en `America/Chicago`, avec règles DST IANA.
+- Le filtre porte uniquement sur la décision d'entrée à `Close[t]`. Le stop structurel et la sortie
+  EMA20 restent actifs hors fenêtre ; aucune fermeture n'est forcée à 15:00. Toutes les autres
+  règles, le RAW `EXPOSED_DEVELOPMENT` et le protocole de screening restent ceux de V1A.
+- Contrat variante SHA-256
+  `c034db1ab2592f0ba4455c0aa0bd5c1c7bc2193f944d9f297819e38c35452f0e` ; module V1B SHA-256
+  `c61703033504539cda5067798c5b38832f406484e069228c9b6e3eb0533ee717` ; runner partagé SHA-256
+  `a477d64e4d419aed40b29794f58714d463a8c0fe018b46e6e8004c0cb8dd6293`.
+- Avant replay : 25 tests V1B, 65 tests variante/parents/runner, 369 tests stratégie/filiation/OOS
+  et 6 262 tests complets PASS avec 6 warnings historiques. Ruff, format, `py_compile`, JSON et
+  diff-check PASS.
+- Préengagement fusionné avant résultat par PR #271 : head
+  `8c060ce33a522ef9f2159ea19d69ba31b20607f3`, CI #224/run `36465463373` success, merge
+  `b7f185d5d0706a7b694c6499f904a218993b6208`, arbre
+  `a4c33fc2ebcdefe8fad7b97f039aeb4e937a4794`.
+- Un seul replay effectif V1B : `ema-pullback-development-3d2bde3b4e3fe085`, achevé le
+  2026-09-28T18:33:06.286656Z sur le même RAW propre SHA-256 `3bd8c078...ba1a`. Aucun OOS,
+  aucune autre session et aucun changement de seuil.
+- V1B : 339 signaux qualifiés, 780 refusés par la session, 325 trades clôturés, PnL net
+  `3 493.00 USD`, profit factor `1.371813295013039544414284954`, drawdown marqué
+  `1 954.87 USD`, 16 pertes consécutives, 59 sorties stop et 266 sorties EMA20.
+- S1/S2/S3 : 50/110/165 trades ; PnL `488.00` / `3 530.80` / `-525.80 USD` ; profit factor
+  `1.506960315811344275919384999` / `2.214192865052236290982619999` /
+  `0.9048146619454159697028943005`. S3 enfreint le plancher `-200.00 USD`.
+- Verdict mécanique : `NO_GO_VARIANT`. Échecs : drawdown, pertes consécutives et stabilité
+  segmentaire. V1 et V1A restent inchangées ; OOS et validation indépendante restent fermés.
+- Rapport comparatif assaini SHA-256
+  `d3b188c8efed50fc418dab25941b9237261bf39cb88a259c371d7e65e4a0e41b`. Il ne contient ni prix
+  ni ligne RAW. Validations post-résultat : 26 tests V1B, 370 tests stratégie/filiation/OOS et
+  6 263 tests complets PASS avec 6 warnings historiques. Aucun test ne relance le RAW privé.
+- Gate suivante :
+  `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1B_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
