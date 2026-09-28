@@ -162,6 +162,7 @@ class DevelopmentReplayCounters:
     ema20_exits: int
     expired_ema20_exits: int
     total_actual_fills: int
+    rejected_by_session_filter: int = 0
 
 
 @dataclass(frozen=True)
@@ -448,10 +449,13 @@ def _run_bars(
     variant_id: str | None = None,
     variant_protocol_sha256: str | None = None,
     no_go_verdict: DevelopmentVerdict = DevelopmentVerdict.NO_GO_BASELINE,
+    entry_eligibility_evaluator: Callable[[datetime], bool] | None = None,
 ) -> DevelopmentReplayResult:
     """Run already-verified bars; public callers must use the hash-verifying wrapper."""
     if (variant_id is None) is not (variant_protocol_sha256 is None):
         raise DevelopmentReplayError("variant id and protocol hash must be supplied together")
+    if entry_eligibility_evaluator is not None and variant_id is None:
+        raise DevelopmentReplayError("an entry filter requires an explicit variant contract")
     closed_bars = _prepare_closed_bars(bars)
     macd, signal = _prepare_macd(bars)
     evaluate_disabled_session_filter(
@@ -468,6 +472,7 @@ def _run_bars(
     marked_equity: list[MarkedEquitySample] = []
     realized_equity = Decimal("0.00")
     qualified_signals = 0
+    rejected_by_session_filter = 0
     ignored_signals = 0
     filled_entries = 0
     rejected_entries = 0
@@ -569,7 +574,18 @@ def _run_bars(
             slope_evaluator=slope_evaluator,
         )
         if candidate is not None:
-            qualified_signals += 1
+            entry_allowed = (
+                True
+                if entry_eligibility_evaluator is None
+                else entry_eligibility_evaluator(bar.timestamp_utc)
+            )
+            if type(entry_allowed) is not bool:
+                raise DevelopmentReplayError("entry eligibility evaluator must return bool")
+            if entry_allowed:
+                qualified_signals += 1
+            else:
+                rejected_by_session_filter += 1
+                candidate = None
 
         if position is not None:
             if candidate is not None:
@@ -636,6 +652,7 @@ def _run_bars(
         ema20_exits=ema20_exits,
         expired_ema20_exits=expired_ema20_exits,
         total_actual_fills=total_fills,
+        rejected_by_session_filter=rejected_by_session_filter,
     )
     return DevelopmentReplayResult(
         run_id=f"ema-pullback-development-{run_hash[:16]}",

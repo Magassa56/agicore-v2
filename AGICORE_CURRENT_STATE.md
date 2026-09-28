@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-28 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1A_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED ;
+Statut : IN_PROGRESS — EMA_PULLBACK_V1B_MNQ_PRECOMMITTED_PRE_REPLAY ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -27,9 +27,11 @@ EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_BASELINE ;
 EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = PASS ;
 EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
+EMA_PULLBACK_V1B_MNQ_VARIANT_PROTOCOL = FROZEN_PENDING_CI ;
+EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_STARTED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1a-mnq-development-replay.
-Base GitHub vérifiée et récupérée : 92e6a5d3de8dd8bd13c2014d52f6ba63a3209d5b.
+Branche de vérification : feature/ema-pullback-v1b-mnq-v1a-us-rth-entry-only.
+Base GitHub vérifiée et récupérée : 60c8d2ac525d688db00756903a414afeb72b55e9.
 
 ## Acquis vérifiés
 
@@ -830,8 +832,40 @@ stratégie/filiation/OOS et suite complète de 6 237 tests PASS avec 6 warnings 
 format Ruff, validation JSON et `git diff --check` passent ; aucun test ne relance le RAW privé.
 
 `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1A_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
-Action humaine unique : arrêter cette piste ou autoriser une nouvelle expérience explicitement nommée
-avec exactement une hypothèse préengagée ; aucune autre valeur de pente n'est autorisée implicitement.
+Cette gate historique a été levée le 2026-09-28 par l'autorisation explicite de l'unique enfant V1B
+ci-dessous. V1 et V1A restent immuables avec leurs verdicts NO_GO respectifs.
+
+## Préengagement V1B — entrées US RTH uniquement
+
+L'unique nouvelle expérience autorisée est
+`EMA_PULLBACK_V1B_MNQ_V1A_US_RTH_ENTRY_ONLY`, enfant de
+`EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK`. Son hypothèse unique est que la restriction des
+nouvelles entrées à la fenêtre principale US réduit les entrées de faible liquidité/agitées, les
+pertes groupées et le drawdown sans modifier les sorties existantes.
+
+Le seul delta est un filtre des décisions d'entrée sur le timestamp UTC de la barre clôturée,
+converti par IANA vers `America/Chicago` : lundi-vendredi, `08:30:00` inclus à `15:00:00` exclu.
+Aucun offset UTC fixe n'est permis. Le stop structurel et la sortie EMA20 restent actifs hors
+fenêtre, aucune fermeture n'est forcée à 15:00 et la politique de fin de données reste inchangée.
+
+Contrat préengagé : `docs/evidence/EMA_PULLBACK_V1B_MNQ_VARIANT_PROTOCOL.json`, SHA-256
+`c034db1ab2592f0ba4455c0aa0bd5c1c7bc2193f944d9f297819e38c35452f0e`. Module V1B SHA-256
+`c61703033504539cda5067798c5b38832f406484e069228c9b6e3eb0533ee717` ; runner commun étendu
+SHA-256 `a477d64e4d419aed40b29794f58714d463a8c0fe018b46e6e8004c0cb8dd6293`.
+
+Les sources V1/V1A conservent respectivement leurs SHA-256 `af9d9159...cac9` et
+`9f8b88f5...5f59`; leurs rapports restent `4351d82e...b3f6` et `29eef4a5...82de`.
+Le protocole de screening `13f3e1b7...864f`, le dataset `EXPOSED_DEVELOPMENT`, les coûts et toutes
+les autres règles sont réutilisés sans modification. Une seule exécution V1B est autorisée ; toute
+autre fenêtre/session après résultat nécessite une nouvelle décision humaine.
+
+Preuves locales pré-replay : 25 tests V1B, 65 tests variante/parent/runner, 369 tests ciblés
+stratégie/filiation/OOS et suite complète de 6 262 tests PASS avec 6 warnings historiques. Ruff,
+format Ruff, validation JSON et `git diff --check` passent. Le replay V1B n'a pas été lancé.
+
+`EMA_PULLBACK_V1B_MNQ_VARIANT_PROTOCOL = FROZEN_PENDING_CI`.
+
+`EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_STARTED`.
 
 ## Limites du produit
 
