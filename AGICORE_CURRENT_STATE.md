@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-27 UTC.
-Statut : IN_PROGRESS — EMA_PULLBACK_V1A_MNQ_PRECOMMITTED_PRE_REPLAY ;
+Date : 2026-09-28 UTC.
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1A_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -24,11 +24,12 @@ EMA_PULLBACK_V1_MNQ_FORMALIZATION = PASS ;
 EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_PROTOCOL = PASS ;
 EMA_PULLBACK_V1_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_BASELINE ;
-EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = FROZEN_PENDING_CI ;
-EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_STARTED ;
+EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = PASS ;
+EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
+EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1a-mnq-ema20-min-slope-1-tick.
-Base GitHub vérifiée et récupérée : 24af0fbeb6494ddecfcfaa59846adbe5f14f02f5.
+Branche de vérification : feature/ema-pullback-v1a-mnq-development-replay.
+Base GitHub vérifiée et récupérée : 92e6a5d3de8dd8bd13c2014d52f6ba63a3209d5b.
 
 ## Acquis vérifiés
 
@@ -792,9 +793,45 @@ stratégie/filiation/OOS et suite complète de 6 236 tests PASS avec 6 warnings 
 format Ruff, `py_compile`, validation JSON, scan anti-fuite de données et `git diff --check` passent.
 Le replay V1A n'a pas été lancé pendant ces validations.
 
-`EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = FROZEN_PENDING_CI`.
+La PR #269 a fusionné ce préengagement avec CI verte avant le replay : head
+`ed3a751246e1cda03b99017d481acc4de4f9b1c1`, CI #220/run `36343021654` success, merge
+`92e6a5d3de8dd8bd13c2014d52f6ba63a3209d5b`, arbre
+`566cf2ebf82acbd55ea614f3ac920d673e82e1e7`.
 
-`EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_STARTED`.
+`EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = PASS`.
+
+`EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE`.
+
+## Résultat du replay DEVELOPMENT V1A préengagé
+
+L'unique replay autorisé est le run `ema-pullback-development-f76f2d17c5ea7ab8`, achevé le
+2026-09-28 à 16:57:52 UTC. Il a utilisé le même RAW propre `EXPOSED_DEVELOPMENT`, le même modèle
+de coûts et exactement le même protocole de screening que V1. Aucun OOS n'a été ouvert.
+
+V1A réduit les signaux qualifiés de 1 471 à 1 119 et les trades clôturés de 1 372 à 1 049.
+Le drawdown marqué baisse de `2 501.21` à `2 167.82 USD` et les pertes consécutives de 23 à 19,
+mais ces valeurs enfreignent encore les limites `750.00 USD` et 8. Le PnL net reste positif à
+`3 918.52 USD` et le profit factor progresse à `1.183757573483896381609799103`.
+
+S1/S2/S3 contiennent 189/342/518 trades et produisent `-458.28` / `3 879.16` / `497.64 USD`.
+Deux segments sont profitables et aucun profit factor ne descend sous `0.80`, mais S1 enfreint
+le plancher de `-200.00 USD`. La stabilité segmentaire reste donc `FAIL`.
+
+Le verdict mécanique est `NO_GO_VARIANT`. La baseline reste séparément et définitivement
+`NO_GO_BASELINE`; aucun seuil n'est modifié et aucune pente supplémentaire n'est testée.
+
+Rapport comparatif assaini :
+`docs/evidence/EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_RESULT.json`, SHA-256
+`29eef4a574fc46aab07a5ab60fc0c09fe111c3e72acc6d91ae3e5f04450582de`. Il contient uniquement
+des métriques agrégées, zéro prix, zéro ligne RAW et `oos_accessed = false`.
+
+Validations post-résultat : 11 tests V1A, 40 tests variante/protocole/runner, 351 tests ciblés
+stratégie/filiation/OOS et suite complète de 6 237 tests PASS avec 6 warnings historiques. Ruff,
+format Ruff, validation JSON et `git diff --check` passent ; aucun test ne relance le RAW privé.
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1A_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
+Action humaine unique : arrêter cette piste ou autoriser une nouvelle expérience explicitement nommée
+avec exactement une hypothèse préengagée ; aucune autre valeur de pente n'est autorisée implicitement.
 
 ## Limites du produit
 
@@ -809,6 +846,7 @@ Les entrées, la sortie principale EMA20, le modèle d'exécution bar-based, le 
 initial, l'absence explicite de take-profit, breakeven et trailing stop ainsi que la priorité entre
 les deux sorties existantes, l'absence de filtre stratégique de session et le refus des nouveaux
 signaux pendant une position ouverte ainsi que la taille fixe d'un MNQ sont désormais formalisés.
-La comptabilité non réalisée, le modèle versionné de coûts et le protocole sont figés. Le replay
-DEVELOPMENT unique est `NO_GO_BASELINE`; aucune performance indépendante n'est démontrée et l'OOS
-reste fermé. Cette stratégie demeure distincte de EMA19/50 V3 rejetée.
+La comptabilité non réalisée, le modèle versionné de coûts et le protocole sont figés. Les replays
+DEVELOPMENT uniques de V1 et V1A sont respectivement `NO_GO_BASELINE` et `NO_GO_VARIANT` ; aucune
+performance indépendante n'est démontrée et l'OOS reste fermé. Cette stratégie demeure distincte
+de EMA19/50 V3 rejetée.

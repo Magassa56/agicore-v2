@@ -549,3 +549,35 @@
   `4351d82e2b965b75843b0e24545358c80e2dc544a0549d085ceb8e93f4ceb3f6`, zéro prix/RAW exposé.
 - Gate suivante :
   `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_MNQ_NO_GO_VARIANT_DECISION_REQUIRED`.
+
+## 2026-09-28 — EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK
+
+- Reprise sans recommencer V1 : worktree propre, commit local préexistant `d9e650a`, arbre
+  `566cf2ebf82acbd55ea614f3ac920d673e82e1e7`, PR #269 ouverte et CI en attente.
+- Delta unique préengagé : formule de pente V1 inchangée sur `K = 3`, LONG `>= +0.25` et SHORT
+  `<= -0.25` point/bar, comparaisons inclusives et aucun arrondi. Toutes les autres règles V1,
+  les coûts, l'exécution, le dataset et les seuils de screening restent identiques.
+- Contrat variante SHA-256
+  `1dc90028d9de807a28218075c09b7d9b32d2eb8cc86b41a84814107a898f77df`. Avant replay :
+  10 tests V1A, 39 tests variante/protocole/runner, 350 tests ciblés et 6 236 tests complets PASS ;
+  Ruff, format, `py_compile`, JSON, anti-fuite et diff-check PASS.
+- Préengagement fusionné avant résultat par PR #269 : head
+  `ed3a751246e1cda03b99017d481acc4de4f9b1c1`, CI #220/run `36343021654` success, merge
+  `92e6a5d3de8dd8bd13c2014d52f6ba63a3209d5b`.
+- Un seul replay effectif V1A : `ema-pullback-development-f76f2d17c5ea7ab8`, achevé le
+  2026-09-28T16:57:52.116620Z sur le même RAW propre SHA-256 `3bd8c078...ba1a`. Aucun OOS,
+  aucune autre pente et aucun changement de seuil.
+- V1A : 1 119 signaux qualifiés, 1 049 trades clôturés, PnL net `3 918.52 USD`, profit factor
+  `1.183757573483896381609799103`, drawdown marqué `2 167.82 USD`, 19 pertes consécutives,
+  200 sorties stop et 849 sorties EMA20.
+- S1/S2/S3 : 189/342/518 trades ; PnL `-458.28` / `3 879.16` / `497.64 USD` ; profit factor
+  `0.8672721690927310746702656989` / `1.607936861175452838645574421` /
+  `1.043307840386536660760471892`. S1 enfreint le plancher `-200.00 USD`.
+- Verdict mécanique : `NO_GO_VARIANT`. Échecs : drawdown, pertes consécutives et stabilité
+  segmentaire. La baseline reste `NO_GO_BASELINE`; OOS et validation indépendante restent fermés.
+- Rapport comparatif assaini SHA-256
+  `29eef4a574fc46aab07a5ab60fc0c09fe111c3e72acc6d91ae3e5f04450582de`. Validations
+  post-résultat : 11 tests V1A, 40 tests variante/protocole/runner, 351 tests ciblés et
+  6 237 tests complets PASS avec 6 warnings historiques. Aucun test ne relance le RAW privé.
+- Gate suivante :
+  `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1A_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
