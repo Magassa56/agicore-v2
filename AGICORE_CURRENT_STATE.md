@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-09-27 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_MNQ_NO_GO_VARIANT_DECISION_REQUIRED ;
+Statut : IN_PROGRESS — EMA_PULLBACK_V1A_MNQ_PRECOMMITTED_PRE_REPLAY ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -24,9 +24,11 @@ EMA_PULLBACK_V1_MNQ_FORMALIZATION = PASS ;
 EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_PROTOCOL = PASS ;
 EMA_PULLBACK_V1_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_BASELINE ;
+EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = FROZEN_PENDING_CI ;
+EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_STARTED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1-mnq-development-replay.
-Base GitHub vérifiée et récupérée : e26748e56e0805ed020c57a74c7c17e15ae8ef5e.
+Branche de vérification : feature/ema-pullback-v1a-mnq-ema20-min-slope-1-tick.
+Base GitHub vérifiée et récupérée : 24af0fbeb6494ddecfcfaa59846adbe5f14f02f5.
 
 ## Acquis vérifiés
 
@@ -763,9 +765,36 @@ Rapport assaini : `docs/evidence/EMA_PULLBACK_V1_MNQ_DEVELOPMENT_REPLAY_RESULT.j
 zéro ligne RAW et confirme `oos_accessed = false`. Aucun seuil ne peut être modifié pour renverser
 ce verdict ; l'OOS et l'étape indépendante restent fermés.
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_MNQ_NO_GO_VARIANT_DECISION_REQUIRED`.
-Action humaine unique : décider soit d'arrêter cette baseline, soit d'autoriser une nouvelle
-variante expérimentale explicitement nommée avec une seule hypothèse de stratégie préengagée.
+Gate historique : `EMA_PULLBACK_V1_MNQ_NO_GO_VARIANT_DECISION_REQUIRED`. Elle est acquittée par
+l'autorisation explicite V1A ci-dessous ; le résultat de la baseline n'est ni modifié ni relabellisé.
+
+## EMA_PULLBACK_V1A_MNQ — variante de pente préengagée avant replay
+
+La décision humaine autorise exactement la variante
+`EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK`, avec l'unique hypothèse que le rejet des
+conditions EMA20 presque plates pourrait réduire les whipsaws, les pertes groupées et le
+drawdown. La baseline V1 et son verdict `NO_GO_BASELINE` restent immuables.
+
+Le seul delta est le seuil inclusif de pente EMA20 : formule causale V1 inchangée sur `K = 3`,
+LONG si pente `>= +0.25` point/bar et SHORT si pente `<= -0.25` point/bar, sans arrondi avant
+comparaison. Le pullback `t-2`, MACD, les sorties, le stop, les absences de TP/breakeven/trailing,
+le calendrier, la taille d'un MNQ, les coûts, l'exécution et la comptabilité de fin de données
+restent inchangés.
+
+Contrat préengagé : `docs/evidence/EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL.json`, SHA-256
+`1dc90028d9de807a28218075c09b7d9b32d2eb8cc86b41a84814107a898f77df`. Il réutilise sans
+assouplissement le protocole de screening SHA-256 `13f3e1b7...864f`, le même dataset
+`EXPOSED_DEVELOPMENT`, et autorise au maximum un replay. Toute deuxième valeur de pente après
+résultat exige une nouvelle décision humaine ; OOS et optimisation restent interdits.
+
+Preuves locales pré-replay : 10 tests V1A, 39 tests variante/protocole/runner, 350 tests ciblés
+stratégie/filiation/OOS et suite complète de 6 236 tests PASS avec 6 warnings historiques. Ruff,
+format Ruff, `py_compile`, validation JSON, scan anti-fuite de données et `git diff --check` passent.
+Le replay V1A n'a pas été lancé pendant ces validations.
+
+`EMA_PULLBACK_V1A_MNQ_VARIANT_PROTOCOL = FROZEN_PENDING_CI`.
+
+`EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_EXECUTION = NOT_STARTED`.
 
 ## Limites du produit
 
