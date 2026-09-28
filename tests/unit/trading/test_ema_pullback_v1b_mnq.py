@@ -49,6 +49,7 @@ V1_MODULE = ROOT / "src/agicore/trading/ema_pullback_v1_mnq.py"
 V1A_MODULE = ROOT / "src/agicore/trading/ema_pullback_v1a_mnq.py"
 V1_RESULT = ROOT / "docs/evidence/EMA_PULLBACK_V1_MNQ_DEVELOPMENT_REPLAY_RESULT.json"
 V1A_RESULT = ROOT / "docs/evidence/EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_REPLAY_RESULT.json"
+V1B_RESULT = ROOT / "docs/evidence/EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_RESULT.json"
 
 
 @pytest.mark.parametrize(
@@ -428,3 +429,80 @@ def test_v1b_runner_identity_is_bound_to_v1a_and_the_new_protocol(monkeypatch) -
     assert captured["no_go_verdict"] is DevelopmentVerdict.NO_GO_VARIANT
     assert captured["slope_evaluator"] is evaluate_v1a_ema20_slope
     assert captured["entry_eligibility_evaluator"] is v1b_entry_session_allows
+
+
+def test_recorded_v1b_result_is_aggregate_fail_closed_and_matches_parents() -> None:
+    raw = V1B_RESULT.read_bytes()
+    result = json.loads(raw)
+    v1_raw = V1_RESULT.read_bytes()
+    v1a_raw = V1A_RESULT.read_bytes()
+
+    assert hashlib.sha256(raw).hexdigest() == (
+        "d3b188c8efed50fc418dab25941b9237261bf39cb88a259c371d7e65e4a0e41b"
+    )
+    assert result["variant_id"] == VARIANT_ID
+    assert result["parent_variant"] == PARENT_VARIANT_ID
+    assert result["variant_protocol_sha256"] == VARIANT_PROTOCOL_SHA256
+    assert result["screening_protocol_sha256"] == PROTOCOL_SHA256
+    assert result["screening_thresholds_changed"] is False
+    assert result["replay_count"] == 1
+    assert result["verdict"] == "NO_GO_VARIANT"
+    assert result["failed_criteria"] == [
+        "maximum_drawdown_usd",
+        "maximum_consecutive_losses",
+        "segment_stability",
+    ]
+
+    counters = result["counters"]
+    metrics = result["metrics"]
+    segments = result["segments"]
+    comparison = result["comparison_v1_v1a_v1b"]
+    assert counters["qualified_signals"] == 339
+    assert counters["rejected_by_session_filter"] == 780
+    assert counters["qualified_signals"] + counters["rejected_by_session_filter"] == 1119
+    assert (
+        counters["structural_stop_exit_count"] + counters["ema20_exit_count"]
+        == metrics["closed_trades"]
+    )
+    assert counters["total_actual_fills"] == metrics["closed_trades"] * 2
+    assert sum(segment["closed_trades"] for segment in segments) == metrics["closed_trades"]
+    assert sum(Decimal(segment["net_realized_pnl_usd"]) for segment in segments) == Decimal(
+        metrics["net_realized_pnl_usd"]
+    )
+
+    assert comparison["v1"]["result_sha256"] == hashlib.sha256(v1_raw).hexdigest()
+    assert comparison["v1"]["verdict"] == "NO_GO_BASELINE"
+    assert comparison["v1a"]["result_sha256"] == hashlib.sha256(v1a_raw).hexdigest()
+    assert comparison["v1a"]["verdict"] == "NO_GO_VARIANT"
+    assert comparison["v1b"]["qualified_signals"] == counters["qualified_signals"]
+    assert comparison["v1b"]["rejected_by_session_filter"] == counters["rejected_by_session_filter"]
+    assert comparison["v1b"]["closed_trades"] == metrics["closed_trades"]
+
+    assert result["entry_session"] == {
+        "enabled": True,
+        "timezone": "America/Chicago",
+        "start_local_inclusive": "08:30:00",
+        "end_local_exclusive": "15:00:00",
+        "weekdays": "Monday-Friday",
+        "dst_policy": "IANA_TIMEZONE_RULES",
+        "fixed_utc_offset_used": False,
+        "scope": "NEW_ENTRIES_ONLY",
+        "force_exit_at_end": False,
+    }
+    observed_keys: set[str] = set()
+    pending: list[object] = [result]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, dict):
+            observed_keys.update(current)
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    assert observed_keys.isdisjoint(
+        {"open", "high", "low", "close", "volume", "execution_price", "base_fill_price"}
+    )
+    assert result["oos_accessed"] is False
+    assert result["raw_rows_exposed"] == 0
+    assert result["prices_exposed"] == 0
+    assert result["independent_validation_authorized"] is False
+    assert result["alternate_session_test_authorized"] is False
