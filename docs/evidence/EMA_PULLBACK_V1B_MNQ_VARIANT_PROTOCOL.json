@@ -1,0 +1,79 @@
+{
+  "schema_version": "agicore.ema-pullback-development-variant.v1",
+  "variant_id": "EMA_PULLBACK_V1B_MNQ_V1A_US_RTH_ENTRY_ONLY",
+  "frozen_at_utc": "2026-09-28T18:17:00Z",
+  "classification": "PRECOMMITTED_SINGLE_HYPOTHESIS_EXPOSED_DEVELOPMENT_VARIANT",
+  "hypothesis": "Restrict new entries to the main US cash/RTH window to reduce low-liquidity/choppy entries, clustered losses and drawdown while preserving the existing exit logic.",
+  "parent_variant": "EMA_PULLBACK_V1A_MNQ_EMA20_MIN_SLOPE_1_TICK",
+  "parent_result": {
+    "verdict": "NO_GO_VARIANT",
+    "result_sha256": "29eef4a574fc46aab07a5ab60fc0c09fe111c3e72acc6d91ae3e5f04450582de",
+    "retention": "IMMUTABLE"
+  },
+  "single_strategy_delta": {
+    "field": "new_entry_session_filter",
+    "enabled": true,
+    "timezone": "America/Chicago",
+    "start_local": "08:30:00",
+    "start_comparison": "INCLUSIVE",
+    "end_local": "15:00:00",
+    "end_comparison": "EXCLUSIVE",
+    "weekdays": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday"
+    ],
+    "dst_policy": "IANA_TIMEZONE_RULES",
+    "decision_timestamp": "CLOSED_BAR_TIMESTAMP_T",
+    "fixed_utc_offset": "FORBIDDEN",
+    "scope": "NEW_ENTRIES_ONLY",
+    "force_exit_at_end": false
+  },
+  "counter_contract": {
+    "qualified_signals": "OTHERWISE_QUALIFIED_V1A_SIGNALS_INSIDE_ENTRY_WINDOW",
+    "rejected_by_session_filter": "OTHERWISE_QUALIFIED_V1A_SIGNALS_OUTSIDE_ENTRY_WINDOW"
+  },
+  "unchanged_contract": {
+    "ema20_minimum_absolute_slope_points_per_bar": "0.25",
+    "t_minus_2_pullback_rule": "UNCHANGED",
+    "macd": "UNCHANGED",
+    "confirmation": "UNCHANGED",
+    "ema20_exit": "UNCHANGED_AND_ACTIVE_OUTSIDE_ENTRY_WINDOW",
+    "initial_structural_stop": "UNCHANGED_AND_ACTIVE_OUTSIDE_ENTRY_WINDOW",
+    "exit_priority": "STRUCTURAL_STOP_FIRST",
+    "take_profit": "NONE",
+    "breakeven": "NONE",
+    "trailing_stop": "NONE",
+    "open_position_signal_policy": "UNCHANGED",
+    "position_size_mnq": 1,
+    "cost_model": "UNCHANGED",
+    "execution_model": "UNCHANGED",
+    "end_of_data_policy": "KEEP_OPEN_UNREALIZED"
+  },
+  "screening": {
+    "protocol_id": "EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_2026_09_27",
+    "protocol_sha256": "13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f",
+    "thresholds": "REUSED_EXACTLY_WITHOUT_RELAXATION",
+    "maximum_replay_count": 1,
+    "allowed_verdicts": [
+      "GO_TO_INDEPENDENT_VALIDATION",
+      "NO_GO_VARIANT",
+      "INSUFFICIENT_SAMPLE"
+    ]
+  },
+  "source_dataset": {
+    "dataset_id": "mnq-06-26-minute-last-development-3bd8c078-v1",
+    "source_raw_sha256": "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a",
+    "exposure_state": "EXPOSED_DEVELOPMENT",
+    "oos_access_permitted": false
+  },
+  "experiment_guardrails": {
+    "alternate_session_after_result": "FORBIDDEN_WITHOUT_NEW_HUMAN_DECISION",
+    "window_adjustment_after_result": "FORBIDDEN",
+    "optimization": "FORBIDDEN",
+    "oos_access": "FORBIDDEN",
+    "performance_independence_claim": false
+  }
+}
