@@ -618,3 +618,28 @@
   6 263 tests complets PASS avec 6 warnings historiques. Aucun test ne relance le RAW privé.
 - Gate suivante :
   `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1B_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
+
+## 2026-09-29 — EMA_PULLBACK_V1B_MNQ_CROSS_CONTRACT_REPLICATION_03_26
+
+- L'autorisation humaine porte sur une réplication exacte de V1B sur le contrat trimestriel propre
+  immédiatement précédent. `STRATEGY_CHANGE = NONE`; aucune V1C sur MNQ 06-26 n'est autorisée.
+- V1, V1A et V1B restent bit-for-bit inchangées et conservent leurs verdicts définitifs
+  `NO_GO_BASELINE`, `NO_GO_VARIANT` et `NO_GO_VARIANT`.
+- Protocole préengagé SHA-256
+  `c431c991c290f000bfdd9f39f01372ccfc05c963911e11534184d1ab95b07d37` ; V1B est liée à son
+  module `c6170303...717`, son protocole `c034db1a...f0e` et le screening `13f3e1b7...864f`.
+- Fenêtre choisie avant toute performance : export NinjaTrader demandé du `2026-01-01` au
+  `2026-03-31` inclus sur `MNQ 03-26`, puis toutes les barres valides réellement produites, sans
+  trimming PnL. Calendrier CME ETH, UTC fin de barre et DST IANA `America/Chicago` obligatoires.
+- La filiation requiert un nouveau RAW `MNQ 03-26.Last.txt` et un reçu contemporain prouvant hash,
+  taille, nombre de lignes, version, fournisseur, fuseaux, timestamps, session, jours fériés,
+  transformation et parent. Le rôle est `EXPOSED_DEVELOPMENT_REPLICATION`.
+- L'ancienne archive `MNQ_OHLCV_2024_2025_03-26_SANS_09-26(1).zip` est refusée : elle n'est ni
+  nouvelle ni dotée de la filiation propre exigée. Aucun autre RAW MNQ 03-26 n'est présent.
+- Mapping résultat préengagé : échantillon insuffisant inchangé ; échec PnL/PF avec échantillon
+  suffisant -> `STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH`; edge économique reproduit mais échec risque
+  ou segments -> `MIXED_DEVELOPMENT_EVIDENCE`; réussite complète -> gate humaine sans ouverture OOS.
+- Validations : 31 tests protocole/V1B, 380 régressions ciblées et 6 268 tests complets sans échec ;
+  Ruff, format, `py_compile`, JSON et diff-check PASS. Zéro accès OOS, zéro prix/RAW publié, zéro
+  replay MNQ 03-26.
+- Gate : `BLOCKED_HUMAN_GATE — CLEAN_MNQ_03_26_EXPORT_EVIDENCE_REQUIRED`.

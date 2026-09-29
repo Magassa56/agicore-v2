@@ -1,0 +1,186 @@
+{
+  "schema_version": "agicore.ema-pullback-cross-contract-replication.v1",
+  "experiment_id": "EMA_PULLBACK_V1B_MNQ_CROSS_CONTRACT_REPLICATION_03_26",
+  "frozen_at_utc": "2026-09-29T19:24:35Z",
+  "classification": "PRECOMMITTED_CROSS_CONTRACT_EXPOSED_DEVELOPMENT_REPLICATION",
+  "objective": "REPLICATION_NOT_OPTIMIZATION",
+  "hypothesis": "The V1B improvement in signal quality, profit factor and risk is not unique to MNQ 06-26 and is reproducible on the immediately preceding clean MNQ quarterly contract.",
+  "strategy_under_test": {
+    "variant_id": "EMA_PULLBACK_V1B_MNQ_V1A_US_RTH_ENTRY_ONLY",
+    "strategy_change": "NONE",
+    "variant_protocol_sha256": "c034db1ab2592f0ba4455c0aa0bd5c1c7bc2193f944d9f297819e38c35452f0e",
+    "variant_module_sha256": "c61703033504539cda5067798c5b38832f406484e069228c9b6e3eb0533ee717",
+    "mnq_06_26_result_sha256": "d3b188c8efed50fc418dab25941b9237261bf39cb88a259c371d7e65e4a0e41b",
+    "immutability": "BIT_FOR_BIT_REQUIRED"
+  },
+  "frozen_parent_results": {
+    "v1": {
+      "verdict": "NO_GO_BASELINE",
+      "result_sha256": "4351d82e2b965b75843b0e24545358c80e2dc544a0549d085ceb8e93f4ceb3f6"
+    },
+    "v1a": {
+      "verdict": "NO_GO_VARIANT",
+      "result_sha256": "29eef4a574fc46aab07a5ab60fc0c09fe111c3e72acc6d91ae3e5f04450582de"
+    },
+    "v1b_mnq_06_26": {
+      "verdict": "NO_GO_VARIANT",
+      "result_sha256": "d3b188c8efed50fc418dab25941b9237261bf39cb88a259c371d7e65e4a0e41b"
+    }
+  },
+  "required_source_contract": {
+    "instrument": "MNQ",
+    "contract_id": "MNQ 03-26",
+    "bar_interval": "1 minute",
+    "data_type": "Last",
+    "merge_policy": "DoNotMerge",
+    "continuous_contract": false,
+    "trading_hours_template": "CME US Index Futures ETH",
+    "account_provider": "Apex Trader Funding",
+    "market_data_provider_or_routing": "Rithmic",
+    "platform": "NinjaTrader",
+    "source_raw_filename": "MNQ 03-26.Last.txt",
+    "dataset_role": "EXPOSED_DEVELOPMENT_REPLICATION"
+  },
+  "clean_lineage_gate": {
+    "required_status_before_replay": "PASS",
+    "current_status": "BLOCKED_MISSING_NEW_EXPORT_AND_EVIDENCE",
+    "required_fields": [
+      "source_raw_sha256",
+      "source_size_bytes",
+      "source_row_count",
+      "export_receipt_sha256",
+      "export_timestamp_utc",
+      "ninjatrader_version",
+      "application_timezone",
+      "source_timestamp_timezone",
+      "session_timezone",
+      "timestamp_semantics",
+      "dst_policy",
+      "session_calendar",
+      "holiday_and_early_close_policy",
+      "transformation",
+      "parent_dataset_sha256"
+    ],
+    "source_raw_sha256": "REQUIRED_BEFORE_REPLAY",
+    "source_size_bytes": "REQUIRED_BEFORE_REPLAY",
+    "source_row_count": "REQUIRED_BEFORE_REPLAY",
+    "export_receipt_sha256": "REQUIRED_BEFORE_REPLAY",
+    "prohibited_source": "MNQ_OHLCV_2024_2025_03-26_SANS_09-26(1).zip",
+    "prohibited_source_reason": "LEGACY_AMBIGUOUS_LINEAGE_NOT_A_NEW_CLEAN_EXPORT",
+    "raw_or_market_rows_allowed_in_git": false,
+    "prices_allowed_in_git": false
+  },
+  "precommitted_contract_window": {
+    "selection_rule": "CALENDAR_QUARTER_MATCHING_THE_PRIOR_MNQ_06_26_EXPORT_REQUEST",
+    "ninjatrader_export_from_local_date_inclusive": "2026-01-01",
+    "ninjatrader_export_to_local_date_inclusive": "2026-03-31",
+    "contract": "MNQ 03-26",
+    "interpretation_timezone": "America/Chicago",
+    "source_timestamp_timezone": "UTC",
+    "timestamp_semantics": "BAR_CLOSE",
+    "dst_policy": "IANA_TIMEZONE_RULES",
+    "session_calendar": "CME US Index Futures ETH",
+    "holiday_and_early_close_policy": "NINJATRADER_TEMPLATE_EFFECTIVE_AT_EXPORT_MUST_BE_ATTESTED",
+    "actual_bounds_policy": "RECORD_EXACT_FIRST_AND_LAST_VALID_SOURCE_BAR_AFTER_HASH_VERIFICATION",
+    "bar_selection_policy": "USE_ALL_VALID_EXPORTED_BARS_IN_SOURCE_ORDER",
+    "pnl_based_date_selection": "FORBIDDEN",
+    "post_result_window_change": "FORBIDDEN",
+    "segment_split": "THREE_CONTIGUOUS_EQUAL_ELAPSED_TIME_THIRDS_FROM_FIRST_TO_LAST_SOURCE_TIMESTAMP"
+  },
+  "unchanged_v1b_contract": {
+    "ema20_minimum_absolute_slope_points_per_bar": "0.25",
+    "ema20_slope_comparators": "LONG_GTE_PLUS_0_25;SHORT_LTE_MINUS_0_25",
+    "us_rth_entry_filter": "08:30:00_INCLUSIVE_TO_15:00:00_EXCLUSIVE_AMERICA_CHICAGO_MONDAY_FRIDAY",
+    "t_minus_2_pullback": "UNCHANGED",
+    "macd": "UNCHANGED",
+    "confirmation": "UNCHANGED",
+    "structural_stop": "UNCHANGED",
+    "ema20_exit": "UNCHANGED",
+    "exit_priority": "STRUCTURAL_STOP_FIRST",
+    "take_profit": "NONE",
+    "breakeven": "NONE",
+    "trailing_stop": "NONE",
+    "position_size_mnq": 1,
+    "costs_and_slippage": "UNCHANGED",
+    "open_position_signal_policy": "IGNORE_ALL_NEW_SIGNALS_UNTIL_FLAT",
+    "end_of_data_policy": "KEEP_OPEN_UNREALIZED"
+  },
+  "screening": {
+    "protocol_id": "EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_2026_09_27",
+    "protocol_sha256": "13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f",
+    "minimum_closed_trades": 100,
+    "minimum_net_pnl_usd": "200.00",
+    "minimum_profit_factor": "1.15",
+    "maximum_drawdown_usd": "750.00",
+    "maximum_consecutive_losses": 8,
+    "segment_stability_rule": "UNCHANGED",
+    "comparators_at_boundary": "INCLUSIVE",
+    "threshold_changes": "FORBIDDEN"
+  },
+  "reported_metrics": {
+    "signals": "QUALIFIED_ENTRY_SIGNALS_AFTER_V1B_SESSION_FILTER",
+    "trades": "CLOSED_TRADES",
+    "net_pnl": "NET_REALIZED_PNL_AFTER_UNCHANGED_V1_COSTS",
+    "pnl_per_trade": "NET_REALIZED_PNL_DIVIDED_BY_CLOSED_TRADES_USD_CENTS_HALF_UP",
+    "profit_factor": "UNCHANGED_SCREENING_DEFINITION",
+    "maximum_drawdown": "UNCHANGED_MARK_TO_MARKET_DEFINITION",
+    "consecutive_losses": "UNCHANGED_SCREENING_DEFINITION",
+    "segments": [
+      "DEVELOPMENT_S1",
+      "DEVELOPMENT_S2",
+      "DEVELOPMENT_S3"
+    ],
+    "exit_counts": [
+      "STRUCTURAL_STOP",
+      "EMA20_EXIT"
+    ]
+  },
+  "replication_assessment": {
+    "evaluation_order": [
+      "ORIGINAL_INSUFFICIENT_SAMPLE_RULE",
+      "ORIGINAL_ECONOMIC_EDGE_THRESHOLDS",
+      "ORIGINAL_RISK_AND_SEGMENT_THRESHOLDS"
+    ],
+    "insufficient_sample": "ORIGINAL_PROTOCOL_RETURNS_INSUFFICIENT_SAMPLE",
+    "material_edge_failure": "SUFFICIENT_SAMPLE_AND_EITHER_NET_PNL_LT_200_00_OR_PROFIT_FACTOR_LT_1_15",
+    "material_edge_failure_action": "STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH",
+    "mixed_development_evidence": "ECONOMIC_EDGE_THRESHOLDS_PASS_BUT_ANY_RISK_OR_SEGMENT_CRITERION_FAILS",
+    "mixed_development_evidence_action": "RETURN_TO_HUMAN_GATE",
+    "favorable_replication": "ALL_ORIGINAL_SCREENING_CRITERIA_PASS",
+    "favorable_replication_action": "RETURN_TO_HUMAN_GATE_WITHOUT_OPENING_OOS",
+    "oos_auto_open": false,
+    "v1c_auto_creation": false
+  },
+  "execution_gate": {
+    "maximum_effective_replay_count": 1,
+    "deterministic_replay_required": true,
+    "clean_lineage_pass_required": true,
+    "protocol_hash_freeze_required": true,
+    "implementation_hash_freeze_required": true,
+    "tests_pass_required": true,
+    "ci_green_required": true,
+    "current_replay_count": 0,
+    "replay_authorized_now": false
+  },
+  "prohibitions": [
+    "OOS_ACCESS",
+    "ALTERNATE_SESSION",
+    "NEW_SLOPE_THRESHOLD",
+    "EMA200_FILTER",
+    "ATR_FILTER",
+    "ADX_FILTER",
+    "TAKE_PROFIT",
+    "TRAILING_STOP",
+    "BREAKEVEN",
+    "SCREENING_THRESHOLD_CHANGE",
+    "V1C_ON_MNQ_06_26"
+  ],
+  "privacy": {
+    "raw_files_committed": false,
+    "market_rows_committed": 0,
+    "prices_committed": 0,
+    "account_identifiers_committed": false,
+    "credentials_committed": false,
+    "oos_accessed": false
+  }
+}
