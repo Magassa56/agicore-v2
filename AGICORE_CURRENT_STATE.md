@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-28 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1B_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED ;
+Date : 2026-09-29 UTC.
+Statut : BLOCKED_HUMAN_GATE — CLEAN_MNQ_03_26_EXPORT_EVIDENCE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -30,9 +30,12 @@ EMA_PULLBACK_V1A_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
 EMA_PULLBACK_V1B_MNQ_VARIANT_PROTOCOL = PASS ;
 EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
+EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_PROTOCOL = PASS ;
+EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = BLOCKED_MISSING_NEW_EXPORT_AND_EVIDENCE ;
+EMA_PULLBACK_V1B_MNQ_03_26_REPLAY_EXECUTION = NOT_STARTED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1b-mnq-development-replay.
-Base GitHub vérifiée et récupérée : b7f185d5d0706a7b694c6499f904a218993b6208.
+Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-replication-protocol.
+Base GitHub vérifiée et récupérée : a7d751c56739289af44d1edf4df0bcf7d3d6c2be.
 
 ## Acquis vérifiés
 
@@ -903,6 +906,48 @@ de 6 263 tests PASS avec 6 warnings historiques. Aucun test ne relance le RAW pr
 `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1B_MNQ_NO_GO_NEXT_EXPERIMENT_DECISION_REQUIRED`.
 Action humaine unique : arrêter cette piste ou autoriser une nouvelle expérience explicitement
 nommée avec exactement une hypothèse préengagée ; aucune autre session n'est autorisée implicitement.
+
+## Préengagement — réplication V1B sur MNQ 03-26
+
+La gate précédente est levée uniquement pour
+`EMA_PULLBACK_V1B_MNQ_CROSS_CONTRACT_REPLICATION_03_26`. Il s'agit d'une réplication de V1B sans
+aucun changement de stratégie et non d'une V1C. V1, V1A et V1B restent immuables avec leurs verdicts
+`NO_GO_BASELINE`, `NO_GO_VARIANT` et `NO_GO_VARIANT`.
+
+Le protocole est figé dans
+`docs/evidence/EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_PROTOCOL.json`, SHA-256
+`c431c991c290f000bfdd9f39f01372ccfc05c963911e11534184d1ab95b07d37`. Il lie bit-for-bit la
+réplication au module V1B SHA-256 `c6170303...717`, au protocole V1B `c034db1a...f0e` et au
+screening original `13f3e1b7...864f`.
+
+La fenêtre a été préengagée avant toute lecture de performance : export NinjaTrader du contrat exact
+`MNQ 03-26`, dates demandées `2026-01-01` à `2026-03-31` incluses, puis utilisation de toutes les
+barres valides réellement exportées dans leur ordre source. Aucun découpage fondé sur le PnL ni
+aucun changement ultérieur de fenêtre n'est permis. Les timestamps sont UTC fin de barre ; le
+calendrier `CME US Index Futures ETH` et les règles DST `America/Chicago` doivent être attestés.
+
+Le contrat source exige `MNQ 03-26 / Minute / Last / DoNotMerge`, contrat non continu, chaîne
+`Apex Trader Funding -> Rithmic -> NinjaTrader`, rôle `EXPOSED_DEVELOPMENT_REPLICATION`, hash,
+taille, nombre de lignes, reçu d'export, version NinjaTrader, fuseaux, sémantique temporelle,
+calendrier, jours fériés/early closes, transformation et parent. L'archive historique
+`MNQ_OHLCV_2024_2025_03-26_SANS_09-26(1).zip` est explicitement interdite car sa filiation est
+ambiguë et elle ne constitue pas le nouvel export propre autorisé.
+
+Le mapping préengagé du résultat est fail-closed : échantillon insuffisant conserve
+`INSUFFICIENT_SAMPLE`; un échantillon suffisant qui échoue le PnL `200.00 USD` ou le profit factor
+`1.15` déclenche `STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH`; si ces deux seuils passent mais qu'un
+critère de risque ou de stabilité échoue, le statut devient `MIXED_DEVELOPMENT_EVIDENCE`. Même si
+tous les critères passent, l'OOS ne s'ouvre pas automatiquement et une gate humaine reste requise.
+
+Vérification locale du protocole : 31 tests protocole/V1B PASS, 380 tests ciblés
+stratégie/filiation/confidentialité PASS et suite complète de 6 268 tests sans échec. Ruff, format,
+`py_compile`, JSON et `git diff --check` passent. Aucun RAW MNQ 03-26 n'a été trouvé ou lu, aucune
+ligne de marché n'a été publiée et le compteur de replay reste zéro.
+
+`BLOCKED_HUMAN_GATE — CLEAN_MNQ_03_26_EXPORT_EVIDENCE_REQUIRED`.
+Action humaine unique : produire et joindre le RAW privé `MNQ 03-26.Last.txt` ainsi qu'un bundle
+assaini contemporain prouvant les champs de filiation exigés pour l'export préengagé du
+`2026-01-01` au `2026-03-31`.
 
 ## Limites du produit
 
