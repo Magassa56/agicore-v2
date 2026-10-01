@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-09-29 UTC.
-Statut : BLOCKED_HUMAN_GATE — CLEAN_MNQ_03_26_EXPORT_EVIDENCE_REQUIRED ;
+Date : 2026-10-01 UTC.
+Statut : IN_PROGRESS — EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_IMPLEMENTATION ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -31,11 +31,11 @@ EMA_PULLBACK_V1B_MNQ_VARIANT_PROTOCOL = PASS ;
 EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
 EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_PROTOCOL = PASS ;
-EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = BLOCKED_MISSING_NEW_EXPORT_AND_EVIDENCE ;
+EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = PASS ;
 EMA_PULLBACK_V1B_MNQ_03_26_REPLAY_EXECUTION = NOT_STARTED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-replication-protocol.
-Base GitHub vérifiée et récupérée : a7d751c56739289af44d1edf4df0bcf7d3d6c2be.
+Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-clean-lineage.
+Base GitHub vérifiée et récupérée : 52af608a6c7c3592d4c0fe67f33df0dddacdfaf6.
 
 ## Acquis vérifiés
 
@@ -944,10 +944,29 @@ stratégie/filiation/confidentialité PASS et suite complète de 6 268 tests san
 `py_compile`, JSON et `git diff --check` passent. Aucun RAW MNQ 03-26 n'a été trouvé ou lu, aucune
 ligne de marché n'a été publiée et le compteur de replay reste zéro.
 
-`BLOCKED_HUMAN_GATE — CLEAN_MNQ_03_26_EXPORT_EVIDENCE_REQUIRED`.
-Action humaine unique : produire et joindre le RAW privé `MNQ 03-26.Last.txt` ainsi qu'un bundle
-assaini contemporain prouvant les champs de filiation exigés pour l'export préengagé du
-`2026-01-01` au `2026-03-31`.
+La nouvelle racine privée `MNQ 03-26.Last.txt` a été vérifiée indépendamment : SHA-256
+`2122722f25dbc865dad154905309b5e76d2190561ffc64acdaa955365ccb9efc`, 3 946 060 octets,
+74 308 lignes, première estampille `2026-01-01T01:22:00Z` et dernière estampille
+`2026-03-20T13:30:00Z`. La fin au 20 mars correspond à l'expiration du contrat trimestriel et ne
+constitue pas une sélection postérieure fondée sur le PnL.
+
+L'attestation finale `FINAL_OPERATOR_ATTESTATION.txt` a été contrôlée octet par octet : 1 844 octets
+et SHA-256 `081386347dcf52ba6eff9b66143b9e217881f11f2cd0a9ab0c4439c7df7c65d7`. Elle lie ce RAW exact à
+`MNQ 03-26 / Minute / Last / DoNotMerge`, au contrat non continu, au template intégré
+`CME US Index Futures ETH` non modifié, à la chaîne Apex Trader Funding -> Rithmic -> NinjaTrader,
+aux timestamps UTC de fin de barre, et déclare `NONE` pour transformation, parent et relation avec
+l'archive legacy. Elle reste explicitement rétrospective.
+
+Les captures contemporaines d'export, les captures historiques/pré-export, les observations NTFS
+post-export et la documentation NinjaTrader conservent chacune leur classe. Leur combinaison est
+acceptée par le contrat fail-closed pour cette racine `EXPOSED_DEVELOPMENT_REPLICATION` uniquement.
+La lignée canonique et la matrice de preuves assainie vivent dans
+`docs/evidence/MNQ_03-26_CLEAN_LINEAGE/`; aucun RAW, prix, identifiant de compte ou capture n'est
+versionné. `EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = PASS`.
+
+Étape technique suivante : figer le chargeur de réplication pour cette identité exacte, prouver par
+tests qu'il réutilise V1B bit-for-bit, obtenir une CI verte, puis exécuter exactement une fois le
+replay DEVELOPMENT préengagé. Aucun accès OOS n'est autorisé.
 
 ## Limites du produit
 
