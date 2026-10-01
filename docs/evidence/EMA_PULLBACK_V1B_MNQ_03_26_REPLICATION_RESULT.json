@@ -1,0 +1,195 @@
+{
+  "report_type": "EMA_PULLBACK_V1B_MNQ_03_26_EXPOSED_DEVELOPMENT_REPLICATION_RESULT",
+  "classification": "EXPLORATORY_NON_INDEPENDENT_DEVELOPMENT_REPLICATION_RESULT",
+  "replay_completed_at_utc": "2026-10-01T18:49:04.024735Z",
+  "experiment_id": "EMA_PULLBACK_V1B_MNQ_CROSS_CONTRACT_REPLICATION_03_26",
+  "run_id": "ema-pullback-development-99c298476b51b73a",
+  "runner_id": "EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_V1",
+  "runner_version": "1.0",
+  "runner_head_sha": "b4294d262e41d4edb1c4c56c205f18a36a2a7986",
+  "runner_merge_sha": "f616033f9dce74a4a0ca567de9c749840daf172f",
+  "runner_module_sha256": {
+    "replication_loader": "d45bfdc4235f41e812d4ccfe8885c00104130e3d85f350dc878971b84d42a22c",
+    "shared_development_runner": "b008b42bd1bf23f0c33a2a2f8b625ed36bcfb84ee72be203ca64e63d696fb4f9",
+    "shared_screening": "a7d48786ea95d4c30119cb884ce2948680f576c1a9095c6ce5334ffb21316456",
+    "strategy_v1b": "c61703033504539cda5067798c5b38832f406484e069228c9b6e3eb0533ee717"
+  },
+  "replication_protocol_sha256": "c431c991c290f000bfdd9f39f01372ccfc05c963911e11534184d1ab95b07d37",
+  "screening_protocol_id": "EMA_PULLBACK_V1_MNQ_DEVELOPMENT_SCREENING_2026_09_27",
+  "screening_protocol_sha256": "13f3e1b71ce27a848a16a9598c37d76e9298a49331531fc7602118ec788c864f",
+  "variant_id": "EMA_PULLBACK_V1B_MNQ_V1A_US_RTH_ENTRY_ONLY",
+  "variant_protocol_sha256": "c034db1ab2592f0ba4455c0aa0bd5c1c7bc2193f944d9f297819e38c35452f0e",
+  "strategy_change": "NONE",
+  "screening_thresholds_changed": false,
+  "clean_lineage": {
+    "status": "PASS",
+    "manifest_sha256": "b22371ac3be30952ae58f4b5a8a5d6261b688583bce31ed2dd6c958f7c4b7c80",
+    "contract_identity_evidence_sha256": "081386347dcf52ba6eff9b66143b9e217881f11f2cd0a9ab0c4439c7df7c65d7"
+  },
+  "dataset_id": "mnq-03-26-minute-last-development-replication-2122722f-v1",
+  "dataset_role": "EXPOSED_DEVELOPMENT_REPLICATION",
+  "source_raw_sha256": "2122722f25dbc865dad154905309b5e76d2190561ffc64acdaa955365ccb9efc",
+  "source_size_bytes": 3946060,
+  "source_row_count": 74308,
+  "first_timestamp_utc": "2026-01-01T01:22:00Z",
+  "last_timestamp_utc": "2026-03-20T13:30:00Z",
+  "replay_count": 1,
+  "deterministic": true,
+  "counters": {
+    "qualified_signals": 478,
+    "rejected_by_session_filter": 1101,
+    "ignored_signals_while_open": 21,
+    "filled_entries": 457,
+    "rejected_entries": 0,
+    "expired_entries": 0,
+    "structural_stop_exit_count": 87,
+    "ema20_exit_count": 370,
+    "expired_ema20_exits": 0,
+    "total_actual_fills": 914
+  },
+  "metrics": {
+    "closed_trades": 457,
+    "net_realized_pnl_usd": "-4758.64",
+    "net_realized_pnl_per_closed_trade_usd": "-10.41",
+    "profit_factor": "0.6444307622415035014152113552",
+    "maximum_drawdown_usd": "4998.09",
+    "maximum_consecutive_losses": 14,
+    "open_position_at_end": false,
+    "unrealized_pnl_at_end_usd": "0.00",
+    "marked_equity_sample_count": 74308
+  },
+  "segments": [
+    {
+      "label": "DEVELOPMENT_S1",
+      "closed_trades": 138,
+      "net_realized_pnl_usd": "-133.26",
+      "profit_factor": "0.9531908615747765975383577811",
+      "net_profitable": false
+    },
+    {
+      "label": "DEVELOPMENT_S2",
+      "closed_trades": 151,
+      "net_realized_pnl_usd": "-1981.52",
+      "profit_factor": "0.6473021512304696538736743928",
+      "net_profitable": false
+    },
+    {
+      "label": "DEVELOPMENT_S3",
+      "closed_trades": 168,
+      "net_realized_pnl_usd": "-2643.86",
+      "profit_factor": "0.4624224802261035765844533458",
+      "net_profitable": false
+    }
+  ],
+  "criterion_evaluation": {
+    "minimum_closed_trades_100": "PASS",
+    "minimum_net_pnl_usd_200_00": "FAIL",
+    "minimum_profit_factor_1_15": "FAIL",
+    "maximum_drawdown_usd_750_00": "FAIL",
+    "maximum_consecutive_losses_8": "FAIL",
+    "each_segment_closed_trades_15": "PASS",
+    "at_least_2_of_3_segments_net_profitable": "FAIL",
+    "no_segment_profit_factor_below_0_80": "FAIL",
+    "no_segment_net_pnl_below_minus_200_00": "FAIL"
+  },
+  "segment_stability": "FAIL",
+  "failed_criteria": [
+    "minimum_net_pnl_usd",
+    "minimum_profit_factor",
+    "maximum_drawdown_usd",
+    "maximum_consecutive_losses",
+    "segment_stability"
+  ],
+  "screening_verdict": "NO_GO_VARIANT",
+  "replication_assessment": {
+    "v1b_edge_reproduced": false,
+    "material_replication_failure": true,
+    "experiment_outcome": "STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH",
+    "reason": "The clean MNQ 03-26 replication is net negative, has profit factor below 1.0, fails all three segment profitability checks, and materially fails to reproduce the positive MNQ 06-26 V1B development result."
+  },
+  "comparison": {
+    "v1_mnq_06_26": {
+      "result_sha256": "4351d82e2b965b75843b0e24545358c80e2dc544a0549d085ceb8e93f4ceb3f6",
+      "verdict": "NO_GO_BASELINE",
+      "qualified_signals": 1471,
+      "rejected_by_session_filter": 0,
+      "closed_trades": 1372,
+      "net_realized_pnl_usd": "4138.56",
+      "net_realized_pnl_per_closed_trade_usd": "3.02",
+      "profit_factor": "1.166145174693789066734111356",
+      "maximum_drawdown_usd": "2501.21",
+      "maximum_consecutive_losses": 23,
+      "segments": [
+        {"label": "DEVELOPMENT_S1", "closed_trades": 257, "net_realized_pnl_usd": "197.86", "profit_factor": "1.050196870369994520103103245"},
+        {"label": "DEVELOPMENT_S2", "closed_trades": 464, "net_realized_pnl_usd": "4276.72", "profit_factor": "1.550261445981554677206851120"},
+        {"label": "DEVELOPMENT_S3", "closed_trades": 651, "net_realized_pnl_usd": "-336.02", "profit_factor": "0.9745351810395393567181439677"}
+      ],
+      "structural_stop_exit_count": 279,
+      "ema20_exit_count": 1093
+    },
+    "v1a_mnq_06_26": {
+      "result_sha256": "29eef4a574fc46aab07a5ab60fc0c09fe111c3e72acc6d91ae3e5f04450582de",
+      "verdict": "NO_GO_VARIANT",
+      "qualified_signals": 1119,
+      "rejected_by_session_filter": 0,
+      "closed_trades": 1049,
+      "net_realized_pnl_usd": "3918.52",
+      "net_realized_pnl_per_closed_trade_usd": "3.74",
+      "profit_factor": "1.183757573483896381609799103",
+      "maximum_drawdown_usd": "2167.82",
+      "maximum_consecutive_losses": 19,
+      "segments": [
+        {"label": "DEVELOPMENT_S1", "closed_trades": 189, "net_realized_pnl_usd": "-458.28", "profit_factor": "0.8672721690927310746702656989"},
+        {"label": "DEVELOPMENT_S2", "closed_trades": 342, "net_realized_pnl_usd": "3879.16", "profit_factor": "1.607936861175452838645574421"},
+        {"label": "DEVELOPMENT_S3", "closed_trades": 518, "net_realized_pnl_usd": "497.64", "profit_factor": "1.043307840386536660760471892"}
+      ],
+      "structural_stop_exit_count": 200,
+      "ema20_exit_count": 849
+    },
+    "v1b_mnq_06_26": {
+      "result_sha256": "d3b188c8efed50fc418dab25941b9237261bf39cb88a259c371d7e65e4a0e41b",
+      "verdict": "NO_GO_VARIANT",
+      "qualified_signals": 339,
+      "rejected_by_session_filter": 780,
+      "closed_trades": 325,
+      "net_realized_pnl_usd": "3493.00",
+      "net_realized_pnl_per_closed_trade_usd": "10.75",
+      "profit_factor": "1.371813295013039544414284954",
+      "maximum_drawdown_usd": "1954.87",
+      "maximum_consecutive_losses": 16,
+      "segments": [
+        {"label": "DEVELOPMENT_S1", "closed_trades": 50, "net_realized_pnl_usd": "488.00", "profit_factor": "1.506960315811344275919384999"},
+        {"label": "DEVELOPMENT_S2", "closed_trades": 110, "net_realized_pnl_usd": "3530.80", "profit_factor": "2.214192865052236290982619999"},
+        {"label": "DEVELOPMENT_S3", "closed_trades": 165, "net_realized_pnl_usd": "-525.80", "profit_factor": "0.9048146619454159697028943005"}
+      ],
+      "structural_stop_exit_count": 59,
+      "ema20_exit_count": 266
+    },
+    "v1b_mnq_03_26_replication": {
+      "verdict": "NO_GO_VARIANT",
+      "qualified_signals": 478,
+      "rejected_by_session_filter": 1101,
+      "closed_trades": 457,
+      "net_realized_pnl_usd": "-4758.64",
+      "net_realized_pnl_per_closed_trade_usd": "-10.41",
+      "profit_factor": "0.6444307622415035014152113552",
+      "maximum_drawdown_usd": "4998.09",
+      "maximum_consecutive_losses": 14,
+      "segments": [
+        {"label": "DEVELOPMENT_S1", "closed_trades": 138, "net_realized_pnl_usd": "-133.26", "profit_factor": "0.9531908615747765975383577811"},
+        {"label": "DEVELOPMENT_S2", "closed_trades": 151, "net_realized_pnl_usd": "-1981.52", "profit_factor": "0.6473021512304696538736743928"},
+        {"label": "DEVELOPMENT_S3", "closed_trades": 168, "net_realized_pnl_usd": "-2643.86", "profit_factor": "0.4624224802261035765844533458"}
+      ],
+      "structural_stop_exit_count": 87,
+      "ema20_exit_count": 370
+    }
+  },
+  "next_gate": "BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_PATH_TERMINATION_DECISION_REQUIRED",
+  "oos_accessed": false,
+  "oos_opening_authorized": false,
+  "v1c_authorized": false,
+  "strategy_or_threshold_changed": false,
+  "raw_rows_exposed": 0,
+  "prices_exposed": 0,
+  "trade_detail_rows_exposed": 0
+}
