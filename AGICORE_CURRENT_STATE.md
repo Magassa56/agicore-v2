@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-01 UTC.
-Statut : IN_PROGRESS — EMA_PULLBACK_V1B_MNQ_03_26_PRE_REPLAY_CI ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_PATH_TERMINATION_DECISION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -32,11 +32,13 @@ EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
 EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_PROTOCOL = PASS ;
 EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = PASS ;
-EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_IMPLEMENTATION = PASS_PENDING_CI ;
-EMA_PULLBACK_V1B_MNQ_03_26_REPLAY_EXECUTION = NOT_STARTED ;
+EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_IMPLEMENTATION = PASS ;
+EMA_PULLBACK_V1B_MNQ_03_26_REPLAY_EXECUTION = COMPLETED_ONCE ;
+EMA_PULLBACK_V1B_MNQ_03_26_SCREENING_VERDICT = NO_GO_VARIANT ;
+EMA_PULLBACK_V1B_MNQ_03_26_EXPERIMENT_OUTCOME = STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-replication-runner.
-Base GitHub vérifiée et récupérée : 42efdaa5147879f67c322c81203f69e69f7ea41c.
+Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-replication-result.
+Base GitHub vérifiée et récupérée : f616033f9dce74a4a0ca567de9c749840daf172f.
 
 ## Acquis vérifiés
 
@@ -982,8 +984,23 @@ passent avec des données synthétiques et le RAW privé n'est jamais ouvert par
 locale complète passe : 6 282 tests, 6 avertissements préexistants ; Ruff ciblé, format Ruff,
 `py_compile` et `git diff --check` passent également.
 
-Étape technique suivante : obtenir une CI verte sur le chargeur figé, puis exécuter exactement une
-fois le replay DEVELOPMENT préengagé. Aucun accès OOS n'est autorisé.
+Le chargeur a été intégré par PR #275 : head
+`b4294d262e41d4edb1c4c56c205f18a36a2a7986`, CI `AGIcore CI #232` verte, merge
+`f616033f9dce74a4a0ca567de9c749840daf172f`.
+
+L'unique replay préengagé a été exécuté le 2026-10-01 à 18:49:04 UTC sur le RAW privé vérifié
+`2122722f...9efc`. Il a produit 478 signaux qualifiés, 457 trades clôturés, un PnL net de
+`-4758.64 USD`, un profit factor de `0.6444307622415035014152113552`, un drawdown maximal de
+`4998.09 USD` et 14 pertes consécutives. Les trois segments sont nets négatifs. Aucun OOS n'a été
+ouvert, aucun prix ni détail de trade n'est publié et aucune règle ou seuil n'a été modifié.
+
+Le résultat agrégé est figé dans
+`docs/evidence/EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_RESULT.json`, SHA-256
+`968f934c46969c3978575aa96b7e98f015958c731c6ed73a543ebe3a9b8372b6`. L'échec matériel de
+réplication impose l'issue préengagée `STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH`. Aucune V1C et aucune
+ouverture OOS ne sont autorisées. La prochaine action exige une décision humaine sur l'arrêt de
+cette voie incrémentale. Les 20 tests ciblés de lignée, runner et résultat passent ; la suite locale
+complète passe avec 6 288 tests et 6 avertissements préexistants.
 
 ## Limites du produit
 
@@ -1001,5 +1018,7 @@ d'entrée uniquement de V1B et le refus des nouveaux signaux pendant une positio
 la taille fixe d'un MNQ sont désormais formalisés.
 La comptabilité non réalisée, le modèle versionné de coûts et le protocole sont figés. Les replays
 DEVELOPMENT uniques de V1, V1A et V1B sont respectivement `NO_GO_BASELINE`, `NO_GO_VARIANT` et
-`NO_GO_VARIANT` ; aucune performance indépendante n'est démontrée et l'OOS reste fermé. Cette
-stratégie demeure distincte de EMA19/50 V3 rejetée.
+`NO_GO_VARIANT`. La réplication propre MNQ 03-26 de V1B est également `NO_GO_VARIANT` et échoue
+matériellement à reproduire l'edge DEVELOPMENT observé sur MNQ 06-26 ; la voie incrémentale V1 est
+arrêtée en attente d'une décision humaine. Aucune performance indépendante n'est démontrée et
+l'OOS reste fermé. Cette stratégie demeure distincte de EMA19/50 V3 rejetée.
