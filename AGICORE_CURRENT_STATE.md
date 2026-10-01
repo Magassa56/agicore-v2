@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-01 UTC.
-Statut : IN_PROGRESS — EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_IMPLEMENTATION ;
+Statut : IN_PROGRESS — EMA_PULLBACK_V1B_MNQ_03_26_PRE_REPLAY_CI ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -32,10 +32,11 @@ EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1B_MNQ_DEVELOPMENT_SCREENING_VERDICT = NO_GO_VARIANT ;
 EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_PROTOCOL = PASS ;
 EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = PASS ;
+EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_IMPLEMENTATION = PASS_PENDING_CI ;
 EMA_PULLBACK_V1B_MNQ_03_26_REPLAY_EXECUTION = NOT_STARTED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-clean-lineage.
-Base GitHub vérifiée et récupérée : 52af608a6c7c3592d4c0fe67f33df0dddacdfaf6.
+Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-replication-runner.
+Base GitHub vérifiée et récupérée : 42efdaa5147879f67c322c81203f69e69f7ea41c.
 
 ## Acquis vérifiés
 
@@ -964,9 +965,25 @@ La lignée canonique et la matrice de preuves assainie vivent dans
 `docs/evidence/MNQ_03-26_CLEAN_LINEAGE/`; aucun RAW, prix, identifiant de compte ou capture n'est
 versionné. `EMA_PULLBACK_V1B_MNQ_03_26_CLEAN_LINEAGE = PASS`.
 
-Étape technique suivante : figer le chargeur de réplication pour cette identité exacte, prouver par
-tests qu'il réutilise V1B bit-for-bit, obtenir une CI verte, puis exécuter exactement une fois le
-replay DEVELOPMENT préengagé. Aucun accès OOS n'est autorisé.
+La lignée a été intégrée par PR #274 : head
+`69a5fecf431ab064b2aa146e753cbfcfae4ac52d`, CI `AGIcore CI #230` verte, merge
+`42efdaa5147879f67c322c81203f69e69f7ea41c`.
+
+Le chargeur privé de réplication refuse toute divergence de SHA-256, taille, nombre de lignes ou
+bornes temporelles avant d'appeler le moteur. Son module a le SHA-256
+`d45bfdc4235f41e812d4ccfe8885c00104130e3d85f350dc878971b84d42a22c`. Le moteur de screening et
+le runner partagé acceptent désormais l'identité et le rôle gouverné de réplication sans modifier
+les seuils. Leurs SHA-256 sont respectivement `a7d48786...16456` et `b008b42b...b4f9`.
+
+V1, V1A et V1B restent bit-for-bit inchangées : `af9d9159...ac9`, `9f8b88f5...f59` et
+`c6170303...717`. Le chargeur réutilise directement la pente V1A, le filtre de session V1B et le
+moteur déterministe commun ; aucun paramètre de stratégie n'est redéfini. Les 85 tests ciblés
+passent avec des données synthétiques et le RAW privé n'est jamais ouvert par les tests. La suite
+locale complète passe : 6 282 tests, 6 avertissements préexistants ; Ruff ciblé, format Ruff,
+`py_compile` et `git diff --check` passent également.
+
+Étape technique suivante : obtenir une CI verte sur le chargeur figé, puis exécuter exactement une
+fois le replay DEVELOPMENT préengagé. Aucun accès OOS n'est autorisé.
 
 ## Limites du produit
 

@@ -450,6 +450,8 @@ def _run_bars(
     variant_protocol_sha256: str | None = None,
     no_go_verdict: DevelopmentVerdict = DevelopmentVerdict.NO_GO_BASELINE,
     entry_eligibility_evaluator: Callable[[datetime], bool] | None = None,
+    dataset_id: str = DATASET_ID,
+    dataset_role: str = REQUIRED_DATASET_ROLE,
 ) -> DevelopmentReplayResult:
     """Run already-verified bars; public callers must use the hash-verifying wrapper."""
     if (variant_id is None) is not (variant_protocol_sha256 is None):
@@ -623,14 +625,16 @@ def _run_bars(
         dataset_end_utc=bars[-1].timestamp_utc,
         closed_trades=closed_trades,
         marked_equity_samples=marked_equity,
-        dataset_role=REQUIRED_DATASET_ROLE,
+        dataset_role=dataset_role,
         protocol_sha256=PROTOCOL_SHA256,
         oos_accessed=False,
         no_go_verdict=no_go_verdict,
+        dataset_id=dataset_id,
+        source_raw_sha256=source_raw_sha256,
     )
     run_payload = {
         "cost_model_id": COST_MODEL_ID,
-        "dataset_id": DATASET_ID,
+        "dataset_id": dataset_id,
         "protocol_sha256": PROTOCOL_SHA256,
         "runner_id": runner_id,
         "runner_version": runner_version,
@@ -660,8 +664,8 @@ def _run_bars(
         runner_version=runner_version,
         protocol_id=PROTOCOL_ID,
         protocol_sha256=PROTOCOL_SHA256,
-        dataset_id=DATASET_ID,
-        dataset_role=REQUIRED_DATASET_ROLE,
+        dataset_id=dataset_id,
+        dataset_role=dataset_role,
         source_raw_sha256=source_raw_sha256,
         source_size_bytes=source_size_bytes,
         source_row_count=len(bars),

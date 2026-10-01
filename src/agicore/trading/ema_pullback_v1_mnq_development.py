@@ -21,6 +21,8 @@ COST_MODEL_ID = "EMA_PULLBACK_V1_MNQ_COSTS_2026_09_27"
 DATASET_ID = "mnq-06-26-minute-last-development-3bd8c078-v1"
 SOURCE_RAW_SHA256 = "3bd8c078d40143ccb1977562e47afadfd173f9c123e3a062ba28dbcb7721ba1a"
 REQUIRED_DATASET_ROLE = "EXPOSED_DEVELOPMENT"
+REPLICATION_DATASET_ROLE = "EXPOSED_DEVELOPMENT_REPLICATION"
+ALLOWED_DATASET_ROLES = (REQUIRED_DATASET_ROLE, REPLICATION_DATASET_ROLE)
 MINIMUM_CLOSED_TRADES = 100
 MINIMUM_NET_PNL_USD = Decimal("200.00")
 MINIMUM_PROFIT_FACTOR = Decimal("1.15")
@@ -255,8 +257,8 @@ def _validate_replay_evidence(
     _require_utc(dataset_end_utc, "dataset_end_utc")
     if dataset_end_utc <= dataset_start_utc:
         raise DevelopmentProtocolError("DEVELOPMENT interval must have positive duration")
-    if dataset_role != REQUIRED_DATASET_ROLE:
-        raise DevelopmentProtocolError("only EXPOSED_DEVELOPMENT is allowed")
+    if dataset_role not in ALLOWED_DATASET_ROLES:
+        raise DevelopmentProtocolError("only EXPOSED_DEVELOPMENT roles are allowed")
     if protocol_sha256 != PROTOCOL_SHA256:
         raise DevelopmentProtocolError("replay evidence is not bound to the frozen protocol hash")
     if type(oos_accessed) is not bool or oos_accessed:
@@ -290,6 +292,8 @@ def evaluate_development_screening(
     protocol_sha256: str,
     oos_accessed: bool,
     no_go_verdict: DevelopmentVerdict = DevelopmentVerdict.NO_GO_BASELINE,
+    dataset_id: str = DATASET_ID,
+    source_raw_sha256: str = SOURCE_RAW_SHA256,
 ) -> DevelopmentScreeningResult:
     """Apply the frozen thresholds mechanically to one DEVELOPMENT replay."""
     if no_go_verdict not in (
@@ -299,6 +303,19 @@ def evaluate_development_screening(
         raise DevelopmentProtocolError(
             "no_go_verdict must explicitly distinguish baseline from variant"
         )
+    if (
+        not isinstance(dataset_id, str)
+        or not dataset_id
+        or dataset_id != dataset_id.strip()
+        or len(dataset_id) > 128
+    ):
+        raise DevelopmentProtocolError("dataset_id must be an explicit bounded identifier")
+    if (
+        not isinstance(source_raw_sha256, str)
+        or len(source_raw_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in source_raw_sha256)
+    ):
+        raise DevelopmentProtocolError("source_raw_sha256 must be lowercase SHA-256")
     trades = tuple(closed_trades)
     marked_equity = tuple(marked_equity_samples)
     _validate_replay_evidence(
@@ -363,9 +380,9 @@ def evaluate_development_screening(
     return DevelopmentScreeningResult(
         protocol_id=PROTOCOL_ID,
         protocol_sha256=PROTOCOL_SHA256,
-        dataset_id=DATASET_ID,
-        source_raw_sha256=SOURCE_RAW_SHA256,
-        dataset_role=REQUIRED_DATASET_ROLE,
+        dataset_id=dataset_id,
+        source_raw_sha256=source_raw_sha256,
+        dataset_role=dataset_role,
         segment_stability=segment_stability,
         verdict=verdict,
         metrics=metrics,
@@ -375,6 +392,7 @@ def evaluate_development_screening(
 
 
 __all__ = [
+    "ALLOWED_DATASET_ROLES",
     "COST_MODEL_ID",
     "DATASET_ID",
     "MAXIMUM_CONSECUTIVE_LOSSES",
@@ -387,6 +405,7 @@ __all__ = [
     "MINIMUM_SEGMENT_PROFIT_FACTOR",
     "PROTOCOL_ID",
     "PROTOCOL_SHA256",
+    "REPLICATION_DATASET_ROLE",
     "REQUIRED_DATASET_ROLE",
     "SEGMENT_LABELS",
     "SOURCE_RAW_SHA256",
