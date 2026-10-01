@@ -1,0 +1,144 @@
+{
+  "audit_id": "mnq-03-26-clean-export-lineage-20261001",
+  "audit_timestamp_utc": "2026-10-01T18:09:04Z",
+  "phase": "D003 — CLEAN_LINEAGE_SOURCE_EVIDENCE",
+  "status": "PASS",
+  "evidence_acceptance": {
+    "decision": "ACCEPTED_FOR_EXPOSED_DEVELOPMENT_REPLICATION_LINEAGE",
+    "basis": "The fail-closed contract accepts a sanitized hashed contract-identity reference for an exposed development root. The exact private RAW bytes, size, row count and temporal bounds were independently verified; contemporaneous export screens identify the selected contract and export operation; observed NTFS metadata binds the preserved file; historical configuration screens and the final retrospective operator attestation establish the remaining export configuration with their evidence classes retained.",
+    "limitation": "The final operator attestation is retrospective. Historical and post-export observations are not reclassified as contemporaneous. This evidence authorizes only the precommitted exposed-development replication; it is not OOS evidence, independent performance proof, paper-trading validation or authorization for real trading."
+  },
+  "contract_identity_evidence": {
+    "filename": "FINAL_OPERATOR_ATTESTATION.txt",
+    "sha256": "081386347dcf52ba6eff9b66143b9e217881f11f2cd0a9ab0c4439c7df7c65d7",
+    "size_bytes": 1844,
+    "encoding": "UTF-8 with BOM",
+    "classification": "FINAL_RETROSPECTIVE_OPERATOR_ATTESTATION",
+    "attestation_date_local": "2026-10-01",
+    "operator_personal_confirmation": true,
+    "owner_supplied_sha256_matches_audited_bytes": true,
+    "exact_raw_sha256_binding": true,
+    "required_identity_fields_present": true,
+    "holiday_and_early_close_policy_attested": true
+  },
+  "raw_source": {
+    "filename": "MNQ 03-26.Last.txt",
+    "role": "CANONICAL_EXPOSED_DEVELOPMENT_REPLICATION_ROOT",
+    "sha256": "2122722f25dbc865dad154905309b5e76d2190561ffc64acdaa955365ccb9efc",
+    "size_bytes": 3946060,
+    "row_count": 74308,
+    "first_timestamp_utc": "2026-01-01T01:22:00Z",
+    "last_timestamp_utc": "2026-03-20T13:30:00Z",
+    "creation_time_local": "2026-09-30T18:40:08",
+    "creation_time_utc": "2026-09-30T16:40:08Z",
+    "last_write_time_local": "2026-09-30T19:45:23",
+    "last_write_time_utc": "2026-09-30T17:45:23Z",
+    "windows_timezone_id": "Romance Standard Time",
+    "utc_offset_at_export": "+02:00",
+    "bytes_hash_size_rows_and_bounds_verified": true,
+    "filesystem_metadata_classification": "POST_EXPORT_OBSERVATION_OF_PRESERVED_RAW",
+    "requested_window": "2026-01-01 through 2026-03-31",
+    "actual_end_explanation": "MNQ 03-26 contract expiration on 2026-03-20; no post-expiration bars expected"
+  },
+  "source_configuration": {
+    "instrument": "MNQ",
+    "contract_id": "MNQ 03-26",
+    "bar_interval": "1 minute",
+    "data_type": "Last",
+    "merge_policy": "DoNotMerge",
+    "continuous_contract": false,
+    "trading_hours_template": "CME US Index Futures ETH",
+    "session_type": "ETH",
+    "account_provider": "Apex Trader Funding",
+    "market_data_provider_or_routing": "Rithmic",
+    "platform": "NinjaTrader",
+    "software_version": "8.0.28.0 64-bit",
+    "application_timezone_windows": "Romance Standard Time",
+    "application_timezone_iana_mapping": "Europe/Paris",
+    "session_timezone_display": "Central Time (US & Canada)",
+    "session_timezone_iana_mapping": "America/Chicago",
+    "session_timezone_mapping_quality": "DERIVED_MAPPING",
+    "source_timestamp_timezone": "UTC",
+    "source_timestamp_semantics": "BAR_END",
+    "dst_policy": "IANA_TIMEZONE_RULES",
+    "holiday_and_early_close_policy": "BUILT_IN_CME_US_INDEX_FUTURES_ETH_TEMPLATE_UNCHANGED",
+    "transformation_after_export": "NONE",
+    "parent_dataset_sha256": null,
+    "legacy_archive_parent_relationship": "NONE"
+  },
+  "evidence_classification": {
+    "instrument_contract_interval_data_type_and_requested_window": "CONTEMPORANEOUS_2026_09_30_EXPORT_UI_PLUS_FINAL_RETROSPECTIVE_ATTESTATION",
+    "export_completion": "CONTEMPORANEOUS_EXPORT_SUCCESS_SCREEN_PLUS_POST_EXPORT_NTFS_LAST_WRITE_OBSERVATION",
+    "merge_policy": "HISTORICAL_PRE_EXPORT_SCREEN_PLUS_FINAL_RETROSPECTIVE_ATTESTATION",
+    "continuous_contract": "CONTEMPORANEOUS_SINGLE_QUARTERLY_CONTRACT_SELECTION_PLUS_FINAL_RETROSPECTIVE_ATTESTATION",
+    "trading_hours_template": "HISTORICAL_PRE_EXPORT_OR_UNDATED_SCREEN_PLUS_FINAL_RETROSPECTIVE_ATTESTATION",
+    "holiday_and_early_close_policy": "FINAL_RETROSPECTIVE_OPERATOR_ATTESTATION_OF_UNCHANGED_BUILT_IN_TEMPLATE",
+    "software_version": "HISTORICAL_OR_UNDATED_NINJATRADER_ABOUT_SCREEN_PLUS_PRIOR_RETROSPECTIVE_OPERATOR_STATEMENT",
+    "provider_chain": "CONTEMPORANEOUS_OR_SAME_SESSION_REDACTED_CONNECTION_SCREENS_PLUS_FINAL_RETROSPECTIVE_ATTESTATION",
+    "application_timezone": "HISTORICAL_PRE_EXPORT_OR_UNDATED_SCREEN_PLUS_POST_EXPORT_WINDOWS_TIMEZONE_OBSERVATION",
+    "source_timestamp_timezone_and_semantics": "NINJATRADER_EXPORT_DOCUMENTATION_PLUS_FINAL_RETROSPECTIVE_ATTESTATION",
+    "raw_identity": "INDEPENDENT_BYTE_HASH_SIZE_ROW_AND_BOUND_VERIFICATION",
+    "transformation_parent_and_legacy_relationship": "FINAL_RETROSPECTIVE_OPERATOR_ATTESTATION"
+  },
+  "sanitized_evidence_bundles": {
+    "clean_export": {
+      "filename": "MNQ_03-26_CLEAN_EXPORT_EVIDENCE.zip",
+      "sha256": "20ac944f8c4270178f8581f6e1be85e23b87e5fccbb88e0e9c2c55e3978306a7",
+      "crc_status": "PASS",
+      "member_hash_status": "PASS"
+    },
+    "assembled_complement": {
+      "filename": "MNQ_03-26_PROVENANCE_COMPLEMENT_ASSEMBLED.zip",
+      "sha256": "36bbadde34df3bd3ae07eb4fb5c06f95ac3a91c90adf4862303ddba5a9e23b8b",
+      "crc_status": "PASS",
+      "declared_member_hashes": "PASS_18_OF_18"
+    },
+    "final_attestation_complement": {
+      "filename": "MNQ_03-26_PROVENANCE_COMPLEMENT_FINAL.zip",
+      "sha256": "3020d81533550d25fe77455f783f817d47fbe1aa3aa18bdb9dff1e8d7fe05a56",
+      "crc_status": "PASS",
+      "independently_hashed_members": 3
+    }
+  },
+  "key_corroborating_artifacts": {
+    "export_success_receipt_sha256": "ae51f8127e9486917352cf81ae0f4e05e7e68cdd77f21ebccbc7dab558a6200e",
+    "exported_files_listing_sha256": "196fab5bd816aa3b790901c30d6456d1f51e4b6cf7b7dc0fe021bb940bf49d44",
+    "historical_download_selection_sha256": "0d9dc3b76d88f4bcfa856df68cf45402fdca0622440c419122081a5b03fd42d2",
+    "apex_account_redacted_sha256": "9c06ff58d9fa2efd8de9c3be7253851b0039e8d747c3df21facf9b64ccddc198",
+    "rithmic_settings_redacted_sha256": "9e215f9cfa132793d2205fba3047d6f0cd552072e680a6a6c89a00c253624158",
+    "do_not_merge_historical_sha256": "d9af785e811b1d3856b21ae61f48e1566df933d983434603381b6702dd6cc528",
+    "trading_hours_historical_sha256": "c69a135010240530e021c04493835fc785831429cada652897657ac3babcee23",
+    "application_timezone_historical_sha256": "c79be885e152c9ff2deb5735370d8285e9d593dd5d9c6593c1dbd7f03763f9db",
+    "ninjatrader_version_historical_sha256": "7f294debdb920f27f0de57082785a1f9252f4df9236ffe2c781fa5caeed8093b",
+    "post_export_ntfs_observation_sha256": "cedf341819b11a95dc1ccdd917a11f2825650f2839b1968f41f2f7bee93c7411"
+  },
+  "legacy_exclusion": {
+    "prohibited_archive": "MNQ_OHLCV_2024_2025_03-26_SANS_09-26(1).zip",
+    "relationship_to_clean_root": "NONE",
+    "is_parent_of_clean_root": false,
+    "used_for_replication": false
+  },
+  "governance": {
+    "dataset_role": "EXPOSED_DEVELOPMENT_REPLICATION",
+    "canonical_manifest_role": "DEVELOPMENT",
+    "exposure_state": "EXPOSED_DEVELOPMENT",
+    "oos": false,
+    "authorized_use": "EMA_PULLBACK_V1B_MNQ_CROSS_CONTRACT_REPLICATION_03_26_ONLY",
+    "prohibited_claims": [
+      "OOS_EVIDENCE",
+      "INDEPENDENT_PERFORMANCE",
+      "PAPER_TRADING_VALIDATED",
+      "APEX_READINESS",
+      "REAL_TRADING_READY"
+    ]
+  },
+  "privacy": {
+    "raw_files_committed": false,
+    "screenshots_committed": false,
+    "market_rows_committed": 0,
+    "prices_committed": 0,
+    "account_identifiers_committed": false,
+    "credentials_committed": false,
+    "oos_accessed": false
+  }
+}
