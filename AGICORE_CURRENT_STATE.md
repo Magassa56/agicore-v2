@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : IN_PROGRESS — REVERSAL_TRANSITION_EVENT_ASSEMBLY ;
+Statut : BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -49,10 +49,11 @@ DIRECTIONAL_IMPULSE_EVENT = PASS ;
 REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION = PASS ;
 REVERSAL_TRANSITION_EVENT_REJECTION_BAR = PASS ;
 REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION = PASS ;
-REVERSAL_TRANSITION_EVENT = ASSEMBLY_PENDING ;
+REVERSAL_TRANSITION_EVENT = PASS ;
+REGIME_CONTEXT_V2_EVENT_LIFETIME = BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-opposite-transition.
-Base GitHub vérifiée et récupérée : 31539cdb8b25ed0672d14fe4469fab84068ec112.
+Branche de vérification : feature/ema-pullback-v2-reversal-event.
+Base GitHub vérifiée et récupérée : 39130e82152002c3c11c7c316f65d8fbcc7fc9d5.
 
 ## Acquis vérifiés
 
@@ -1027,7 +1028,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`b715e37a0796721663f9fa75d225bdb711444fc9b448c33a432555886119871b`. L'hypothèse porte sur une
+`c848aee8c2ca59a72fd062dba68fd1d1fd07e7af4f7c162a9f5c20290962285e`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1302,7 +1303,8 @@ ultérieure conserve l'index et le timestamp t+1. Références t-5..t-1 et rejet
 t réutilisés sans modification. Open/Close t+1 seulement ; aucun indicateur.
 Baseline pré-replay non optimisée, sans dérivation V1/V1A/V1B ni ajustement MNQ.
 
-Module src/agicore/trading/reversal_transition_v2.py, SHA-256
+Module lors de la formalisation de la transition opposée :
+src/agicore/trading/reversal_transition_v2.py, SHA-256
 `9581d9b7d47aef0385f8008a9e219135f3945fd5fe509d00b8cea3db6c843676`.
 73 nouveaux tests synthétiques PASS ; 475 tests V2 ciblés PASS.
 Fichier tests/unit/trading/test_reversal_opposite_transition_v2.py, SHA-256
@@ -1312,11 +1314,44 @@ dans ce sandbox. Ruff, format, compilation et diff-check PASS.
 CI intégrale verte exigée avant fusion ; preuves et SHA de merge dans la PR.
 Aucun replay, accès OOS, dataset réel ou changement de règles V1/risque.
 
-Prochaine étape déjà autorisée : après fusion, assembler l'événement complet
-par conjonction des trois composants figés. Type source REVERSAL_TRANSITION,
-index/timestamp événement t+1 et rejet t séparés. Ensuite revenir à
-REGIME_CONTEXT_V2 pour sa durée de vie jusqu'au pullback ; aucune persistance
-ou invalidation n'est inventée ici. V2 reste PRE_FORMALIZATION.
+L'assemblage demandé après fusion est réalisé dans la phase ci-dessous.
+
+## V2 — événement de retournement complet à t+1
+
+PR #286 fusionnée après CI #254 verte, merge
+`39130e82152002c3c11c7c316f65d8fbcc7fc9d5`.
+Assemblage explicitement autorisé : direction préalable qualifiée AND rejet
+qualifié AND transition opposée confirmée. Les trois fonctions figées sont
+réutilisées sans changement sur les mêmes observations. Aucun composant,
+seuil ou règle de marché supplémentaire. Toute qualification incomplète,
+invalide, expirée ou en attente donne zéro événement complet.
+
+Source immutable : event_type = REVERSAL_TRANSITION, direction LONG/SHORT
+opposée à prior_direction UP/DOWN, rejection_bar_index t et event_bar_index
+t+1, rejection_timestamp et event_timestamp UTC séparés. L'événement n'existe
+qu'à Close[t+1]. Une réévaluation ultérieure conserve cette disponibilité.
+Seuls t-5..t et t+1 autorisée par l'horloge sont lus, jamais t+2/future.
+
+L'adaptateur as_regime_event() conserve direction/index/timestamp de l'événement
+dans la famille existante REVERSAL_TRANSITION_EVENT du compositeur inchangé.
+Le record source conserve type REVERSAL_TRANSITION et provenance du rejet.
+L'OR des deux familles et la collision opposée restent figés ; aucun ancien
+événement n'est retimestampé sur une barre ultérieure pour rester actif.
+
+Module src/agicore/trading/reversal_transition_v2.py, SHA-256
+`72d11ae348470bcb4a56b89473848524ab4ca23f670e532a557424d3e89d5a28`.
+47 nouveaux tests synthétiques d'assemblage PASS ; 522 tests V2 ciblés PASS.
+Fichier tests/unit/trading/test_reversal_transition_event_v2.py, SHA-256
+`bef2a0ba02a158f06e85246140c6a6c7d6f76e62ea510019a41c60dc6d61875c`.
+6806 tests locaux PASS, 4 avertissements préexistants, hors test_mcp.py bloqué
+dans ce sandbox. Ruff, format, compilation et diff-check PASS.
+CI intégrale verte exigée avant fusion ; preuves et SHA de merge dans la PR.
+Aucun replay, accès OOS, lecture de dataset, calibration MNQ ou changement V1/risque.
+
+Prochaine gate unique : REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED.
+Définir le maintien causal du contexte entre événement qualifié et futur
+pullback EMA20 : durée, invalidation, consommation et nouvel événement.
+Aucune règle de vie ni entrée n'est inventée. V2 reste PRE_FORMALIZATION.
 
 ## Limites du produit
 
