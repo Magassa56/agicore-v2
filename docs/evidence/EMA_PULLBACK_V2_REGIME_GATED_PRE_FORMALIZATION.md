@@ -307,8 +307,9 @@ Les clôtures égales comptent uniquement comme flat. Les extrémités doivent
 3 pas directionnels. Un seul pullback ou un seul flat est admis si les deux
 conditions de direction sont satisfaites. Aucun seuil de magnitude ajouté.
 
-Le module distinct `src/agicore/trading/reversal_transition_v2.py` lit seulement
-les cinq index antérieurs requis. `t` peut être absent et n'est jamais lue ;
+La fonction `evaluate_reversal_prior_direction_v2` du module distinct
+`src/agicore/trading/reversal_transition_v2.py` lit seulement les cinq index
+antérieurs requis. `t` peut être absent et n'est jamais lue ;
 ni les barres plus anciennes ni les futures ne sont consultées. La direction
 est entièrement connue à Close[t-1] ; l'index et le timestamp de disponibilité
 sont conservés sur une évaluation valide. Le calcul des quatre différences
@@ -337,11 +338,73 @@ EMA20, MACD, RSI, stochastic, volume, range, wick, ATR et filtre de session
 ne participent pas à ce sous-prédicat. Il ne qualifie pas encore un événement
 REVERSAL_TRANSITION_EVENT ou une entrée. Aucun replay ni accès OOS.
 
-## Prochaine ambiguïté — bougie de rejet du retournement
+## Bougie de rejet du retournement — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_REJECTION_BAR_REQUIRED`
+Le 2026-10-03, `REVERSAL_TRANSITION_EVENT_REJECTION_BAR_REQUIRED` est acquittée.
+`REVERSAL_TRANSITION_EVENT_REJECTION_BAR` est figé comme baseline initiale
+pré-replay, non optimisée, sans dérivation des résultats V1/V1A/V1B.
+`MIN_REJECTION_WICK_RATIO = Decimal("0.40")` ne sera pas ajusté après
+observation de résultats.
 
-Quelle règle causale exacte sur la bougie candidate clôturée `t` définit le
-rejet ou l'épuisement dans la direction préalable UP/DOWN ? Les mesures,
-comparateurs et éventuels seuils de cette bougie ne sont pas choisis ici.
-L'événement de retournement complet reste à formaliser avant tout replay.
+```text
+PRIOR_BARS = [t-5, t-4, t-3, t-2, t-1]
+REJECTION_CANDIDATE = t, closed
+range_t = High[t] - Low[t]
+upper_wick_t = High[t] - max(Open[t], Close[t])
+lower_wick_t = min(Open[t], Close[t]) - Low[t]
+prior_high = max(High[t-5], ..., High[t-1])
+prior_low = min(Low[t-5], ..., Low[t-1])
+SHORT = prior_direction == UP
+        AND High[t] > prior_high
+        AND Close[t] < prior_high
+        AND upper_wick_t >= Decimal("0.40") * range_t
+LONG = prior_direction == DOWN
+       AND Low[t] < prior_low
+       AND Close[t] > prior_low
+       AND lower_wick_t >= Decimal("0.40") * range_t
+```
+
+La fonction `evaluate_reversal_rejection_bar_v2` réutilise la fonction figée de
+direction préalable et exactement les mêmes cinq observations antérieures pour
+les extrêmes. La candidate est exclue des deux références ; seule sa géométrie
+est utilisée pour le rejet. Aucune bougie future ou antérieure à t-5 n'est lue.
+Direction disponible à Close[t-1], rejet disponible uniquement à Close[t].
+Les index et timestamps de disponibilité sont conservés séparément.
+
+Validation préalable de la candidate : OHLC finis et exacts, High >= max(Open,
+Close), Low <= min(Open, Close), High >= Low. Sinon `INVALID_OHLC`, qualification
+fausse. Après validation, range <= 0 donne `INVALID_CANDIDATE_RANGE`,
+qualification fausse. Le balayage et le retour sont stricts : égalité du High
+ou du Low à l'extrême, ou de Close à l'extrême concerné, échoue. La mèche est
+inclusive : exactement 40% passe, toute valeur inférieure échoue. Calculs exacts
+Decimal, sans division de ratios ni arrondi avant comparaison, même sous
+précision ambiante réduite ; les entiers exacts sont admis, les floats refusés.
+
+Aucune condition de couleur du corps : une bougie encore haussière peut
+qualifier SHORT après UP, et une bougie encore baissière peut qualifier LONG
+après DOWN. Un doji n'est pas exclu si les trois conditions sont satisfaites.
+Le retour compare Close au seul extrême balayé ; aucune borne supplémentaire
+sur l'autre extrême n'est ajoutée. Une direction préalable NONE ne qualifie rien.
+
+Les statuts warmup/donnée Close invalide du sous-prédicat préalable sont
+propagés. Candidate absente/non clôturée ou métadonnées incohérentes : erreur
+fail-closed. High/Low antérieurs manquants, non finis ou inversés :
+`INVALID_PRIOR_EXTREMA`, qualification fausse. Ces contrôles d'entrée ne sont
+pas des conditions de marché supplémentaires. L'Open historique n'est pas
+requis. `EVALUATED` distingue une évaluation valide de son booléen de qualification.
+
+Aucun MACD, EMA20, volume, ATR, RSI, stochastic, sens du corps ou confirmation
+t+1 n'est ajouté. Le rejet reste un sous-prédicat : il n'émet aucun événement
+REVERSAL_TRANSITION_EVENT ni signal d'entrée. La transition opposée après le
+rejet sera formalisée séparément. Aucun replay, accès OOS ou ajustement sur
+MNQ 03-26/06-26.
+
+## Prochaine ambiguïté — transition opposée après le rejet
+
+`BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION_REQUIRED`
+
+Quelle règle causale exacte confirme l'inversion après la bougie de rejet
+clôturée `t` ? Définir les observations autorisées, comparateurs, frontières,
+délai et moment de disponibilité de la confirmation. Aucune règle de
+confirmation n'est choisie ici ; l'événement de retournement complet reste à
+formaliser avant tout replay ou ouverture OOS.
