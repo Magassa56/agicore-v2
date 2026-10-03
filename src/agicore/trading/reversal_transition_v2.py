@@ -1,8 +1,9 @@
-"""Independent, causal prior-direction and rejection prerequisites for V2.
+"""Causal prior-direction, rejection and opposite-transition prerequisites.
 
 Prior direction reads only the five closes before t. Rejection reads OHLC of
 closed t and the extrema of those same five bars, with no candle-color filter.
-Neither prerequisite emits a reversal event or an entry signal.
+Confirmation reads only Open/Close of closed t+1, behind a closed-bar clock.
+These prerequisites emit no complete reversal event or entry signal.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .regime_context_v2 import RegimeDirection
 PRIOR_DIRECTION_LOOKBACK = 5
 PRIOR_DIRECTION_MIN_STEPS = 3
 MIN_REJECTION_WICK_RATIO = Decimal("0.40")
+CONFIRMATION_WINDOW_CLOSED_BARS = 1
 
 
 class ReversalTransitionV2Error(ValueError):
@@ -50,6 +52,17 @@ class RejectionBarStatus(StrEnum):
     INVALID_OHLC = "INVALID_OHLC"
     INVALID_CANDIDATE_RANGE = "INVALID_CANDIDATE_RANGE"
     EVALUATED = "EVALUATED"
+
+
+class OppositeTransitionStatus(StrEnum):
+    """One-bar confirmation state without a complete reversal event."""
+
+    REJECTION_NOT_QUALIFIED = "REJECTION_NOT_QUALIFIED"
+    AWAITING_OPPOSITE_TRANSITION = "AWAITING_OPPOSITE_TRANSITION"
+    INCOMPLETE_CONFIRMATION = "INCOMPLETE_CONFIRMATION"
+    INVALID_CONFIRMATION_INPUT = "INVALID_CONFIRMATION_INPUT"
+    EXPIRED_NO_TRANSITION = "EXPIRED_NO_TRANSITION"
+    CONFIRMED = "CONFIRMED"
 
 
 @dataclass(frozen=True)
@@ -128,6 +141,30 @@ class ReversalRejectionEvaluation:
     def rejection_direction(self) -> RegimeDirection | None:
         """Return the rejection's eligible reversal side only when qualified."""
         return self.prior_direction.reversal_direction if self.rejection_qualified else None
+
+
+@dataclass(frozen=True)
+class ReversalOppositeTransitionEvaluation:
+    """Confirmation only; rejection and confirmation retain separate availability."""
+
+    status: OppositeTransitionStatus
+    transition_confirmed: bool
+    rejection: ReversalRejectionEvaluation
+    confirmation_bar_index: int
+    rejection_body_low: Decimal | None = None
+    rejection_body_high: Decimal | None = None
+    known_at_bar_index: int | None = None
+    known_at_timestamp: datetime | None = None
+
+    @property
+    def state(self) -> OppositeTransitionStatus:
+        """Expose the explicit awaiting, confirmed, expired or invalid state."""
+        return self.status
+
+    @property
+    def rejection_qualified(self) -> bool:
+        """Keep rejection qualification separate from transition confirmation."""
+        return self.rejection.rejection_qualified
 
 
 def _finite_close(value: Decimal | int | None) -> Decimal | None:
@@ -328,18 +365,128 @@ def evaluate_reversal_rejection_bar_v2(
     )
 
 
+def evaluate_reversal_opposite_transition_v2(
+    *,
+    rejection_candidate_bar_index: int,
+    closed_bar_index: int,
+    bars_by_index: Mapping[int, RejectionBarV2],
+    end_of_data: bool = False,
+) -> ReversalOppositeTransitionEvaluation:
+    """Confirm opposite body acceptance strictly on closed t+1, without t+2.
+
+    The caller's closed-bar clock prevents reading t+1 at Close[t], even if it
+    is present in a historical mapping. An explicit end-of-data signal turns
+    that waiting state into incomplete confirmation. A missing or unclosed
+    t+1 remains incomplete; a valid closed failure expires permanently for t.
+    Only Open/Close of t+1 are used, without a range, extreme or volume filter.
+    """
+    if type(closed_bar_index) is not int or closed_bar_index < 0:
+        raise ReversalTransitionV2Error("closed_bar_index must be a nonnegative integer")
+    if type(rejection_candidate_bar_index) is not int or rejection_candidate_bar_index < 0:
+        raise ReversalTransitionV2Error("candidate index must be a nonnegative integer")
+    if closed_bar_index < rejection_candidate_bar_index:
+        raise ReversalTransitionV2Error("rejection must already be closed at the evaluation clock")
+    if type(end_of_data) is not bool:
+        raise ReversalTransitionV2Error("end_of_data must be a boolean")
+
+    t = rejection_candidate_bar_index
+    confirmation_index = t + CONFIRMATION_WINDOW_CLOSED_BARS
+    rejection = evaluate_reversal_rejection_bar_v2(
+        rejection_candidate_bar_index=t, bars_by_index=bars_by_index
+    )
+    if not rejection.rejection_qualified:
+        return ReversalOppositeTransitionEvaluation(
+            OppositeTransitionStatus.REJECTION_NOT_QUALIFIED, False, rejection, confirmation_index
+        )
+
+    candidate = bars_by_index[t]
+    open_, close = _finite_close(candidate.open), _finite_close(candidate.close)
+    body_low, body_high = min(open_, close), max(open_, close)
+    if closed_bar_index < confirmation_index:
+        status = (
+            OppositeTransitionStatus.INCOMPLETE_CONFIRMATION
+            if end_of_data
+            else OppositeTransitionStatus.AWAITING_OPPOSITE_TRANSITION
+        )
+        return ReversalOppositeTransitionEvaluation(
+            status, False, rejection, confirmation_index, body_low, body_high
+        )
+    if confirmation_index not in bars_by_index:
+        return ReversalOppositeTransitionEvaluation(
+            OppositeTransitionStatus.INCOMPLETE_CONFIRMATION,
+            False,
+            rejection,
+            confirmation_index,
+            body_low,
+            body_high,
+        )
+    confirmation = bars_by_index[confirmation_index]
+    if not isinstance(confirmation, RejectionBarV2) or confirmation.bar_index != confirmation_index:
+        raise ReversalTransitionV2Error("confirmation bar index is inconsistent")
+    if confirmation.is_closed is not True:
+        return ReversalOppositeTransitionEvaluation(
+            OppositeTransitionStatus.INCOMPLETE_CONFIRMATION,
+            False,
+            rejection,
+            confirmation_index,
+            body_low,
+            body_high,
+        )
+    if confirmation.timestamp_utc <= candidate.timestamp_utc:
+        raise ReversalTransitionV2Error("confirmation must follow the closed rejection bar")
+    confirmation_open = _finite_close(confirmation.open)
+    confirmation_close = _finite_close(confirmation.close)
+    if confirmation_open is None or confirmation_close is None:
+        return ReversalOppositeTransitionEvaluation(
+            OppositeTransitionStatus.INVALID_CONFIRMATION_INPUT,
+            False,
+            rejection,
+            confirmation_index,
+            body_low,
+            body_high,
+        )
+    prior_direction = rejection.prior_direction.prior_direction
+    confirmed = (
+        prior_direction is ReversalPriorDirection.UP
+        and rejection.rejection_direction is RegimeDirection.SHORT
+        and confirmation_close < confirmation_open
+        and confirmation_close < body_low
+    ) or (
+        prior_direction is ReversalPriorDirection.DOWN
+        and rejection.rejection_direction is RegimeDirection.LONG
+        and confirmation_close > confirmation_open
+        and confirmation_close > body_high
+    )
+    return ReversalOppositeTransitionEvaluation(
+        OppositeTransitionStatus.CONFIRMED
+        if confirmed
+        else OppositeTransitionStatus.EXPIRED_NO_TRANSITION,
+        confirmed,
+        rejection,
+        confirmation_index,
+        body_low,
+        body_high,
+        confirmation_index,
+        confirmation.timestamp_utc,
+    )
+
+
 __all__ = [
+    "CONFIRMATION_WINDOW_CLOSED_BARS",
     "MIN_REJECTION_WICK_RATIO",
     "PRIOR_DIRECTION_LOOKBACK",
     "PRIOR_DIRECTION_MIN_STEPS",
+    "OppositeTransitionStatus",
     "PriorDirectionBarV2",
     "PriorDirectionStatus",
     "RejectionBarStatus",
     "RejectionBarV2",
+    "ReversalOppositeTransitionEvaluation",
     "ReversalPriorDirection",
     "ReversalPriorDirectionEvaluation",
     "ReversalRejectionEvaluation",
     "ReversalTransitionV2Error",
+    "evaluate_reversal_opposite_transition_v2",
     "evaluate_reversal_prior_direction_v2",
     "evaluate_reversal_rejection_bar_v2",
 ]
