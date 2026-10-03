@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-01 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V1_PATH_TERMINATION_DECISION_REQUIRED ;
+Date : 2026-10-03 UTC.
+Statut : BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -36,9 +36,13 @@ EMA_PULLBACK_V1B_MNQ_03_26_REPLICATION_IMPLEMENTATION = PASS ;
 EMA_PULLBACK_V1B_MNQ_03_26_REPLAY_EXECUTION = COMPLETED_ONCE ;
 EMA_PULLBACK_V1B_MNQ_03_26_SCREENING_VERDICT = NO_GO_VARIANT ;
 EMA_PULLBACK_V1B_MNQ_03_26_EXPERIMENT_OUTCOME = STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH ;
+EMA_PULLBACK_V1_PATH = TERMINATED ;
+STRATEGY_FAMILY = EMA_PULLBACK_V2_REGIME_GATED ;
+EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION ;
+REGIME_CONTEXT_V2 = BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v1b-mnq-03-26-replication-result.
-Base GitHub vérifiée et récupérée : f616033f9dce74a4a0ca567de9c749840daf172f.
+Branche de vérification : feature/ema-pullback-v2-regime-preformalization.
+Base GitHub vérifiée et récupérée : d03680fcd9c387e6e8dad86a11e0377cb02c1296.
 
 ## Acquis vérifiés
 
@@ -1002,6 +1006,31 @@ ouverture OOS ne sont autorisées. La prochaine action exige une décision humai
 cette voie incrémentale. Les 20 tests ciblés de lignée, runner et résultat passent ; la suite locale
 complète passe avec 6 288 tests et 6 avertissements préexistants.
 
+## Décision humaine — V1 terminée, V2 en préformalisation
+
+Le 2026-10-03, le propriétaire a décidé `EMA_PULLBACK_V1_PATH = TERMINATED` et figé
+définitivement V1 `NO_GO_BASELINE`, V1A `NO_GO_VARIANT`, V1B `NO_GO_VARIANT`.
+La réplication V1B MNQ 03-26 et ses métriques historiques restent inchangées.
+Aucune V1C n'est autorisée.
+L'ancienne gate `EMA_PULLBACK_V1_PATH_TERMINATION_DECISION_REQUIRED` est acquittée
+par cette décision ; elle reste une trace historique et ne constitue plus l'arrêt actif.
+
+Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
+`docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
+`99ffab38bbd32f2e9a88b5a316549606d64fff3b65d05a634c7dd01f2c41bf29`. L'hypothèse porte sur une
+transition de régime ou une impulsion directionnelle précédant le pullback EMA.
+Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
+pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
+retournement, transition momentum et acceptation de tendance, puis prédicats,
+warmup, ordre, invalidation, durée de vie, politique de position, sorties et risque.
+
+La première ambiguïté structurante est la composition des événements qualifiants :
+impulsion seule, retournement seul, ou deux prédicats distincts. Gate :
+`BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED`.
+Pas de replay, de sélection de seuil sur les résultats V1, de réutilisation des
+contrats MNQ 06-26 ou MNQ 03-26 pour calibrer V2, ni d'ouverture OOS. Un nouveau
+dataset DEVELOPMENT avec filiation sera requis après formalisation.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -1020,5 +1049,6 @@ La comptabilité non réalisée, le modèle versionné de coûts et le protocole
 DEVELOPMENT uniques de V1, V1A et V1B sont respectivement `NO_GO_BASELINE`, `NO_GO_VARIANT` et
 `NO_GO_VARIANT`. La réplication propre MNQ 03-26 de V1B est également `NO_GO_VARIANT` et échoue
 matériellement à reproduire l'edge DEVELOPMENT observé sur MNQ 06-26 ; la voie incrémentale V1 est
-arrêtée en attente d'une décision humaine. Aucune performance indépendante n'est démontrée et
-l'OOS reste fermé. Cette stratégie demeure distincte de EMA19/50 V3 rejetée.
+terminée par décision humaine. V2 est un programme distinct en préformalisation.
+Aucune performance indépendante n'est démontrée et l'OOS reste fermé. Cette
+stratégie demeure distincte de EMA19/50 V3 rejetée.
