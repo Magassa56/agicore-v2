@@ -80,8 +80,9 @@ refuse toute métadonnée incohérente ou provenant d'une barre ultérieure.
 La qualification du contexte est l'OR des événements indépendants, sous réserve
 de la collision opposée. Aucun événement n'a priorité sur l'autre. Un contexte
 qualifié n'est pas encore un signal d'entrée. L'ordre désormais figé est :
-événement complet, contexte actif, pullback qualifié et consommation unique.
-La future confirmation/momentum après le pullback et l'entrée restent à définir.
+événement complet, contexte actif, pullback qualifié et consommation unique,
+puis confirmation prix/momentum sur une clôture ultérieure. L'exécution d'entrée
+reste à définir séparément.
 
 Les seuils d'étendue, de volume et de géométrie des bougies sont désormais fixés
 dans leurs sous-contrats ci-dessous ; aucun ATR ou magnitude MACD n'est fixé. Aucun
@@ -674,13 +675,125 @@ Aucun MACD, EMA slope/proximity, ATR, volume, couleur de bougie, SMA14/SMA21,
 filtre de session, stop, target ou exécution d'entrée. Aucune règle V1 héritée.
 Aucun replay, accès OOS ou lecture de dataset réel.
 
-## Prochaine ambiguïté — confirmation/momentum d'entrée V2
+## Confirmation prix/momentum d'entrée V2 — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM_REQUIRED`
+Le 2026-10-03, `EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM_REQUIRED` est
+acquittée. Baseline initiale pré-replay non optimisée, indépendante des
+résultats V1/V1A/V1B. Aucun ajustement sur MNQ 03-26 ou MNQ 06-26.
 
-Après le pullback qualifié et consommé à Close[k], quelle confirmation exacte
-autorise la suite vers l'entrée ? Figer sa fenêtre, ses comparateurs OHLC et
-ses éventuelles conditions de momentum, sa disponibilité causale et son
-expiration. Aucun filtre, indicateur, délai ou signal d'entrée n'est choisi
-ici. Le contexte consommé ne sera pas réactivé en cas d'échec. Aucun replay
-ni ouverture OOS.
+```text
+PULLBACK_BAR = k
+FIRST_CONFIRMATION_BAR = k+1
+LAST_CONFIRMATION_BAR = k+2
+MAX_CONFIRMATION_AGE_CLOSED_BARS = 2
+MAX_CONFIRMATION_ELAPSED_TIME = 2 minutes
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+MACD_WARMUP_CLOSED_BARS = 26 + 9 = 35
+MACD_SESSION_RESET = FALSE
+NO_MACD_CROSS_REQUIRED
+NO_MACD_MAGNITUDE_THRESHOLD
+```
+
+À Close[k], le pullback formel est qualifié, le contexte reste CONSUMED et
+l'opportunité distincte devient AWAITING_CONFIRMATION. Elle conserve exactement
+le corps de k : pullback_body_low=min(Open[k], Close[k]) et
+pullback_body_high=max(Open[k], Close[k]). k ne peut jamais se confirmer.
+Seules k+1 et k+2, clôturées, sont candidates ; le premier PASS gagne.
+
+| Direction du pullback consommé | Prix de confirmation sur q | Momentum sur q |
+| --- | --- | --- |
+| LONG | Close[q] > Open[q] et Close[q] > pullback_body_high | MACD[q] > SIGNAL[q], HIST[q] > 0, HIST[q] > HIST[q-1], MACD[q] > MACD[q-1] |
+| SHORT | Close[q] < Open[q] et Close[q] < pullback_body_low | MACD[q] < SIGNAL[q], HIST[q] < 0, HIST[q] < HIST[q-1], MACD[q] < MACD[q-1] |
+
+Les deux colonnes sont exigées simultanément. Toutes leurs comparaisons sont
+strictes : égalité au bord du corps, doji, MACD==SIGNAL, HIST==0, histogramme
+inchangé ou ligne MACD inchangée donnent FAIL. La cassure de High[k] pour LONG
+ou Low[k] pour SHORT n'est pas exigée. Les High/Low de q ne participent pas à
+cette gate ; seuls ses Open/Close et sa disponibilité causale sont requis.
+La couleur du pullback k reste celle admise par le prédicat EMA20 figé.
+
+```text
+EMA12[0] = Close[0]
+EMA26[0] = Close[0]
+MACD[0] = EMA12[0] - EMA26[0] = 0
+SIGNAL[0] = MACD[0]
+HIST[0] = MACD[0] - SIGNAL[0] = 0
+
+EMA12[i] = EMA12[i-1] + (2/13) * (Close[i] - EMA12[i-1])
+EMA26[i] = EMA26[i-1] + (2/27) * (Close[i] - EMA26[i-1])
+MACD[i] = EMA12[i] - EMA26[i]
+SIGNAL[i] = SIGNAL[i-1] + (2/10) * (MACD[i] - SIGNAL[i-1])
+HIST[i] = MACD[i] - SIGNAL[i]
+```
+
+Chaque prix Decimal fini est converti exactement en Fraction ; toutes les
+récurrences et comparaisons restent rationnelles exactes. Entiers/Fraction
+admis, floats binaires refusés. Aucun arrondi préalable, seuil arrondi, reset
+journalier/session ou remplissage des gaps. L'indicateur avance uniquement
+sur les clôtures valides des observations réelles, sans bougie synthétique.
+Les indices commencent à zéro. Le warmup inclut q : premier candidat MACD
+éligible à q=34, lorsque 35 bougies clôturées existent. Avant cela :
+INSUFFICIENT_MACD_WARMUP et confirmation false. Les valeurs initiales sont
+exposées pour vérifier l'arithmétique mais n'autorisent aucune confirmation.
+35 est dérivé mécaniquement de 26+9, sans observation de performance.
+
+Le MACD peut être déjà au-dessus du signal avant q pour LONG, ou au-dessous
+pour SHORT. Aucun crossover exact sur q ni seuil de magnitude. Il faut à la
+fois le bon côté, le bon signe d'histogramme, son renforcement strict et le
+déplacement strict de la ligne MACD dans la direction du trade.
+
+`begin_entry_confirmation_momentum_v2` accepte la transition formelle de
+consommation EMA20, vérifie sa provenance et capture le corps de k une fois.
+`advance_entry_confirmation_momentum_v2` traite chaque clôture candidate dans
+l'ordre, sans saut de k+1 en faveur de k+2. Index, fermeture et timestamps UTC
+cohérents sont requis. Le préfixe MACD consulté est explicitement 0..q, sans
+énumération des clés ou de la longueur d'une collection contenant le futur.
+Les timestamps requis sont strictement croissants et connus à Close[q].
+
+| Situation | Transition de l'opportunité |
+| --- | --- |
+| Close[k] | AWAITING_CONFIRMATION, aucune évaluation |
+| Temps depuis k >2 minutes | EXPIRED_CONFIRMATION_ELAPSED_TIME avant toute lecture prix/MACD de q |
+| k+1 FAIL | Reste AWAITING_CONFIRMATION |
+| Premier PASS sur k+1 ou k+2 | CONFIRMED à Close[q], record qualifié conservé |
+| k+2 FAIL | EXPIRED_NO_ENTRY_CONFIRMATION après évaluation |
+| q au-delà de k+2 | Aucune évaluation, aucune résurrection |
+| État terminal | Conservé sans lecture des bougies ultérieures |
+
+Exactement deux minutes est inclusif. Si temps et âge sont dépassés,
+l'expiration temporelle est appliquée avant toute évaluation. Si k+1 passe,
+k+2 n'est jamais lue pour cette opportunité. Si les données disponibles
+s'arrêtent avant une prochaine clôture, aucune confirmation/entrée synthétique
+n'est produite ; seule la décision connue est conservée. Le contexte source
+reste définitivement CONSUMED, y compris après warmup insuffisant, expiration,
+échec de confirmation ou future entrée.
+
+Un Close requis absent/non fini, une observation requise absente ou non
+clôturée donne INVALID_MACD_INPUT sans substitution, saut ni reset. Open[q]
+invalide ou candidate indisponible donne INVALID_CONFIRMATION_INPUT. Ces
+statuts techniques donnent false, sans prolonger la fenêtre. Les métadonnées
+incohérentes/non causales sont refusées par EntryConfirmationV2Error.
+
+Sur PASS, conserver source_regime_event_types/direction/bar_index/timestamp,
+pullback_bar_index=k, pullback_timestamp, ema_reference exacte,
+confirmation_bar_index=q, confirmation_timestamp, macd, signal, histogram,
+previous_macd et previous_histogram. La décision n'existe qu'à Close[q].
+Le record et le contexte source sont immuables ; la confirmation n'est pas
+une exécution d'entrée.
+
+Aucun fill, ordre, stop, take profit, breakeven, trailing, sizing, objectif
+quotidien, limite de trades/jour, filtre de session, SMA14/SMA21, RSI,
+stochastic, volume supplémentaire ou seuil de magnitude MACD. Aucune règle
+d'entrée V1 héritée, aucun replay ni ouverture OOS.
+
+## Prochaine ambiguïté — exécution d'entrée V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED`
+
+Quand et comment une confirmation qualifiée à Close[q] devient-elle une entrée
+exécutable ? Figer séparément son instant causal, son mode/prix d'exécution et
+le traitement d'une prochaine barre indisponible. Aucune règle d'exécution
+n'est choisie ici ; les sorties restent hors de cette prochaine gate. Aucun
+replay ni ouverture OOS.

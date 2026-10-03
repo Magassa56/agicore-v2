@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -52,10 +52,11 @@ REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION = PASS ;
 REVERSAL_TRANSITION_EVENT = PASS ;
 REGIME_CONTEXT_V2_EVENT_LIFETIME = PASS ;
 EMA20_PULLBACK_V2 = PASS ;
-EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM_REQUIRED ;
+EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM = PASS ;
+EMA_PULLBACK_V2_ENTRY_EXECUTION = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema20-pullback-v2.
-Base GitHub vérifiée et récupérée : 22125e90fe990e75d57549f186215315b9b03008.
+Branche de vérification : feature/ema-pullback-v2-entry-confirmation-momentum.
+Base GitHub vérifiée et récupérée : 227714be7ec45a67177e6bd273a66f5afdf1a63a.
 
 ## Acquis vérifiés
 
@@ -1030,7 +1031,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`92f1a3812f56329a0de3e5774cb62e6593c95532ffb18bec443f51f321503069`. L'hypothèse porte sur une
+`9a4b67de05bf5dbef42e67d0e6a2aaef71fe4593296cd4b09044dd37a1b4421c`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1464,11 +1465,81 @@ non optimisée, indépendante des résultats V1/V1A/V1B. Aucun replay, accès OO
 dataset réel ou ajustement MNQ 03-26/06-26. Aucun MACD, pente/proximité EMA,
 ATR, volume, couleur, SMA14/SMA21, filtre de session, stop, target ou entrée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM_REQUIRED.
-Figer la future confirmation/momentum après Close[k] : fenêtre, prédicats,
-frontières, causalité et expiration, sans réactiver le contexte consommé.
-Aucun indicateur/délai choisi ici. V2 reste PRE_FORMALIZATION ; aucun replay
-ou ouverture OOS.
+La gate confirmation/momentum d'entrée est acquittée par la décision ci-dessous.
+
+## V2 — confirmation clôturée et momentum MACD exact
+
+Point de départ vérifié : PR #289 fusionnée après CI #260 verte, merge
+`227714be7ec45a67177e6bd273a66f5afdf1a63a`.
+Décision du propriétaire du 2026-10-03 :
+EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM figée comme baseline initiale
+pré-replay non optimisée. Confirmation seulement sur k+1..k+2 inclusivement,
+MAX_CONFIRMATION_AGE_CLOSED_BARS=2, MAX_CONFIRMATION_ELAPSED_TIME=2 minutes.
+Le pullback qualifié à Close[k] a consommé son contexte et crée une opportunité
+distincte AWAITING_CONFIRMATION. k ne peut jamais se confirmer lui-même.
+
+Corps de k capturé une seule fois : min(Open[k], Close[k]) / max(Open[k], Close[k]).
+LONG : Close[q]>Open[q] et Close[q]>pullback_body_high.
+SHORT : Close[q]<Open[q] et Close[q]<pullback_body_low.
+Toutes les frontières sont strictes ; doji et égalité au bord du corps refusés.
+Pas de cassure requise de High[k]/Low[k] ni contrainte High/Low supplémentaire
+sur q. La géométrie et la couleur autorisée du pullback demeurent inchangées.
+
+MACD_FAST=12, MACD_SLOW=26, MACD_SIGNAL=9, MACD_SESSION_RESET=FALSE.
+EMA12[0]=EMA26[0]=Close[0], MACD[0]=SIGNAL[0]=HIST[0]=0.
+Récurrences exactes EMA12 += (2/13)*(Close-EMA12),
+EMA26 += (2/27)*(Close-EMA26), MACD=EMA12-EMA26,
+SIGNAL += (2/10)*(MACD-SIGNAL), HIST=MACD-SIGNAL.
+Conversion exacte Decimal fini en Fraction ; aucun arrondi, float,
+reset session/jour ou bougie synthétique. Préfixe causal explicite 0..q,
+sans consultation des clés/longueur futures. Warmup mécanique 26+9=35
+clôtures, incluant q : première éligibilité à q=34, sinon
+INSUFFICIENT_MACD_WARMUP et false sans prolongation de fenêtre.
+
+LONG exige simultanément MACD[q]>SIGNAL[q], HIST[q]>0,
+HIST[q]>HIST[q-1], MACD[q]>MACD[q-1]. SHORT est le miroir strict.
+Toute égalité ou affaiblissement requis donne FAIL.
+NO_MACD_CROSS_REQUIRED ; NO_MACD_MAGNITUDE_THRESHOLD.
+Un MACD déjà du bon côté du signal peut confirmer si tout le momentum se
+renforce ; aucune règle de crossover V1 n'est héritée.
+
+Temps depuis k >2 minutes : EXPIRED_CONFIRMATION_ELAPSED_TIME avant toute
+lecture prix/MACD. Exactement deux minutes inclusif. Candidats traités dans
+l'ordre sans sauter k+1 ; premier PASS terminal CONFIRMED à Close[q].
+Si k+1 passe, aucune lecture de k+2 pour cette opportunité. Si k+1 échoue,
+attente maintenue ; si k+2 échoue, EXPIRED_NO_ENTRY_CONFIRMATION après
+évaluation. k+3 ne peut ressusciter une opportunité terminale. Données
+finies avant une prochaine clôture : aucun signal ou acte synthétique.
+Le contexte source reste CONSUMED après tout résultat, sans second pullback
+ni réactivation après échec de confirmation ou future entrée.
+
+Close requis invalide, observation absente/non clôturée : INVALID_MACD_INPUT.
+Open de q invalide ou candidate indisponible : INVALID_CONFIRMATION_INPUT.
+Ces statuts techniques refusent la confirmation sans saut/reset ni délai
+supplémentaire. Métadonnées non causales/incohérentes refusées explicitement.
+PASS conserve source_regime_event_types/direction/index/timestamp,
+pullback index/timestamp/ema_reference et confirmation index/timestamp,
+macd/signal/histogram/previous_macd/previous_histogram exacts et immuables.
+
+Nouveau module src/agicore/trading/ema_pullback_entry_confirmation_v2.py,
+SHA-256 `d21e767d569609995ebf4ef289eda041619744f2cfa3b357d2b072ee479e70b6`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_entry_confirmation_v2.py,
+SHA-256 `4781f45d86d4d1d164c99093050573739c1cf72509065409bfbb67890adf5768`.
+114 nouveaux tests synthétiques PASS ; 841 tests V2 ciblés PASS.
+7125 tests de régression locaux PASS, 4 avertissements préexistants ;
+hors test_mcp.py bloqué dans ce sandbox, inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée
+avant fusion ; preuves et SHA de merge dans la PR.
+Détecteurs, cycle de vie, EMA20/pullback figés et V1/V1A/V1B inchangés.
+Aucun dataset réel, replay, OOS ni calibration MNQ 03-26/06-26.
+Aucun fill/ordre, stop/target, breakeven/trailing, sizing, objectif quotidien,
+limite de trades, filtre session, SMA14/SMA21, RSI/stochastic ou volume ajouté.
+Aucune rentabilité V2 démontrée ; programme toujours PRE_FORMALIZATION.
+
+Prochaine gate unique : EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED.
+Décider quand et comment la confirmation clôturée devient une entrée exécutable,
+en fixant séparément instant causal, mode/prix et prochaine barre indisponible.
+Aucune exécution choisie ici, aucune sortie définie, aucun replay ni ouverture OOS.
 
 ## Limites du produit
 
