@@ -56,20 +56,47 @@ qualifier un **nouveau dataset DEVELOPMENT** avec sa propre filiation. Les contr
 MNQ 06-26 et MNQ 03-26 déjà exploités pour V1 ne servent pas à choisir des
 paramètres V2. L'OOS reste scellé.
 
-## Première ambiguïté bloquante
+## Composition des événements — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED`
+Le 2026-10-03, la gate `REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED` a été
+acquittée par la règle architecturale
+`REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT`.
 
-L'hypothèse cite une transition de régime **ou** une impulsion directionnelle,
-et la première famille de variables cite `IMPULSE / REVERSAL EVENT`. Elle ne dit
-pas si une impulsion et un retournement sont deux chemins de qualification
-distincts, si l'un des deux est seul admissible, ni s'ils doivent se succéder.
-Ce choix détermine la direction et l'ordre causal des futurs prédicats. Aucun
-choix de seuil, de formule ou d'ordre d'événements ne peut le remplacer.
+`DIRECTIONAL_IMPULSE_EVENT` signifie accélération et acceptation fortes dans une
+direction déjà émergente. `REVERSAL_TRANSITION_EVENT` signifie rejet ou épuisement
+suivi d'une transition vers la direction opposée. Les deux prédicats restent
+indépendants : aucun score générique ne les fusionne. Chaque événement qualifié
+porte `event_type`, `event_direction = LONG | SHORT`, `event_bar_index` et
+`event_timestamp` (UTC). La composition porte sur la même barre clôturée et
+refuse toute métadonnée incohérente ou provenant d'une barre ultérieure.
 
-**Décision humaine unique demandée :** le contexte V2 doit-il commencer par
-**une impulsion directionnelle seulement**, **un retournement seulement**, ou
-**l'un ou l'autre selon deux prédicats distincts** ?
+| Événements sur la barre clôturée | Contexte | Direction | Étiquettes conservées |
+| --- | --- | --- | --- |
+| Aucun | `UNQUALIFIED` | Aucune | Aucune |
+| Impulsion seule ou retournement seul | `QUALIFIED` | Celle de l'événement | Une |
+| Les deux, même direction | `QUALIFIED` | Direction commune | Les deux |
+| Les deux, directions opposées | `AMBIGUOUS` | Aucune | Les deux ; aucune entrée |
 
-Après cette réponse, formaliser les prédicats et les autres ambiguïtés une par
-une, avant de sélectionner le nouveau dataset DEVELOPMENT et avant tout replay.
+La qualification du contexte est l'OR des événements indépendants, sous réserve
+de la collision opposée. Aucun événement n'a priorité sur l'autre. Un contexte
+qualifié n'est pas encore un signal d'entrée. L'ordre prévu est : contexte,
+transition momentum, acceptation EMA20, pullback, puis entrée ; les prédicats
+intermédiaires restent à définir.
+
+Aucun seuil numérique de volume, d'étendue de bougie, de ratio de mèche, d'ATR
+ou de magnitude MACD n'est fixé. Aucun replay ni choix de paramètre à partir des
+contrats MNQ 03-26 ou MNQ 06-26 n'est autorisé.
+
+## Prochaine ambiguïté — prédicat d'impulsion
+
+`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED`
+
+La notion « direction déjà émergente » n'a pas encore de critère causal exact.
+**Décision humaine unique demandée :** quelle observation sur les barres déjà
+clôturées établit la direction émergente avant qu'une bougie puisse qualifier
+`DIRECTIONAL_IMPULSE_EVENT` ?
+
+La définition de l'événement de retournement reste distincte et suivra sa
+propre formalisation. Les autres prédicats, warmup, ordre, invalidation, durée de
+vie, position, sorties et risque restent ouverts avant tout nouveau dataset
+DEVELOPMENT et tout replay.

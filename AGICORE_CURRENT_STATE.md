@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -39,10 +39,13 @@ EMA_PULLBACK_V1B_MNQ_03_26_EXPERIMENT_OUTCOME = STOP_INCREMENTAL_EMA_PULLBACK_V1
 EMA_PULLBACK_V1_PATH = TERMINATED ;
 STRATEGY_FAMILY = EMA_PULLBACK_V2_REGIME_GATED ;
 EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION ;
-REGIME_CONTEXT_V2 = BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED ;
+REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT ;
+REGIME_CONTEXT_V2_EVENT_COMPOSITION_STATUS = PASS ;
+DIRECTIONAL_IMPULSE_EVENT = BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED ;
+REVERSAL_TRANSITION_EVENT = PRE_FORMALIZATION ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-regime-preformalization.
-Base GitHub vérifiée et récupérée : d03680fcd9c387e6e8dad86a11e0377cb02c1296.
+Branche de vérification : feature/ema-pullback-v2-distinct-regime-events.
+Base GitHub vérifiée et récupérée : f67eaed1d8e3608146f8e81d7c0db45721d6e31d.
 
 ## Acquis vérifiés
 
@@ -1017,19 +1020,47 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`99ffab38bbd32f2e9a88b5a316549606d64fff3b65d05a634c7dd01f2c41bf29`. L'hypothèse porte sur une
+`46df95e9d95070ace4b7ac0ae0bf93a7c77ed587142b783bbae3aa331bf8e26c`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
 retournement, transition momentum et acceptation de tendance, puis prédicats,
 warmup, ordre, invalidation, durée de vie, politique de position, sorties et risque.
 
-La première ambiguïté structurante est la composition des événements qualifiants :
-impulsion seule, retournement seul, ou deux prédicats distincts. Gate :
-`BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED`.
+La première ambiguïté structurante était la composition des événements qualifiants :
+impulsion seule, retournement seul, ou deux prédicats distincts. La gate historique
+`REGIME_CONTEXT_V2_EVENT_COMPOSITION_REQUIRED` a été acquittée le 2026-10-03.
+La charte initiale a été intégrée par PR #277, head
+`582e8a9661e72da21e94b7096d303057c66ace91`, CI #236 verte, merge
+`f67eaed1d8e3608146f8e81d7c0db45721d6e31d`.
 Pas de replay, de sélection de seuil sur les résultats V1, de réutilisation des
 contrats MNQ 06-26 ou MNQ 03-26 pour calibrer V2, ni d'ouverture OOS. Un nouveau
 dataset DEVELOPMENT avec filiation sera requis après formalisation.
+
+## V2 — composition de deux événements indépendants
+
+Décision humaine du 2026-10-03 :
+`REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT`.
+`DIRECTIONAL_IMPULSE_EVENT` et `REVERSAL_TRANSITION_EVENT` portent chacun un type,
+une direction LONG/SHORT, l'index et l'estampille UTC de leur barre clôturée. Un seul
+événement qualifie le contexte ; deux événements de même direction le qualifient
+en conservant leurs deux étiquettes ; deux directions opposées donnent
+`AMBIGUOUS`, sans qualification et sans entrée. Aucune priorité ni score générique.
+
+Le compositeur pur `src/agicore/trading/regime_context_v2.py`, SHA-256
+`f871ffe4f4cc8bca3a55ca8e558d5ded56d0acc0a182e2628c0f8302cdb5629f`,
+vérifie fermeture et métadonnées de même barre avant la composition. Il n'est
+raccordé ni aux détecteurs, ni à l'entrée, ni au replay ; leurs prédicats ne sont
+pas encore définis. La prochaine gate distincte est
+`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED` :
+définir causalement la direction déjà émergente à partir des barres clôturées.
+Aucun seuil numérique, nouveau dataset ou résultat de performance V2 n'a été fixé.
+Tests locaux : 24 tests synthétiques de composition PASS ; 6308 tests PASS avec
+`tests/unit/test_mcp.py` exclu. La suite intégrale dans ce sandbox reste non
+concluante : le test préexistant `test_root_endpoint` de FastAPI `TestClient`
+se bloque même isolé (timeout 30 s). Ruff ciblé, `py_compile` et
+`git diff --check` PASS. La CI de la PR devra confirmer la suite intégrale
+avant fusion ; aucune réussite intégrale locale n'est revendiquée.
 
 ## Limites du produit
 
