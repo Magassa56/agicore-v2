@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED ;
+Statut : DIRECTIONAL_IMPULSE_EVENT_ASSEMBLY_AUTHORIZED_AFTER_BODY_WICK_MERGE ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -44,11 +44,12 @@ REGIME_CONTEXT_V2_EVENT_COMPOSITION_STATUS = PASS ;
 DIRECTIONAL_IMPULSE_EMERGING_DIRECTION = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_RANGE = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_VOLUME = PASS ;
-DIRECTIONAL_IMPULSE_EVENT = BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED ;
+DIRECTIONAL_IMPULSE_EVENT_BODY_WICK = PASS ;
+DIRECTIONAL_IMPULSE_EVENT = ASSEMBLY_AUTHORIZED_AFTER_BODY_WICK_MERGE ;
 REVERSAL_TRANSITION_EVENT = PRE_FORMALIZATION ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-impulse-volume.
-Base GitHub vérifiée et récupérée : 064b8b2e0943eb87133bb7989ec4d4dba47a72ad.
+Branche de vérification : feature/ema-pullback-v2-impulse-body-wick.
+Base GitHub vérifiée et récupérée : 03931edbb2717b8f65a6a1af46680c11bb0416be.
 
 ## Acquis vérifiés
 
@@ -1023,7 +1024,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`a6480cccfd70b2b8bd1b18c4ee2e3b78c3037afc463db6aff941123150566dd7`. L'hypothèse porte sur une
+`2f5d2f4e57da9ae29bb236e847eb64c4868f8cd0c7eb597a50b1816f2df9b2f2`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1078,7 +1079,7 @@ highs SHORT autorisée. Manque d'une bougie : `INSUFFICIENT_WARMUP`, direction
 bougie candidate `t` et les barres futures ne sont jamais lues.
 
 Le prédicat pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`3addf4f1386dfa186b90fe1525197e06e5084ca917c6fd8f01fd59ece608df2c`,
+`cb8a67c28152ea1014333d7dc575d79981c4c55cb7852b5d742a9d3941f109ef`,
 contient maintenant ce prérequis ainsi que les sous-prédicats de range et de volume ci-dessous.
 La gate suivante était `DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED` ;
 elle a été acquittée par décision du propriétaire du 2026-10-03.
@@ -1100,7 +1101,7 @@ moyenne exacte de ses deux valeurs centrales. Le calcul n'est pas directionnel,
 ne lit aucune barre future et n'intègre jamais `t` à sa référence.
 
 Le même module `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`3addf4f1386dfa186b90fe1525197e06e5084ca917c6fd8f01fd59ece608df2c`,
+`cb8a67c28152ea1014333d7dc575d79981c4c55cb7852b5d742a9d3941f109ef`,
 ne produit encore aucun événement d'impulsion ou signal. Le seuil 1.50 a été
 choisi avant replay, sans résultat V1/V1A/V1B et sans optimisation. La gate
 suivante était `DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED` ; elle a été
@@ -1133,7 +1134,7 @@ Index/timestamps ou type de volume incohérents sont refusés. Aucun accès
 à `t+1`, à une barre plus ancienne que `t-20` ou aux prix par ce sous-prédicat.
 
 Le module pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`3addf4f1386dfa186b90fe1525197e06e5084ca917c6fd8f01fd59ece608df2c`,
+`cb8a67c28152ea1014333d7dc575d79981c4c55cb7852b5d742a9d3941f109ef`,
 expose ce calcul avec un résultat immutable. Les mentions Last/Minute/volume
 de transactions sont des contraintes d'entrée et ne remplacent pas les preuves
 de filiation d'un nouveau dataset. Aucun événement d'impulsion ni entrée V2
@@ -1150,11 +1151,27 @@ Ruff ciblé, format Ruff, `py_compile` et diff-check PASS. La fusion exige une
 suite intégrale CI verte sur le commit exact ; la PR conserve cette preuve et
 le SHA de merge. Les autorisations Git permanentes du propriétaire s'appliquent.
 
-La prochaine gate unique est
-`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED` :
-définir le prédicat exact corps/mèches de la candidate clôturée `t`, avec ses
-comparateurs LONG/SHORT. Aucun seuil ajouté, replay, ouverture OOS, modification
-du Risk Engine ou accès broker.
+La gate corps/mèches a été acquittée par la décision du propriétaire ci-dessous.
+PR #281 fusionnée après CI #244 verte ; merge
+`03931edbb2717b8f65a6a1af46680c11bb0416be`.
+
+## V2 — corps et mèches de l'impulsion
+
+Décision humaine du 2026-10-03 : corps >= Decimal("0.60") * range et mèche
+terminale <= Decimal("0.20") * range. LONG exige corps haussier et contrôle la
+mèche supérieure ; SHORT exige corps baissier et contrôle la mèche inférieure.
+Direction exclusivement émergente, aucune limite sur la mèche opposée.
+Égalités admises, doji refusé, comparaisons exactes sans arrondi. OHLC malformé
+ou non fini : INVALID_OHLC ; range nul après validation : INVALID_CANDIDATE_RANGE.
+Qualification fausse pour ces statuts. Candidate clôturée seulement, aucun accès
+aux barres antérieures ou futures par ce sous-prédicat.
+
+46 tests synthétiques corps/mèches PASS ; 163 tests V2 ciblés PASS.
+6447 tests locaux PASS, 4 avertissements préexistants, hors test_mcp.py bloqué
+dans ce sandbox. Ruff, format, compilation et diff-check PASS ; la fusion
+exige la CI intégrale verte, dont la PR conserve le résultat et le SHA de merge. Le composant ne produit encore aucun
+événement ou signal. Prochaine action explicitement autorisée après fusion :
+assembler les quatre composants figés, sans replay ni nouveau seuil.
 
 ## Limites du produit
 

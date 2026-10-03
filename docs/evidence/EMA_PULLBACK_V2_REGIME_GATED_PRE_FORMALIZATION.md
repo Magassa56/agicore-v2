@@ -200,11 +200,48 @@ Les trois sous-prédicats direction/range/volume ne sont pas encore assemblés
 en événement d'impulsion ou signal d'entrée. Les tests sont uniquement
 synthétiques ; aucun replay, accès OOS ou ajustement sur MNQ 03-26/06-26.
 
-## Prochaine ambiguïté — corps et mèches de l'impulsion
+## Corps et mèches de la candidate — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED`
+Le 2026-10-03, `DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED` est
+acquittée. `MIN_BODY_TO_RANGE_RATIO = Decimal("0.60")` et
+`MAX_TERMINAL_WICK_TO_RANGE_RATIO = Decimal("0.20")` sont des baselines
+pré-replay, non optimisées, sans dérivation des résultats V1/V1A/V1B.
+Aucun seuil ne sera ajusté après observation de performance.
 
-**Décision humaine unique demandée :** quel prédicat exact sur le corps et les
-mèches de la bougie clôturée `t`, avec ses comparateurs LONG/SHORT, doit qualifier
-l'impulsion ? Aucun ratio ou seuil n'est choisi automatiquement. Aucun replay
-ni OOS avant la formalisation complète.
+```text
+range_t = High[t] - Low[t]
+body_t = abs(Close[t] - Open[t])
+upper_wick_t = High[t] - max(Open[t], Close[t])
+lower_wick_t = min(Open[t], Close[t])
+LONG = emerging_direction == LONG AND Close[t] > Open[t]
+       AND body_t >= Decimal("0.60") * range_t
+       AND upper_wick_t <= Decimal("0.20") * range_t
+SHORT = emerging_direction == SHORT AND Close[t] < Open[t]
+        AND body_t >= Decimal("0.60") * range_t
+        AND lower_wick_t <= Decimal("0.20") * range_t
+```
+
+La candidate `t` doit être clôturée ; elle seule est consultée par ce
+sous-prédicat. OHLC finis Decimal et cohérents requis : High >= max(Open, Close),
+Low <= min(Open, Close), High >= Low. Sinon `INVALID_OHLC`, qualification fausse.
+Après cette validation, range <= 0 donne `INVALID_CANDIDATE_RANGE`, qualification
+fausse. Aucune direction émergente donne une qualification fausse ; le corps
+n'infère jamais une direction. Les métadonnées incohérentes sont refusées.
+
+L'égalité 60% du corps et 20% de mèche terminale est admise ; une différence
+même infinitésimale du mauvais côté échoue. Doji refusé. Calcul exact Decimal,
+sans division de ratios ni arrondi préalable, même sous précision ambiante réduite.
+La mèche terminale est upper LONG / lower SHORT, dans le sens final de
+l'impulsion. Aucune limite séparée sur lower LONG / upper SHORT : la contrainte
+sur le corps borne déjà indirectement la somme des mèches.
+
+Aucun engulfing, breakout du high précédent, ATR, EMA20, MACD, filtre de session
+ou optimisation corps/mèche n'est ajouté. Les anciens composants restent figés.
+
+## Suite autorisée — assemblage de l'impulsion
+
+Après fusion du sous-prédicat corps/mèches et CI verte, assembler uniquement :
+`emerging_direction AND range_qualified AND volume_qualified AND body_wick_qualified`.
+Émettre le type DIRECTIONAL_IMPULSE_EVENT, sa direction émergente, l'index et
+le timestamp de `t` clôturée. Aucun replay, OOS ou signal d'entrée n'est autorisé.
+Le prédicat REVERSAL_TRANSITION_EVENT reste distinct et à formaliser.
