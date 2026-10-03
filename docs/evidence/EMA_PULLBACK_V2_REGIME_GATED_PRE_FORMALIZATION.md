@@ -141,8 +141,9 @@ est refusée. Aucune barre future n'est consultée et `t` ne participe pas à la
 référence. Seules `t` et les 20 bougies précédentes sont nécessaires.
 
 Le module `src/agicore/trading/directional_impulse_v2.py` calcule ce sous-prédicat
-avec des `Decimal` exacts. Il ne combine pas encore le range avec la direction
-émergente et n'émet ni `DIRECTIONAL_IMPULSE_EVENT` ni signal d'entrée. ATR,
+avec des `Decimal` exacts. À cette étape historique, il ne combinait pas encore
+le range avec la direction émergente et n'émettait ni événement ni signal d'entrée ; l'assemblage autorisé
+est désormais décrit ci-dessous. ATR,
 True Range, corps/mèche, direction de bougie, volume, EMA20, MACD et filtre de
 session ne participent pas au prédicat de range.
 
@@ -196,9 +197,9 @@ normalisation horaire, cumul, delta, footprint, order flow, ratio corps/mèche,
 EMA20, MACD ou filtre de session n'est ajouté.
 
 Le sous-prédicat pur est dans `src/agicore/trading/directional_impulse_v2.py`.
-Les trois sous-prédicats direction/range/volume ne sont pas encore assemblés
-en événement d'impulsion ou signal d'entrée. Les tests sont uniquement
-synthétiques ; aucun replay, accès OOS ou ajustement sur MNQ 03-26/06-26.
+À cette étape historique, les trois sous-prédicats direction/range/volume
+n'étaient pas encore assemblés en événement d'impulsion ou signal d'entrée.
+Les tests sont uniquement synthétiques ; aucun replay, accès OOS ou ajustement sur MNQ 03-26/06-26.
 
 ## Corps et mèches de la candidate — décision du propriétaire
 
@@ -238,10 +239,52 @@ sur le corps borne déjà indirectement la somme des mèches.
 Aucun engulfing, breakout du high précédent, ATR, EMA20, MACD, filtre de session
 ou optimisation corps/mèche n'est ajouté. Les anciens composants restent figés.
 
-## Suite autorisée — assemblage de l'impulsion
+## Assemblage de l'impulsion — décision du propriétaire
 
-Après fusion du sous-prédicat corps/mèches et CI verte, assembler uniquement :
-`emerging_direction AND range_qualified AND volume_qualified AND body_wick_qualified`.
-Émettre le type DIRECTIONAL_IMPULSE_EVENT, sa direction émergente, l'index et
-le timestamp de `t` clôturée. Aucun replay, OOS ou signal d'entrée n'est autorisé.
-Le prédicat REVERSAL_TRANSITION_EVENT reste distinct et à formaliser.
+L'assemblage est autorisé explicitement par le propriétaire après fusion du
+prédicat corps/mèches. PR #282 fusionnée après CI #246 verte, merge
+`3997b75d6451b6e030c4f38cb428938da0211fb0`.
+
+```text
+directional_impulse_event_qualified =
+    emerging_direction != NONE
+    AND range_qualified
+    AND volume_qualified
+    AND body_wick_qualified
+```
+
+`evaluate_directional_impulse_event_v2` appelle exactement les quatre fonctions
+figées. Aucune constante, règle d'entrée ou condition supplémentaire de marché
+n'est introduite. Une même observation canonique `DirectionalImpulseBarV2`
+fournit OHLC et volume Last/Minute à tous les calculs ; les vues internes ont
+les mêmes index, timestamps et clôtures. Les métadonnées de volume gardent leurs
+contrôles et ne remplacent pas la filiation du futur dataset.
+
+Seules les observations présentes de `t-20 ... t-1` et `t` sont consultées.
+Aucune barre plus ancienne ou future n'est lue. La direction est calculée par
+la fonction existante sur `t-3 ... t-1` ; la candidate ne peut pas la modifier.
+Warmup insuffisant, direction NONE ou tout composant non qualifié donne zéro
+événement. Les statuts individuels sont conservés. Une candidate OHLC invalide
+ou de range nul retourne le statut corps/mèches explicite, sans projeter cette
+candidate dans le sous-prédicat de range ; range et volume restent alors non
+évalués. Les incohérences structurelles ou temporelles restent des erreurs
+fail-closed, jamais des événements. Aucune priorité stratégique nouvelle.
+
+Si et seulement si les quatre composants qualifient, l'événement immutable
+porte `event_type = DIRECTIONAL_IMPULSE_EVENT`, `event_direction` exclusivement
+émergente, `event_bar_index = t`, `event_timestamp = timestamp_utc[t]` clôturée.
+Il est compatible avec le compositeur distinct existant et ses règles de
+collision inchangées. Il ne constitue pas une entrée ni une qualification
+complète momentum/EMA20/pullback. Aucune durée de contexte ou invalidation
+ultérieure n'est inventée ici. Aucun replay ni sélection de dataset.
+
+## Prochaine ambiguïté — direction préalable au retournement
+
+`BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED`
+
+Le retournement reste un prédicat indépendant. Avant de mesurer son rejet ou
+son épuisement, quelle règle causale sur les bougies déjà clôturées établit la
+direction préalable qui doit être rejetée puis inversée ? La règle émergente
+sur trois bougies de l'impulsion n'est pas héritée automatiquement. Aucun seuil
+ou prédicat de retournement n'est choisi sans cette décision ; OOS et replay
+restent fermés.
