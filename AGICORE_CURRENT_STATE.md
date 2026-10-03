@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : DIRECTIONAL_IMPULSE_EVENT_ASSEMBLY_AUTHORIZED_AFTER_BODY_WICK_MERGE ;
+Statut : BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -45,11 +45,11 @@ DIRECTIONAL_IMPULSE_EMERGING_DIRECTION = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_RANGE = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_VOLUME = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_BODY_WICK = PASS ;
-DIRECTIONAL_IMPULSE_EVENT = ASSEMBLY_AUTHORIZED_AFTER_BODY_WICK_MERGE ;
+DIRECTIONAL_IMPULSE_EVENT = PASS ;
 REVERSAL_TRANSITION_EVENT = PRE_FORMALIZATION ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-impulse-body-wick.
-Base GitHub vérifiée et récupérée : 03931edbb2717b8f65a6a1af46680c11bb0416be.
+Branche de vérification : feature/ema-pullback-v2-impulse-event.
+Base GitHub vérifiée et récupérée : 3997b75d6451b6e030c4f38cb428938da0211fb0.
 
 ## Acquis vérifiés
 
@@ -1024,7 +1024,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`2f5d2f4e57da9ae29bb236e847eb64c4868f8cd0c7eb597a50b1816f2df9b2f2`. L'hypothèse porte sur une
+`326a6387e89d18cc26a82ee600764a286b4ce9ef93a12e1a9a0474cefde342bd`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1079,8 +1079,8 @@ highs SHORT autorisée. Manque d'une bougie : `INSUFFICIENT_WARMUP`, direction
 bougie candidate `t` et les barres futures ne sont jamais lues.
 
 Le prédicat pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`cb8a67c28152ea1014333d7dc575d79981c4c55cb7852b5d742a9d3941f109ef`,
-contient maintenant ce prérequis ainsi que les sous-prédicats de range et de volume ci-dessous.
+`7cd03b0385a409478134d6855d3f4bf51aef589b91657e753b878029858f95f8`,
+contient les quatre sous-prédicats et leur assemblage événementiel, décrits ci-dessous.
 La gate suivante était `DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED` ;
 elle a été acquittée par décision du propriétaire du 2026-10-03.
 Tests locaux : 29 nouveaux tests synthétiques PASS ; 53 tests V2 ciblés PASS ;
@@ -1101,9 +1101,9 @@ moyenne exacte de ses deux valeurs centrales. Le calcul n'est pas directionnel,
 ne lit aucune barre future et n'intègre jamais `t` à sa référence.
 
 Le même module `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`cb8a67c28152ea1014333d7dc575d79981c4c55cb7852b5d742a9d3941f109ef`,
-ne produit encore aucun événement d'impulsion ou signal. Le seuil 1.50 a été
-choisi avant replay, sans résultat V1/V1A/V1B et sans optimisation. La gate
+`7cd03b0385a409478134d6855d3f4bf51aef589b91657e753b878029858f95f8`,
+ne produisait à cette étape historique aucun événement d'impulsion ou signal.
+Le seuil 1.50 a été choisi avant replay, sans résultat V1/V1A/V1B et sans optimisation. La gate
 suivante était `DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED` ; elle a été
 acquittée par décision du propriétaire du 2026-10-03. Mèches/corps et autres
 composantes restent ouverts.
@@ -1134,11 +1134,12 @@ Index/timestamps ou type de volume incohérents sont refusés. Aucun accès
 à `t+1`, à une barre plus ancienne que `t-20` ou aux prix par ce sous-prédicat.
 
 Le module pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`cb8a67c28152ea1014333d7dc575d79981c4c55cb7852b5d742a9d3941f109ef`,
+`7cd03b0385a409478134d6855d3f4bf51aef589b91657e753b878029858f95f8`,
 expose ce calcul avec un résultat immutable. Les mentions Last/Minute/volume
 de transactions sont des contraintes d'entrée et ne remplacent pas les preuves
-de filiation d'un nouveau dataset. Aucun événement d'impulsion ni entrée V2
-n'est encore émis. Le seuil 1.50 est non optimisé, choisi avant replay ;
+de filiation d'un nouveau dataset. À cette étape historique aucun événement
+n'était émis ; l'assemblage ci-dessous émet seulement un événement de contexte.
+Le seuil 1.50 est non optimisé, choisi avant replay ;
 aucun résultat V1 ni les contrats MNQ 03-26/06-26 n'est utilisé pour le choisir.
 
 Tests synthétiques : 45 tests de volume PASS ; 117 tests V2 ciblés PASS.
@@ -1169,9 +1170,38 @@ aux barres antérieures ou futures par ce sous-prédicat.
 46 tests synthétiques corps/mèches PASS ; 163 tests V2 ciblés PASS.
 6447 tests locaux PASS, 4 avertissements préexistants, hors test_mcp.py bloqué
 dans ce sandbox. Ruff, format, compilation et diff-check PASS ; la fusion
-exige la CI intégrale verte, dont la PR conserve le résultat et le SHA de merge. Le composant ne produit encore aucun
-événement ou signal. Prochaine action explicitement autorisée après fusion :
-assembler les quatre composants figés, sans replay ni nouveau seuil.
+exige la CI intégrale verte, dont la PR conserve le résultat et le SHA de merge.
+Le composant autonome n’émet aucun événement ou signal. L’assemblage ci-dessous réalise la suite
+explicitement autorisée après fusion, sans replay ni nouveau seuil.
+
+## V2 — assemblage déterministe de l'impulsion
+
+PR #282 fusionnée après CI #246 verte, merge
+`3997b75d6451b6e030c4f38cb428938da0211fb0`.
+Décision explicite du propriétaire : conjonction stricte des quatre composants
+figés. L'évaluateur appelle les fonctions existantes sans modification, sur les
+mêmes observations OHLC/volume Last/Minute. Direction uniquement sur t-3..t-1,
+range/volume sur la candidate et les 20 antérieures, corps/mèches sur t.
+Les observations plus anciennes et futures ne sont jamais lues. Les seuils
+1.50/1.50/0.60/0.20 restent des baselines pré-replay non optimisées.
+
+Qualification complète seulement : événement immutable de type
+DIRECTIONAL_IMPULSE_EVENT, direction émergente LONG/SHORT, index t et timestamp
+UTC de t clôturée. Un échec, warmup incomplet ou donnée invalide n'émet aucun
+événement. OHLC candidat invalide ou range nul : statut corps/mèches conservé,
+range/volume non évalués. Les autres incohérences restent fail-closed.
+Le compositeur existant garde les collisions distinctes, sans priorité nouvelle.
+
+41 tests synthétiques d'assemblage PASS ; 204 tests V2 ciblés PASS.
+6488 tests locaux PASS, 4 avertissements préexistants, hors test_mcp.py bloqué
+dans ce sandbox. Ruff, format, compilation et diff-check PASS. CI intégrale
+verte requise avant fusion ; preuves et SHA de merge dans PR.
+Aucune entrée, mesure de performance, durée du contexte, replay, OOS ou donnée
+réelle. REVERSAL_TRANSITION_EVENT demeure PRE_FORMALIZATION.
+
+Prochaine gate unique : REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED.
+Définir causalement la direction préalable à rejeter/épuiser puis inverser,
+sans hériter automatiquement du prédicat émergent de l'impulsion.
 
 ## Limites du produit
 

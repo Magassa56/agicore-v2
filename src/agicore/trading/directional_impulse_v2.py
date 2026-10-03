@@ -4,7 +4,8 @@ The emerging direction inspects only the three closed bars before candidate
 ``t``. The independent range and trade-volume predicates inspect the closed
 candidate and the preceding 20 closed bars. Body/wick qualification inspects
 only the closed candidate with the already established emerging direction.
-None emits an impulse or entry signal.
+The event evaluator combines only those four frozen components on one canonical
+Last/Minute observation stream. It emits a context event, never an entry signal.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from decimal import MAX_EMAX, MIN_EMIN, Decimal, Inexact, localcontext
 from enum import StrEnum
 from itertools import pairwise
 
-from .regime_context_v2 import RegimeDirection
+from .regime_context_v2 import RegimeDirection, RegimeEvent, RegimeEventType
 
 EMERGING_DIRECTION_LOOKBACK = 3
 IMPULSE_RANGE_LOOKBACK = 20
@@ -157,6 +158,30 @@ class TradeVolumeBarV2:
 
 
 @dataclass(frozen=True)
+class DirectionalImpulseBarV2(BodyWickBarV2):
+    """One canonical OHLC plus Last/Minute trade-volume observation."""
+
+    volume: Decimal | int | None
+    volume_measure: str
+    interval_minutes: int
+    data_type: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Reuse the frozen source/metadata validation, preserving invalid
+        # numeric volumes for the existing evaluator's explicit statuses.
+        TradeVolumeBarV2(
+            self.bar_index,
+            self.timestamp_utc,
+            self.volume,
+            self.is_closed,
+            self.volume_measure,
+            self.interval_minutes,
+            self.data_type,
+        )
+
+
+@dataclass(frozen=True)
 class EmergingDirectionEvaluation:
     """Direction known by Close[t-1], before evaluating candidate bar t."""
 
@@ -203,6 +228,22 @@ class ImpulseBodyWickEvaluation:
     body: Decimal | None
     upper_wick: Decimal | None
     lower_wick: Decimal | None
+
+
+@dataclass(frozen=True)
+class DirectionalImpulseEvaluation:
+    """Four component outcomes and an optional closed-bar context event."""
+
+    emerging_direction: EmergingDirectionEvaluation
+    range: ImpulseRangeEvaluation | None
+    volume: ImpulseVolumeEvaluation | None
+    body_wick: ImpulseBodyWickEvaluation
+    event: RegimeEvent | None
+
+    @property
+    def directional_impulse_event_qualified(self) -> bool:
+        """Whether all four frozen predicates emitted an impulse event."""
+        return self.event is not None
 
 
 def evaluate_emerging_direction_v2(
@@ -556,6 +597,97 @@ def evaluate_impulse_body_wick_v2(
     )
 
 
+def evaluate_directional_impulse_event_v2(
+    *,
+    impulse_candidate_bar_index: int,
+    bars_by_index: Mapping[int, DirectionalImpulseBarV2],
+) -> DirectionalImpulseEvaluation:
+    """AND the four frozen components without thresholds or strategy additions.
+
+    All views come from the same indexed observations; only t and its preceding
+    20 bars may be accessed. Direction comes exclusively from t-3 through t-1.
+    Invalid candidate OHLC/range stops before candidate structural projection;
+    its explicit body/wick status is retained, with range/volume unevaluated.
+    Malformed source metadata raises the existing fail-closed input error.
+    """
+    if type(impulse_candidate_bar_index) is not int or impulse_candidate_bar_index < 0:
+        raise EmergingDirectionV2Error("candidate index must be a nonnegative integer")
+    if not isinstance(bars_by_index, Mapping):
+        raise EmergingDirectionV2Error("bars_by_index must be a mapping")
+
+    t = impulse_candidate_bar_index
+    if t not in bars_by_index:
+        raise EmergingDirectionV2Error("closed candidate bar is required")
+    candidate = bars_by_index[t]
+    if not isinstance(candidate, DirectionalImpulseBarV2) or candidate.bar_index != t:
+        raise EmergingDirectionV2Error("candidate bar index is inconsistent")
+    if candidate.is_closed is not True:
+        raise EmergingDirectionV2Error("candidate bar must be closed")
+
+    structural: dict[int, StructuralBarV2] = {}
+    volumes: dict[int, TradeVolumeBarV2] = {}
+    for index in range(max(0, t - IMPULSE_RANGE_LOOKBACK), t):
+        if index not in bars_by_index:
+            continue
+        bar = bars_by_index[index]
+        if not isinstance(bar, DirectionalImpulseBarV2) or bar.bar_index != index:
+            raise EmergingDirectionV2Error("prior impulse bar index is inconsistent")
+        structural[index] = StructuralBarV2(
+            index, bar.timestamp_utc, bar.low, bar.high, bar.close, bar.is_closed
+        )
+        volumes[index] = TradeVolumeBarV2(
+            index,
+            bar.timestamp_utc,
+            bar.volume,
+            bar.is_closed,
+            bar.volume_measure,
+            bar.interval_minutes,
+            bar.data_type,
+        )
+
+    emerging = evaluate_emerging_direction_v2(
+        impulse_candidate_bar_index=t, bars_by_index=structural
+    )
+    body_wick = evaluate_impulse_body_wick_v2(
+        impulse_candidate_bar_index=t,
+        bars_by_index={t: candidate},
+        emerging_direction=emerging.emerging_direction,
+    )
+    if body_wick.status is not ImpulseBodyWickStatus.EVALUATED:
+        return DirectionalImpulseEvaluation(emerging, None, None, body_wick, None)
+
+    structural[t] = StructuralBarV2(
+        t, candidate.timestamp_utc, candidate.low, candidate.high, candidate.close, True
+    )
+    volumes[t] = TradeVolumeBarV2(
+        t,
+        candidate.timestamp_utc,
+        candidate.volume,
+        True,
+        candidate.volume_measure,
+        candidate.interval_minutes,
+        candidate.data_type,
+    )
+    range_result = evaluate_impulse_range_v2(
+        impulse_candidate_bar_index=t, bars_by_index=structural
+    )
+    volume_result = evaluate_impulse_volume_v2(impulse_candidate_bar_index=t, bars_by_index=volumes)
+    event = None
+    if (
+        emerging.emerging_direction is not None
+        and range_result.range_qualified
+        and volume_result.volume_qualified
+        and body_wick.body_wick_qualified
+    ):
+        event = RegimeEvent(
+            RegimeEventType.DIRECTIONAL_IMPULSE_EVENT,
+            emerging.emerging_direction,
+            t,
+            candidate.timestamp_utc,
+        )
+    return DirectionalImpulseEvaluation(emerging, range_result, volume_result, body_wick, event)
+
+
 __all__ = [
     "EMERGING_DIRECTION_LOOKBACK",
     "IMPULSE_RANGE_LOOKBACK",
@@ -566,6 +698,8 @@ __all__ = [
     "MAX_TERMINAL_WICK_TO_RANGE_RATIO",
     "MIN_BODY_TO_RANGE_RATIO",
     "BodyWickBarV2",
+    "DirectionalImpulseBarV2",
+    "DirectionalImpulseEvaluation",
     "EmergingDirectionEvaluation",
     "EmergingDirectionStatus",
     "EmergingDirectionV2Error",
@@ -577,6 +711,7 @@ __all__ = [
     "ImpulseVolumeStatus",
     "StructuralBarV2",
     "TradeVolumeBarV2",
+    "evaluate_directional_impulse_event_v2",
     "evaluate_emerging_direction_v2",
     "evaluate_impulse_body_wick_v2",
     "evaluate_impulse_range_v2",
