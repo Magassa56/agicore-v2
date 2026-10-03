@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -43,11 +43,12 @@ REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION_STATUS = PASS ;
 DIRECTIONAL_IMPULSE_EMERGING_DIRECTION = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_RANGE = PASS ;
-DIRECTIONAL_IMPULSE_EVENT = BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED ;
+DIRECTIONAL_IMPULSE_EVENT_VOLUME = PASS ;
+DIRECTIONAL_IMPULSE_EVENT = BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED ;
 REVERSAL_TRANSITION_EVENT = PRE_FORMALIZATION ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-impulse-range.
-Base GitHub vérifiée et récupérée : 3e0f9bed0405964dd81ac90658b2fd5f1aae3948.
+Branche de vérification : feature/ema-pullback-v2-impulse-volume.
+Base GitHub vérifiée et récupérée : 064b8b2e0943eb87133bb7989ec4d4dba47a72ad.
 
 ## Acquis vérifiés
 
@@ -1022,7 +1023,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`e264273093e694ff912aa16f8b9897ddba64a9c607778f824cacb407aa9c7021`. L'hypothèse porte sur une
+`a6480cccfd70b2b8bd1b18c4ee2e3b78c3037afc463db6aff941123150566dd7`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1077,8 +1078,8 @@ highs SHORT autorisée. Manque d'une bougie : `INSUFFICIENT_WARMUP`, direction
 bougie candidate `t` et les barres futures ne sont jamais lues.
 
 Le prédicat pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`77bece16abde79391d7d870eefeda37f9f66899329e985cbae297216c0d9e020`,
-contient maintenant ce prérequis ainsi que le sous-prédicat de range ci-dessous.
+`3addf4f1386dfa186b90fe1525197e06e5084ca917c6fd8f01fd59ece608df2c`,
+contient maintenant ce prérequis ainsi que les sous-prédicats de range et de volume ci-dessous.
 La gate suivante était `DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED` ;
 elle a été acquittée par décision du propriétaire du 2026-10-03.
 Tests locaux : 29 nouveaux tests synthétiques PASS ; 53 tests V2 ciblés PASS ;
@@ -1099,16 +1100,61 @@ moyenne exacte de ses deux valeurs centrales. Le calcul n'est pas directionnel,
 ne lit aucune barre future et n'intègre jamais `t` à sa référence.
 
 Le même module `src/agicore/trading/directional_impulse_v2.py`, SHA-256
-`77bece16abde79391d7d870eefeda37f9f66899329e985cbae297216c0d9e020`,
+`3addf4f1386dfa186b90fe1525197e06e5084ca917c6fd8f01fd59ece608df2c`,
 ne produit encore aucun événement d'impulsion ou signal. Le seuil 1.50 a été
-choisi avant replay, sans résultat V1/V1A/V1B et sans optimisation. Prochaine
-gate : `DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED`, pour définir la
-composante de volume relatif. Mèches/corps et autres composantes restent ouverts.
+choisi avant replay, sans résultat V1/V1A/V1B et sans optimisation. La gate
+suivante était `DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED` ; elle a été
+acquittée par décision du propriétaire du 2026-10-03. Mèches/corps et autres
+composantes restent ouverts.
 Aucun replay, nouvelle sélection de données ni ouverture OOS.
 Tests locaux : 19 tests synthétiques de range PASS ; 72 tests V2 ciblés PASS ;
 6356 tests PASS hors `tests/unit/test_mcp.py`, bloqué dans ce sandbox lors des
-tranches précédentes. Ruff ciblé, `py_compile` et diff-check PASS. La suite
-intégrale sur la CI de cette PR reste à vérifier avant fusion.
+tranches précédentes. Ruff ciblé, `py_compile` et diff-check PASS.
+PR #280 fusionnée après CI #242 verte (suite intégrale et contrôle des espaces) ;
+merge `064b8b2e0943eb87133bb7989ec4d4dba47a72ad`.
+
+## V2 — volume de l'impulsion sur 20 bougies précédentes
+
+Décision humaine du 2026-10-03 : `VOLUME_MEASURE = BAR_TRADE_VOLUME`, référence
+médiane exacte des volumes de transactions des 20 bougies clôturées précédentes,
+multiplicateur `Decimal("1.50")`. `Volume[t] >= 1.50 * median(Volume[t-20 ... t-1])`
+qualifie le volume, égalité incluse et sans arrondi préalable. La médiane est
+la moyenne exacte des valeurs centrales 10 et 11 triées. Le volume est uniquement
+celui de barres Last d'une minute ; Bid/Ask, delta, tick count et carnet refusés.
+La direction reste exclusivement celle du prérequis émergent, indépendante du volume.
+
+Candidate `t` clôturée obligatoire ; moins de 20 antérieures clôturées :
+`INSUFFICIENT_WARMUP` ; volume candidat absent/invalide :
+`INVALID_CANDIDATE_VOLUME` ; référence absente/invalide ou médiane <= 0 :
+`INVALID_REFERENCE_VOLUME` ; tout volume sélectionné négatif : `INVALID_VOLUME`.
+Tous ces statuts donnent `volume_qualified = false`. Le warmup est vérifié
+d'abord, puis les négatifs, le défaut candidat et le défaut de référence.
+Index/timestamps ou type de volume incohérents sont refusés. Aucun accès
+à `t+1`, à une barre plus ancienne que `t-20` ou aux prix par ce sous-prédicat.
+
+Le module pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
+`3addf4f1386dfa186b90fe1525197e06e5084ca917c6fd8f01fd59ece608df2c`,
+expose ce calcul avec un résultat immutable. Les mentions Last/Minute/volume
+de transactions sont des contraintes d'entrée et ne remplacent pas les preuves
+de filiation d'un nouveau dataset. Aucun événement d'impulsion ni entrée V2
+n'est encore émis. Le seuil 1.50 est non optimisé, choisi avant replay ;
+aucun résultat V1 ni les contrats MNQ 03-26/06-26 n'est utilisé pour le choisir.
+
+Tests synthétiques : 45 tests de volume PASS ; 117 tests V2 ciblés PASS.
+Fichier `tests/unit/trading/test_directional_impulse_volume_v2.py`, SHA-256
+`b3af140e9d292e1126c088cf2a368b9048e1dca98e1a219f4d9ed2c7d978cb14`.
+Suite locale : 6401 tests PASS, 4 avertissements préexistants, 74.89 s, hors
+`tests/unit/test_mcp.py` dont le `TestClient` est bloqué dans ce sandbox lors des
+tranches précédentes. Aucune réussite intégrale locale n'est revendiquée.
+Ruff ciblé, format Ruff, `py_compile` et diff-check PASS. La fusion exige une
+suite intégrale CI verte sur le commit exact ; la PR conserve cette preuve et
+le SHA de merge. Les autorisations Git permanentes du propriétaire s'appliquent.
+
+La prochaine gate unique est
+`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED` :
+définir le prédicat exact corps/mèches de la candidate clôturée `t`, avec ses
+comparateurs LONG/SHORT. Aucun seuil ajouté, replay, ouverture OOS, modification
+du Risk Engine ou accès broker.
 
 ## Limites du produit
 
