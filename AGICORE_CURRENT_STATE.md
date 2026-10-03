@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_REJECTION_BAR_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -46,10 +46,11 @@ DIRECTIONAL_IMPULSE_EVENT_RANGE = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_VOLUME = PASS ;
 DIRECTIONAL_IMPULSE_EVENT_BODY_WICK = PASS ;
 DIRECTIONAL_IMPULSE_EVENT = PASS ;
-REVERSAL_TRANSITION_EVENT = PRE_FORMALIZATION ;
+REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION = PASS ;
+REVERSAL_TRANSITION_EVENT = BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_REJECTION_BAR_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-impulse-event.
-Base GitHub vérifiée et récupérée : 3997b75d6451b6e030c4f38cb428938da0211fb0.
+Branche de vérification : feature/ema-pullback-v2-reversal-prior-direction.
+Base GitHub vérifiée et récupérée : e850cc8658d6112a494a566c3fe73c2506dce7e9.
 
 ## Acquis vérifiés
 
@@ -1024,7 +1025,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`326a6387e89d18cc26a82ee600764a286b4ce9ef93a12e1a9a0474cefde342bd`. L'hypothèse porte sur une
+`ad4d1de36910641bda21e3d143614851bedbcef9f25c65d5d388ef363ec0880a`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1199,9 +1200,41 @@ verte requise avant fusion ; preuves et SHA de merge dans PR.
 Aucune entrée, mesure de performance, durée du contexte, replay, OOS ou donnée
 réelle. REVERSAL_TRANSITION_EVENT demeure PRE_FORMALIZATION.
 
-Prochaine gate unique : REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED.
-Définir causalement la direction préalable à rejeter/épuiser puis inverser,
-sans hériter automatiquement du prédicat émergent de l'impulsion.
+La gate direction préalable est acquittée par la décision ci-dessous.
+
+## V2 — direction préalable distincte au retournement
+
+PR #283 fusionnée après CI #248 verte, merge
+`e850cc8658d6112a494a566c3fe73c2506dce7e9`.
+Décision du propriétaire du 2026-10-03 : cinq bougies clôturées t-5..t-1,
+quatre différences de Close exactes, UP si extrémité strictement supérieure
+et au moins trois pas positifs ; DOWN si extrémité strictement inférieure et
+au moins trois pas négatifs ; sinon NONE. Les flats ne comptent dans aucun
+sens. UP rend seulement SHORT éligible ; DOWN rend seulement LONG éligible ;
+NONE interdit tout événement de retournement. Le côté éligible n'est pas un
+événement complet. Aucun seuil optimisé ni résultat V1 utilisé.
+
+Warmup incomplet ou bougie antérieure non clôturée : INSUFFICIENT_WARMUP,
+direction NONE ; Close manquante/non finie : INVALID_PRIOR_DIRECTION_INPUT,
+direction NONE. L'historique clôturé est vérifié avant les prix. Métadonnées
+incohérentes refusées fail-closed. Seules les cinq Close sont utilisées, la
+candidate t et les observations futures/plus anciennes ne sont jamais lues.
+Disponible à Close[t-1] seulement sur évaluation valide. Aucune importation ou
+modification du détecteur d'impulsion, aucune EMA/MACD/RSI/volume/range/mèche/ATR.
+
+Module distinct : src/agicore/trading/reversal_transition_v2.py, SHA-256
+`689b271c9b0395d18eda779e727b856d296c8bb76b73dd5fa46cdc6235332691`.
+Tests synthétiques : 84 nouveaux tests PASS ; 288 tests V2 ciblés PASS.
+Fichier tests/unit/trading/test_reversal_prior_direction_v2.py, SHA-256
+`6eae5e5d700d0fbf67c93e78624cb6ab9e789c7eb60e71d47ff41b717e3435a0`.
+6572 tests locaux PASS, 4 avertissements préexistants, hors test_mcp.py bloqué
+dans ce sandbox. Ruff, format, compilation et diff-check PASS. CI intégrale
+verte exigée avant fusion ; preuves et SHA de merge conservés dans la PR.
+Aucun replay ou accès OOS.
+
+Prochaine gate unique : REVERSAL_TRANSITION_EVENT_REJECTION_BAR_REQUIRED.
+Définir le rejet/épuisement de la candidate t clôturée dans le sens préalable,
+sans inventer ici sa mesure ou ses seuils.
 
 ## Limites du produit
 
