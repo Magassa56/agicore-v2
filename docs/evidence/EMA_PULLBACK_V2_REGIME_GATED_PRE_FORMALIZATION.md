@@ -83,8 +83,8 @@ qualifié n'est pas encore un signal d'entrée. L'ordre prévu est : contexte,
 transition momentum, acceptation EMA20, pullback, puis entrée ; les prédicats
 intermédiaires restent à définir.
 
-Le seuil d'étendue de bougie est désormais fixé dans son sous-contrat ci-dessous ;
-aucun seuil de volume, ratio de mèche, ATR ou magnitude MACD n'est fixé. Aucun
+Les seuils d'étendue et de volume sont désormais fixés dans leurs sous-contrats
+ci-dessous ; aucun ratio de mèche, ATR ou magnitude MACD n'est fixé. Aucun
 replay ni choix de paramètre à partir des contrats MNQ 03-26 ou MNQ 06-26 n'est
 autorisé.
 
@@ -146,12 +146,65 @@ avec des `Decimal` exacts. Il ne combine pas encore le range avec la direction
 True Range, corps/mèche, direction de bougie, volume, EMA20, MACD et filtre de
 session ne participent pas au prédicat de range.
 
-## Prochaine ambiguïté — volume de l'impulsion
+## Volume de la bougie candidate — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED`
+Le 2026-10-03, `DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED` a été
+acquittée. La baseline est choisie avant tout replay, non optimisée et non
+dérivée des résultats V1/V1A/V1B :
 
-**Décision humaine unique demandée :** quelle règle causale exacte de volume
-(mesure sur `t`, référence sur barres antérieures, fenêtre et comparaison) doit
-qualifier la composante de volume relatif de l'impulsion ? Les relations
-corps/mèche restent distinctes et non définies. Aucun replay ni OOS avant la
-formalisation complète.
+```text
+VOLUME_MEASURE = BAR_TRADE_VOLUME
+VOLUME_REFERENCE = MEDIAN_PRIOR_20_CLOSED_BARS
+VOLUME_MULTIPLIER = Decimal("1.50")
+volume_t = Volume[t]
+prior_volumes = [Volume[i] for i in t-20 ... t-1]
+reference_volume = exact_median(prior_volumes)
+volume_qualified = volume_t >= Decimal("1.50") * reference_volume
+```
+
+La médiane des 20 volumes triés est la moyenne arithmétique exacte des valeurs
+centrales 10 et 11. L'égalité qualifie ; toute valeur strictement inférieure
+échoue. Les entiers et `Decimal` finis sont conservés exactement, sans conversion
+float ni arrondi avant comparaison, même si la précision Decimal ambiante est
+réduite. Le volume est le volume de transactions agrégé d'une barre **Last d'une
+minute**. `TradeVolumeBarV2` exige explicitement cette mesure, l'intervalle et
+le type Last ; aucun volume Bid/Ask, delta, tick count ou déséquilibre de carnet
+ne peut être substitué. Ces métadonnées d'entrée ne prouvent pas la filiation
+d'un dataset, qui reste un contrôle séparé.
+
+| Condition | Statut | Qualification |
+| --- | --- | --- |
+| Moins de 20 bougies antérieures clôturées | `INSUFFICIENT_WARMUP` | `false` |
+| Volume de `t` absent ou invalide | `INVALID_CANDIDATE_VOLUME` | `false` |
+| Volume d'une référence absent ou invalide | `INVALID_REFERENCE_VOLUME` | `false` |
+| Un volume sélectionné est négatif | `INVALID_VOLUME` | `false` |
+| Médiane de référence <= 0 | `INVALID_REFERENCE_VOLUME` | `false` |
+| Volumes valides et médiane positive | `EVALUATED` | Comparaison inclusive |
+
+La barre candidate doit exister et être clôturée. Index, types de source ou
+timestamps incohérents sont refusés. Une barre absente dans l'historique constitue
+un warmup insuffisant ; une barre présente mais sans volume constitue une
+référence invalide. En cas de défauts simultanés, le prérequis d'historique clôturé
+est contrôlé d'abord ; sur une fenêtre complète, tout volume négatif prime, puis
+le défaut candidat, puis le défaut de référence. Tous ces cas restent non qualifiés.
+
+Seules `t` et `t-20 ... t-1` sont lues. La référence exclut `t` ; les observations
+plus anciennes ou futures n'affectent pas le résultat. Le prédicat ne contient
+aucune direction LONG/SHORT : celle-ci vient exclusivement de
+`DIRECTIONAL_IMPULSE_EMERGING_DIRECTION`. Aucun volume moyen mobile, z-score,
+normalisation horaire, cumul, delta, footprint, order flow, ratio corps/mèche,
+EMA20, MACD ou filtre de session n'est ajouté.
+
+Le sous-prédicat pur est dans `src/agicore/trading/directional_impulse_v2.py`.
+Les trois sous-prédicats direction/range/volume ne sont pas encore assemblés
+en événement d'impulsion ou signal d'entrée. Les tests sont uniquement
+synthétiques ; aucun replay, accès OOS ou ajustement sur MNQ 03-26/06-26.
+
+## Prochaine ambiguïté — corps et mèches de l'impulsion
+
+`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_BODY_WICK_PREDICATE_REQUIRED`
+
+**Décision humaine unique demandée :** quel prédicat exact sur le corps et les
+mèches de la bougie clôturée `t`, avec ses comparateurs LONG/SHORT, doit qualifier
+l'impulsion ? Aucun ratio ou seuil n'est choisi automatiquement. Aucun replay
+ni OOS avant la formalisation complète.
