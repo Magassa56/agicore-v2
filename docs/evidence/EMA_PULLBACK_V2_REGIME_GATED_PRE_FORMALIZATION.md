@@ -278,13 +278,70 @@ collision inchangées. Il ne constitue pas une entrée ni une qualification
 complète momentum/EMA20/pullback. Aucune durée de contexte ou invalidation
 ultérieure n'est inventée ici. Aucun replay ni sélection de dataset.
 
-## Prochaine ambiguïté — direction préalable au retournement
+## Direction préalable au retournement — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED`
+Le 2026-10-03, `REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION_REQUIRED` est acquittée.
+La définition indépendante suivante est figée avant replay, non optimisée,
+sans dérivation des résultats V1/V1A/V1B :
 
-Le retournement reste un prédicat indépendant. Avant de mesurer son rejet ou
-son épuisement, quelle règle causale sur les bougies déjà clôturées établit la
-direction préalable qui doit être rejetée puis inversée ? La règle émergente
-sur trois bougies de l'impulsion n'est pas héritée automatiquement. Aucun seuil
-ou prédicat de retournement n'est choisi sans cette décision ; OOS et replay
-restent fermés.
+```text
+PRIOR_DIRECTION_LOOKBACK = 5 closed bars
+PRIOR_BARS = [t-5, t-4, t-3, t-2, t-1]
+d1 = Close[t-4] - Close[t-5]
+d2 = Close[t-3] - Close[t-4]
+d3 = Close[t-2] - Close[t-3]
+d4 = Close[t-1] - Close[t-2]
+up_steps = count(di > 0)
+down_steps = count(di < 0)
+flat_steps = count(di == 0)
+UP = Close[t-1] > Close[t-5] AND up_steps >= 3
+DOWN = Close[t-1] < Close[t-5] AND down_steps >= 3
+NONE = neither UP nor DOWN
+UP => only SHORT reversal is eligible
+DOWN => only LONG reversal is eligible
+NONE => no reversal event
+```
+
+Les clôtures égales comptent uniquement comme flat. Les extrémités doivent
+être strictement orientées ; Close[t-1] == Close[t-5] donne NONE, même avec
+3 pas directionnels. Un seul pullback ou un seul flat est admis si les deux
+conditions de direction sont satisfaites. Aucun seuil de magnitude ajouté.
+
+Le module distinct `src/agicore/trading/reversal_transition_v2.py` lit seulement
+les cinq index antérieurs requis. `t` peut être absent et n'est jamais lue ;
+ni les barres plus anciennes ni les futures ne sont consultées. La direction
+est entièrement connue à Close[t-1] ; l'index et le timestamp de disponibilité
+sont conservés sur une évaluation valide. Le calcul des quatre différences
+est exact en Decimal, sans arrondi préalable, même sous faible précision ambiante.
+Les entiers exacts sont acceptés ; floats et types non-prix ne sont pas convertis
+silencieusement. Aucun prix ou indicateur autre que ces cinq Close n'est demandé.
+
+| Condition | Statut | Direction préalable |
+| --- | --- | --- |
+| Moins de cinq bougies antérieures clôturées dans la fenêtre requise | `INSUFFICIENT_WARMUP` | `NONE` |
+| Une Close requise absente, non finie ou de type invalide | `INVALID_PRIOR_DIRECTION_INPUT` | `NONE` |
+| Cinq observations valides | `EVALUATED` | `UP`, `DOWN` ou `NONE` |
+
+Une barre absente dans la fenêtre représente un historique insuffisant ;
+une barre présente mais sans Close représente une entrée invalide. Un manque
+de clôture est un warmup insuffisant. L'historique clôturé est vérifié avant les
+prix ; les index ou timestamps incohérents sont refusés fail-closed. Sur les
+statuts non évalués, aucune direction de retournement ou date de disponibilité
+n'est revendiquée. `reversal_direction = None` représente l'absence de côté éligible.
+
+IMPULSE garde sa direction émergente stricte sur trois bougies ; REVERSAL garde
+la direction préalable établie sur cinq, avec au moins trois transitions sur
+quatre et une extrémité alignée. Aucun héritage/import du détecteur d'impulsion.
+Le type partagé LONG/SHORT est seulement celui de l'infrastructure de composition.
+EMA20, MACD, RSI, stochastic, volume, range, wick, ATR et filtre de session
+ne participent pas à ce sous-prédicat. Il ne qualifie pas encore un événement
+REVERSAL_TRANSITION_EVENT ou une entrée. Aucun replay ni accès OOS.
+
+## Prochaine ambiguïté — bougie de rejet du retournement
+
+`BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_REJECTION_BAR_REQUIRED`
+
+Quelle règle causale exacte sur la bougie candidate clôturée `t` définit le
+rejet ou l'épuisement dans la direction préalable UP/DOWN ? Les mesures,
+comparateurs et éventuels seuils de cette bougie ne sont pas choisis ici.
+L'événement de retournement complet reste à formaliser avant tout replay.
