@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -41,11 +41,12 @@ STRATEGY_FAMILY = EMA_PULLBACK_V2_REGIME_GATED ;
 EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION_STATUS = PASS ;
-DIRECTIONAL_IMPULSE_EVENT = BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED ;
+DIRECTIONAL_IMPULSE_EMERGING_DIRECTION = PASS ;
+DIRECTIONAL_IMPULSE_EVENT = BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED ;
 REVERSAL_TRANSITION_EVENT = PRE_FORMALIZATION ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-distinct-regime-events.
-Base GitHub vérifiée et récupérée : f67eaed1d8e3608146f8e81d7c0db45721d6e31d.
+Branche de vérification : feature/ema-pullback-v2-emerging-direction.
+Base GitHub vérifiée et récupérée : 04b0ef527da196af01bf7f3f0dad6b86aa9ff34e.
 
 ## Acquis vérifiés
 
@@ -1020,7 +1021,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`46df95e9d95070ace4b7ac0ae0bf93a7c77ed587142b783bbae3aa331bf8e26c`. L'hypothèse porte sur une
+`3701c0f42170eebcbed3142715fc25748ad6c558412224cd06669a34b9e0efb7`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1051,16 +1052,40 @@ Le compositeur pur `src/agicore/trading/regime_context_v2.py`, SHA-256
 `f871ffe4f4cc8bca3a55ca8e558d5ded56d0acc0a182e2628c0f8302cdb5629f`,
 vérifie fermeture et métadonnées de même barre avant la composition. Il n'est
 raccordé ni aux détecteurs, ni à l'entrée, ni au replay ; leurs prédicats ne sont
-pas encore définis. La prochaine gate distincte est
-`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED` :
-définir causalement la direction déjà émergente à partir des barres clôturées.
-Aucun seuil numérique, nouveau dataset ou résultat de performance V2 n'a été fixé.
+pas encore définis. La gate suivante était
+`DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED` : définir causalement
+la direction déjà émergente à partir des barres clôturées. Elle a été acquittée
+par la décision du propriétaire du 2026-10-03.
+Aucun seuil numérique de magnitude, nouveau dataset ou résultat de performance V2 n'a été fixé.
 Tests locaux : 24 tests synthétiques de composition PASS ; 6308 tests PASS avec
 `tests/unit/test_mcp.py` exclu. La suite intégrale dans ce sandbox reste non
 concluante : le test préexistant `test_root_endpoint` de FastAPI `TestClient`
 se bloque même isolé (timeout 30 s). Ruff ciblé, `py_compile` et
-`git diff --check` PASS. La CI de la PR devra confirmer la suite intégrale
-avant fusion ; aucune réussite intégrale locale n'est revendiquée.
+`git diff --check` PASS. PR #278 fusionnée après CI #238 verte (suite intégrale
+et contrôle des espaces) ; merge `04b0ef527da196af01bf7f3f0dad6b86aa9ff34e`.
+Aucune réussite intégrale locale n'est revendiquée.
+
+## V2 — direction émergente structurelle avant l'impulsion
+
+Décision humaine du 2026-10-03 : sur `t-3`, `t-2`, `t-1` clôturées, LONG exige
+trois closes strictement croissants et trois lows non décroissants ; SHORT exige
+trois closes strictement décroissants et trois highs non croissants. La direction
+est connue à `Close[t-1]`. Clôtures égales rejetées ; égalité des lows LONG ou
+highs SHORT autorisée. Manque d'une bougie : `INSUFFICIENT_WARMUP`, direction
+`NONE`. Incohérence ou barre préalable non clôturée : rejet fail-closed. La
+bougie candidate `t` et les barres futures ne sont jamais lues.
+
+Le prédicat pur `src/agicore/trading/directional_impulse_v2.py`, SHA-256
+`5bdff3a7adace2b3cbc765ffdd1e7bb7e50c16d8fbddc39a7fab5995f4814740`,
+est un prérequis, pas un détecteur de `DIRECTIONAL_IMPULSE_EVENT`. Aucun seuil
+d'amplitude, volume, mèche, EMA, MACD, ATR ou filtre de session n'est ajouté.
+Prochaine gate : `DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED`, pour
+définir exactement la composante d'étendue de la bougie candidate `t` sans
+consulter de performance. Aucun replay ni ouverture OOS.
+Tests locaux : 29 nouveaux tests synthétiques PASS ; 53 tests V2 ciblés PASS ;
+6337 tests PASS hors `tests/unit/test_mcp.py` (son `TestClient` se bloque dans
+ce sandbox, comme pour PR #278). Ruff ciblé, `py_compile` et diff-check PASS.
+La suite intégrale sur la CI de cette PR reste à vérifier avant fusion.
 
 ## Limites du produit
 
