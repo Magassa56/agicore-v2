@@ -2,7 +2,9 @@
 
 The emerging direction inspects only the three closed bars before candidate
 ``t``. The independent range and trade-volume predicates inspect the closed
-candidate and the preceding 20 closed bars. None emits an impulse or entry signal.
+candidate and the preceding 20 closed bars. Body/wick qualification inspects
+only the closed candidate with the already established emerging direction.
+None emits an impulse or entry signal.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ IMPULSE_RANGE_MULTIPLIER = Decimal("1.50")
 IMPULSE_VOLUME_MEASURE = "BAR_TRADE_VOLUME"
 IMPULSE_VOLUME_LOOKBACK = 20
 IMPULSE_VOLUME_MULTIPLIER = Decimal("1.50")
+MIN_BODY_TO_RANGE_RATIO = Decimal("0.60")
+MAX_TERMINAL_WICK_TO_RANGE_RATIO = Decimal("0.20")
 
 
 class EmergingDirectionV2Error(ValueError):
@@ -51,6 +55,39 @@ class ImpulseVolumeStatus(StrEnum):
     INVALID_REFERENCE_VOLUME = "INVALID_REFERENCE_VOLUME"
     INVALID_VOLUME = "INVALID_VOLUME"
     EVALUATED = "EVALUATED"
+
+
+class ImpulseBodyWickStatus(StrEnum):
+    """Distinguish malformed OHLC and zero range from an evaluated predicate."""
+
+    INVALID_OHLC = "INVALID_OHLC"
+    INVALID_CANDIDATE_RANGE = "INVALID_CANDIDATE_RANGE"
+    EVALUATED = "EVALUATED"
+
+
+@dataclass(frozen=True)
+class BodyWickBarV2:
+    """Candidate OHLC; malformed values reach the evaluator's error status."""
+
+    bar_index: int
+    timestamp_utc: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    is_closed: bool
+
+    def __post_init__(self) -> None:
+        if type(self.bar_index) is not int or self.bar_index < 0:
+            raise EmergingDirectionV2Error("bar_index must be a nonnegative integer")
+        if (
+            not isinstance(self.timestamp_utc, datetime)
+            or self.timestamp_utc.tzinfo is None
+            or self.timestamp_utc.utcoffset() != timedelta(0)
+        ):
+            raise EmergingDirectionV2Error("bar timestamp must be aware UTC")
+        if type(self.is_closed) is not bool:
+            raise EmergingDirectionV2Error("is_closed must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -152,6 +189,20 @@ class ImpulseVolumeEvaluation:
     candidate_volume: Decimal | None
     reference_volume: Decimal | None
     required_volume: Decimal | None
+
+
+@dataclass(frozen=True)
+class ImpulseBodyWickEvaluation:
+    """Exact candidate geometry, qualified only in the supplied emerging direction."""
+
+    status: ImpulseBodyWickStatus
+    body_wick_qualified: bool
+    impulse_candidate_bar_index: int
+    emerging_direction: RegimeDirection | None
+    candidate_range: Decimal | None
+    body: Decimal | None
+    upper_wick: Decimal | None
+    lower_wick: Decimal | None
 
 
 def evaluate_emerging_direction_v2(
@@ -408,6 +459,103 @@ def evaluate_impulse_volume_v2(
     )
 
 
+def evaluate_impulse_body_wick_v2(
+    *,
+    impulse_candidate_bar_index: int,
+    bars_by_index: Mapping[int, BodyWickBarV2],
+    emerging_direction: RegimeDirection | None,
+) -> ImpulseBodyWickEvaluation:
+    """Require a directional body >= 60% and its terminal wick <= 20% of range.
+
+    Only the closed candidate t is read. OHLC is checked before positive range;
+    finite Decimal calculations use exact arithmetic without ratio division or
+    pre-comparison rounding. No separate nonterminal-wick bound is imposed.
+    """
+    if type(impulse_candidate_bar_index) is not int or impulse_candidate_bar_index < 0:
+        raise EmergingDirectionV2Error("candidate index must be a nonnegative integer")
+    if not isinstance(bars_by_index, Mapping):
+        raise EmergingDirectionV2Error("bars_by_index must be a mapping")
+    if emerging_direction is not None and not isinstance(emerging_direction, RegimeDirection):
+        raise EmergingDirectionV2Error("emerging_direction must be LONG, SHORT or None")
+
+    t = impulse_candidate_bar_index
+    if t not in bars_by_index:
+        raise EmergingDirectionV2Error("closed candidate bar is required")
+    candidate = bars_by_index[t]
+    if not isinstance(candidate, BodyWickBarV2) or candidate.bar_index != t:
+        raise EmergingDirectionV2Error("candidate bar index is inconsistent")
+    if candidate.is_closed is not True:
+        raise EmergingDirectionV2Error("candidate bar must be closed")
+
+    values = (candidate.open, candidate.high, candidate.low, candidate.close)
+    if not all(isinstance(value, Decimal) and value.is_finite() for value in values) or not (
+        candidate.high >= max(candidate.open, candidate.close)
+        and candidate.low <= min(candidate.open, candidate.close)
+        and candidate.high >= candidate.low
+    ):
+        return ImpulseBodyWickEvaluation(
+            ImpulseBodyWickStatus.INVALID_OHLC,
+            False,
+            t,
+            emerging_direction,
+            None,
+            None,
+            None,
+            None,
+        )
+
+    precision = max(
+        28,
+        max(value.adjusted() for value in values)
+        - min(value.as_tuple().exponent for value in values)
+        + 10,
+    )
+    with localcontext() as context:
+        context.prec = precision
+        context.Emax = MAX_EMAX
+        context.Emin = MIN_EMIN
+        context.traps[Inexact] = True
+        candidate_range = candidate.high - candidate.low
+        body = (candidate.close - candidate.open).copy_abs()
+        upper_wick = candidate.high - max(candidate.open, candidate.close)
+        lower_wick = min(candidate.open, candidate.close) - candidate.low
+        if candidate_range <= 0:
+            return ImpulseBodyWickEvaluation(
+                ImpulseBodyWickStatus.INVALID_CANDIDATE_RANGE,
+                False,
+                t,
+                emerging_direction,
+                candidate_range,
+                body,
+                upper_wick,
+                lower_wick,
+            )
+        strong_body = body >= MIN_BODY_TO_RANGE_RATIO * candidate_range
+        terminal_wick_limit = MAX_TERMINAL_WICK_TO_RANGE_RATIO * candidate_range
+        qualified = (
+            emerging_direction is RegimeDirection.LONG
+            and candidate.close > candidate.open
+            and strong_body
+            and upper_wick <= terminal_wick_limit
+        ) or (
+            emerging_direction is RegimeDirection.SHORT
+            and candidate.close < candidate.open
+            and strong_body
+            and lower_wick <= terminal_wick_limit
+        )
+
+    return ImpulseBodyWickEvaluation(
+        ImpulseBodyWickStatus.EVALUATED,
+        qualified,
+        t,
+        emerging_direction,
+        candidate_range,
+        body,
+        upper_wick,
+        lower_wick,
+    )
+
+
 __all__ = [
     "EMERGING_DIRECTION_LOOKBACK",
     "IMPULSE_RANGE_LOOKBACK",
@@ -415,9 +563,14 @@ __all__ = [
     "IMPULSE_VOLUME_LOOKBACK",
     "IMPULSE_VOLUME_MEASURE",
     "IMPULSE_VOLUME_MULTIPLIER",
+    "MAX_TERMINAL_WICK_TO_RANGE_RATIO",
+    "MIN_BODY_TO_RANGE_RATIO",
+    "BodyWickBarV2",
     "EmergingDirectionEvaluation",
     "EmergingDirectionStatus",
     "EmergingDirectionV2Error",
+    "ImpulseBodyWickEvaluation",
+    "ImpulseBodyWickStatus",
     "ImpulseRangeEvaluation",
     "ImpulseRangeStatus",
     "ImpulseVolumeEvaluation",
@@ -425,6 +578,7 @@ __all__ = [
     "StructuralBarV2",
     "TradeVolumeBarV2",
     "evaluate_emerging_direction_v2",
+    "evaluate_impulse_body_wick_v2",
     "evaluate_impulse_range_v2",
     "evaluate_impulse_volume_v2",
 ]
