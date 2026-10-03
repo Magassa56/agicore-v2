@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA20_PULLBACK_V2_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -50,10 +50,11 @@ REVERSAL_TRANSITION_EVENT_PRIOR_DIRECTION = PASS ;
 REVERSAL_TRANSITION_EVENT_REJECTION_BAR = PASS ;
 REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION = PASS ;
 REVERSAL_TRANSITION_EVENT = PASS ;
-REGIME_CONTEXT_V2_EVENT_LIFETIME = BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED ;
+REGIME_CONTEXT_V2_EVENT_LIFETIME = PASS ;
+EMA20_PULLBACK_V2 = BLOCKED_HUMAN_GATE — EMA20_PULLBACK_V2_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-reversal-event.
-Base GitHub vérifiée et récupérée : 39130e82152002c3c11c7c316f65d8fbcc7fc9d5.
+Branche de vérification : feature/ema-pullback-v2-context-lifetime.
+Base GitHub vérifiée et récupérée : 677b5dd2d0ac49aec406fa006a6d487ee593ae3c.
 
 ## Acquis vérifiés
 
@@ -1028,7 +1029,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`c848aee8c2ca59a72fd062dba68fd1d1fd07e7af4f7c162a9f5c20290962285e`. L'hypothèse porte sur une
+`4576ebab42ba44315a336494dbca78e84d19cf563789f8104e5a7b8cf71bde12`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1055,7 +1056,8 @@ une direction LONG/SHORT, l'index et l'estampille UTC de leur barre clôturée. 
 en conservant leurs deux étiquettes ; deux directions opposées donnent
 `AMBIGUOUS`, sans qualification et sans entrée. Aucune priorité ni score générique.
 
-Le compositeur pur `src/agicore/trading/regime_context_v2.py`, SHA-256
+Lors de la formalisation initiale, le compositeur pur
+`src/agicore/trading/regime_context_v2.py`, SHA-256
 `f871ffe4f4cc8bca3a55ca8e558d5ded56d0acc0a182e2628c0f8302cdb5629f`,
 vérifie fermeture et métadonnées de même barre avant la composition. Il n'est
 raccordé ni aux détecteurs, ni à l'entrée, ni au replay ; leurs prédicats ne sont
@@ -1348,10 +1350,64 @@ dans ce sandbox. Ruff, format, compilation et diff-check PASS.
 CI intégrale verte exigée avant fusion ; preuves et SHA de merge dans la PR.
 Aucun replay, accès OOS, lecture de dataset, calibration MNQ ou changement V1/risque.
 
-Prochaine gate unique : REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED.
-Définir le maintien causal du contexte entre événement qualifié et futur
-pullback EMA20 : durée, invalidation, consommation et nouvel événement.
-Aucune règle de vie ni entrée n'est inventée. V2 reste PRE_FORMALIZATION.
+La gate durée de vie est acquittée par la décision ci-dessous.
+
+## V2 — contexte borné et consommation unique
+
+PR #287 fusionnée après CI #256 verte, merge
+`677b5dd2d0ac49aec406fa006a6d487ee593ae3c`.
+Décision du propriétaire du 2026-10-03 : MAX_CONTEXT_AGE_CLOSED_BARS = 8,
+MAX_CONTEXT_ELAPSED_TIME = 8 minutes, CONTEXT_REUSE = ONE_SHOT,
+SAME_DIRECTION_REFRESH = DISABLED. Baselines initiales pré-replay non optimisées,
+fixées avant performance V2 ; aucun ajustement sur MNQ 03-26/06-26 ou V1.
+
+Source complète sur e : contexte ACTIVE après Close[e], pullbacks possibles
+sur e+1..e+8 inclusivement, jamais sur e. Le timestamp doit rester à <=8 minutes
+du timestamp source. Temps >8 minutes expire avant tout pullback, y compris
+après une interruption de données/session. Âge >8 expire avant évaluation ;
+e+8 sans qualification expire seulement après sa dernière opportunité.
+Si temps et âge sont dépassés simultanément, EXPIRED_ELAPSED_TIME prévaut.
+
+Ordre figé par bougie clôturée : expiration, composition des événements
+courants, invalidation AMBIGUOUS/opposée, conservation même direction sans
+rafraîchissement, puis seulement évaluation formelle d'un pullback éligible.
+Opposé : ancien record INVALIDATED_OPPOSITE_EVENT, nouveau contexte de k,
+premier pullback k+1. AMBIGUOUS : INVALIDATED_AMBIGUOUS_EVENT sans remplacement.
+Même direction ACTIVE : source/âge/étiquettes conservés, pas de pile, notice
+SAME_DIRECTION_EVENT_IGNORED_NO_REFRESH. L'invalidation gagne sur le pullback
+potentiel de l'ancien contexte sur la même bougie. Les records retirés sont
+rendus pour audit, sans mutation des snapshots précédents.
+
+Seul EMA20_PULLBACK_QUALIFIED=true consomme le contexte. Touche/proximité brute
+ne suffit pas. Record CONSUMED conserve source_event_types/direction/index/
+timestamp et pullback_bar_index/timestamp. Aucun second pullback ni réactivation
+après échec de confirmation/entrée ; un nouvel événement crée une nouvelle
+source. Les deux familles d'événements et les doubles étiquettes sont admises ;
+pour REVERSAL, e correspond à la confirmation t+1 du détecteur figé.
+
+Fin des données : ACTIVE => EXPIRED_END_OF_DATA, sans bougie/pullback/entrée
+synthétique. Finaliseur au dernier index/timestamp connu ; aucun état terminal
+n'est rouvert. Une série terminée refuse de transmettre son contexte à une
+autre série. Horloge UTC index/timestamp strictement croissante et source
+clôturée requises ; métadonnées futures/incohérentes refusées fail-closed.
+
+Module src/agicore/trading/regime_context_v2.py, SHA-256
+`587e2ea9bad4be0778c10ad101e9266fbe76ffe82810e9e1fd934d0f3b8e46de`.
+82 nouveaux tests synthétiques PASS ; 604 tests V2 ciblés PASS.
+Fichier tests/unit/trading/test_regime_context_lifetime_v2.py, SHA-256
+`7370ab769f3dbfc2b67b7f087449c419198e35ba463501774b0951735ef16927`.
+6888 tests locaux PASS, 4 avertissements préexistants, hors test_mcp.py bloqué
+dans ce sandbox. Ruff, format, compilation et diff-check PASS.
+CI intégrale verte exigée avant fusion ; preuves et SHA de merge dans la PR.
+Compositeur et détecteurs figés inchangés. Interface du futur prédicat formel
+seulement ; aucune règle de prix/High/Low, franchissement EMA20, MACD, ATR,
+volume, session, limite quotidienne, stop, take profit ou exécution d'entrée.
+Aucun replay, accès OOS, dataset réel ou calibration MNQ.
+
+Prochaine gate unique : EMA20_PULLBACK_V2_REQUIRED.
+Figer le prédicat causal exact OHLC/EMA20 symétrique LONG/SHORT, avec calcul,
+warmup et frontières, sans hériter automatiquement de V1. V2 reste
+PRE_FORMALIZATION ; aucun replay ou ouverture OOS.
 
 ## Limites du produit
 

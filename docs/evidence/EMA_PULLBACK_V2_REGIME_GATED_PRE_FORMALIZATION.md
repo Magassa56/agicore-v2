@@ -497,18 +497,99 @@ compositeur existant reste inchangé : seul/sens commun qualifié, directions
 opposées ambiguës, aucune priorité entre impulsion et retournement. Sa règle
 de barre courante refuse de réutiliser l'événement t+1 comme événement t+2.
 
-La qualification ne maintient pas encore le contexte sur des barres suivantes,
-ne définit pas de momentum/acceptation EMA20/pullback et n'émet aucune entrée.
+L'assemblage seul ne maintient pas le contexte sur des barres suivantes ; la
+durée de vie distincte est formalisée ci-dessous. Il ne définit pas de
+momentum/acceptation EMA20/pullback et n'émet aucune entrée.
 Baselines inchangées, pré-replay non optimisées, sans dérivation V1/V1A/V1B.
 Aucun replay, accès OOS, dataset réel ou ajustement MNQ 03-26/06-26.
 
-## Prochaine ambiguïté — maintien du contexte jusqu'au pullback
+## Durée de vie du contexte — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED`
+Le 2026-10-03, `REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED` est acquittée.
+Les deux bornes sont des baselines initiales pré-replay, non optimisées et
+choisies avant toute performance V2. Aucun ajustement à partir de MNQ 03-26,
+MNQ 06-26 ou des résultats V1/V1A/V1B :
 
-Pour un événement qualifié à la clôture k, quelle règle causale maintient
-REGIME_CONTEXT_V2 actif jusqu'au futur pullback EMA20 ? Définir sa durée en
-bougies clôturées, ses conditions d'invalidation et de consommation, ainsi que
-le traitement d'un nouvel événement avant le pullback. Aucun délai, indicateur
-ou remplacement de contexte n'est choisi ici. Les prochaines formalités
-momentum/EMA20/pullback restent distinctes. Aucun replay ni ouverture OOS.
+```text
+MAX_CONTEXT_AGE_CLOSED_BARS = 8
+MAX_CONTEXT_ELAPSED_TIME = 8 minutes
+CONTEXT_REUSE = ONE_SHOT
+SAME_DIRECTION_REFRESH = DISABLED
+source_event_bar_index = e
+first_eligible_pullback_bar = e+1
+last_eligible_pullback_bar = e+8
+timestamp[k] - source_event_timestamp <= 8 minutes
+```
+
+Le contexte est créé après Close[e] par la composition qualifiée d'une
+impulsion, d'un retournement complet ou des deux dans le même sens. Les
+étiquettes de famille du compositeur sont conservées, ainsi que direction,
+index et timestamp source. Pour REVERSAL, e est la confirmation t+1, jamais
+la bougie de rejet t. La bougie e est toujours inéligible au pullback.
+
+États exacts : `INACTIVE`, `ACTIVE`, `CONSUMED`, `EXPIRED_MAX_AGE`,
+`EXPIRED_ELAPSED_TIME`, `INVALIDATED_OPPOSITE_EVENT`,
+`INVALIDATED_AMBIGUOUS_EVENT`, `EXPIRED_END_OF_DATA`.
+
+`advance_regime_context_v2` suit cet ordre sur chaque nouvelle bougie clôturée :
+
+1. expiration du contexte ACTIVE si temps écoulé >8 minutes, puis âge >8
+   bougies ; si les deux sont dépassés, le statut temporel prévaut ;
+2. appel du compositeur figé sur les événements complets de la seule bougie k ;
+3. AMBIGUOUS invalide l'ancien contexte sans remplacement ; un événement
+   opposé invalide l'ancien et crée un nouveau contexte à k, inéligible sur k ;
+4. même direction ACTIVE : source, étiquettes et âge conservés, aucune pile
+   ni prolongation ; notice `SAME_DIRECTION_EVENT_IGNORED_NO_REFRESH` ;
+5. seulement ensuite, évaluation du futur `EMA20_PULLBACK_QUALIFIED` sur un
+   contexte ACTIVE existant et éligible ; true le consomme définitivement.
+
+À e+8 et exactement huit minutes, le contexte reste éligible. Si le pullback
+n'est pas qualifié, `EXPIRED_MAX_AGE` intervient après cette dernière
+opportunité. À e+9, l'âge interdit l'évaluation. Un dépassement temporel, même
+de la plus petite précision du timestamp, expire avant l'évaluation, y compris
+sur la première bougie disponible après un trou de données/session.
+L'expiration initiale précède les nouveaux événements : un événement après
+expiration peut créer une nouvelle source, même de même direction, sans
+rafraîchir l'ancienne. Une invalidation opposée/ambiguë sur k gagne sur le
+pullback potentiel de l'ancien contexte ; aucun appel de son évaluateur.
+
+La consommation retient dans un record immutable `source_event_types`,
+`source_event_direction`, `source_event_bar_index`, `source_event_timestamp`,
+`pullback_bar_index`, `pullback_timestamp`. Un contexte consommé reste CONSUMED
+malgré un échec ultérieur de confirmation/entrée. Il faut un nouvel événement
+pour une nouvelle source et une nouvelle opportunité. Les records retirés
+sur la bougie sont rendus au caller pour audit, sans modifier les snapshots
+précédents ni empiler plusieurs contextes actifs.
+
+La gate définit seulement une interface d'évaluateur formel causal, appelé
+avec le contexte, k et son timestamp après les contrôles ci-dessus. Aucun
+évaluateur fourni ou résultat false : aucune consommation. Un résultat autre
+que bool est refusé. Une touche/proximité EMA brute n'est pas une qualification
+formelle. La règle OHLC/EMA20 elle-même reste à définir dans la prochaine gate.
+
+Fin des données : `end_of_data=True` expire tout contexte restant ACTIVE après
+la dernière évaluation autorisée. `finish_regime_context_v2` termine aussi la
+série au dernier index/timestamp déjà connus, sans inventer une nouvelle
+bougie. Un record CONSUMED ou déjà terminal reste dans son état. Une série
+terminée refuse toute continuation/transport de contexte ; la suivante part
+sans contexte. Aucun pullback, entrée ou report synthétique.
+
+Métadonnées UTC, source clôturée et horloge index/timestamp strictement
+croissante obligatoires ; événements futurs, double traitement d'une bougie,
+provenance future ou entrées incohérentes refusés fail-closed. L'API reçoit
+seulement les événements de la bougie courante, sans collection future.
+Le compositeur et les détecteurs figés restent inchangés.
+
+Aucune invalidation par prix/High/Low, franchissement EMA20, MACD, ATR, volume,
+filtre de session, limite quotidienne, stop, take profit ou exécution d'entrée.
+Aucun replay, accès OOS ou lecture de dataset réel.
+
+## Prochaine ambiguïté — pullback EMA20 V2
+
+`BLOCKED_HUMAN_GATE — EMA20_PULLBACK_V2_REQUIRED`
+
+Quel prédicat causal exact OHLC/EMA20, symétrique LONG/SHORT, rend
+`EMA20_PULLBACK_QUALIFIED` vrai ? Figer le calcul/warmup EMA20, les conditions
+de bougie et les comparateurs/frontières. La durée de vie ne définit aucune
+de ces conditions et n'hérite pas automatiquement du prédicat V1. Aucun replay
+ni ouverture OOS.
