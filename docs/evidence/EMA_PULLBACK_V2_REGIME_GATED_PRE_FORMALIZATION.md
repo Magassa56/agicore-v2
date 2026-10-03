@@ -113,7 +113,7 @@ produit aucun `DIRECTIONAL_IMPULSE_EVENT`, signal d'entrée ou décision d'ordre
 EMA20, MACD, ATR, volume, seuil d'étendue ou de mèche et filtre de session ne
 participent pas à cette direction émergente. Aucun résultat de V1/V1A/V1B n'a
 servi à choisir ce prédicat. L'événement de retournement garde son prédicat
-distinct, encore à définir.
+distinct, formalisé séparément ci-dessous.
 
 ## Range de la bougie candidate — décision du propriétaire
 
@@ -450,11 +450,65 @@ de range/volume sur t+1, EMA20, MACD, RSI, stochastic, ATR ou session. Symétrie
 LONG/SHORT stricte. Aucune lecture t+2/future, replay, OOS ou calibration MNQ.
 Ce sous-prédicat ne crée pas encore d'événement complet.
 
-## Prochaine étape autorisée — assemblage du retournement
+## Assemblage du retournement — décision du propriétaire
 
-Après fusion de la confirmation, assembler exactement les trois composants
-figés : direction préalable qualifiée AND rejet qualifié AND transition
-opposée confirmée. L'événement conservera `event_type = REVERSAL_TRANSITION`,
-LONG/SHORT, direction préalable, index et timestamp du rejet t, index et
-timestamp de l'événement t+1. Ensuite seulement ouvrir la gate de maintien de
-REGIME_CONTEXT_V2 jusqu'au futur pullback EMA20. Aucun replay ou accès OOS.
+La confirmation a été fusionnée par PR #286 après CI #254 verte, merge
+`39130e82152002c3c11c7c316f65d8fbcc7fc9d5`.
+L'assemblage explicitement autorisé par le propriétaire appelle exactement
+les trois fonctions figées sur les mêmes observations :
+
+```text
+REVERSAL_TRANSITION_EVENT =
+    prior_direction_qualified
+    AND rejection_bar_qualified
+    AND opposite_transition_confirmed
+UP => SHORT event
+DOWN => LONG event
+```
+
+`evaluate_reversal_transition_event_v2` conserve les résultats individuels et
+leurs statuts. À Close[t] : aucun événement, transition en attente. Échec,
+warmup incomplet, entrée invalide, confirmation absente ou non clôturée : aucun
+événement. Un t+1 échoué reste expiré même si t+2 satisfait la géométrie.
+Aucun seuil, filtre, priorité de marché ou nouveau composant n'est introduit.
+
+L'événement source immutable `ReversalTransitionEventV2` porte exactement :
+
+```text
+event_type = REVERSAL_TRANSITION
+event_direction = LONG | SHORT
+prior_direction = UP | DOWN
+rejection_bar_index = t
+event_bar_index = t+1
+rejection_timestamp = timestamp_utc[t]
+event_timestamp = timestamp_utc[t+1]
+```
+
+La direction vient exclusivement du côté opposé à la direction préalable.
+Index et timestamps sont cohérents, UTC et ordonnés. Les seules observations
+consultées sont t-5..t, puis t+1 derrière l'horloge clôturée. Une réévaluation
+ultérieure ne retimestamp pas l'événement ; t+2/future ne sont jamais lus.
+
+`as_regime_event()` adapte explicitement l'étiquette source
+`REVERSAL_TRANSITION` à la famille de composition déjà figée
+`RegimeEventType.REVERSAL_TRANSITION_EVENT`, en gardant direction, index et
+timestamp t+1. Le record source conserve les métadonnées de rejet. Le
+compositeur existant reste inchangé : seul/sens commun qualifié, directions
+opposées ambiguës, aucune priorité entre impulsion et retournement. Sa règle
+de barre courante refuse de réutiliser l'événement t+1 comme événement t+2.
+
+La qualification ne maintient pas encore le contexte sur des barres suivantes,
+ne définit pas de momentum/acceptation EMA20/pullback et n'émet aucune entrée.
+Baselines inchangées, pré-replay non optimisées, sans dérivation V1/V1A/V1B.
+Aucun replay, accès OOS, dataset réel ou ajustement MNQ 03-26/06-26.
+
+## Prochaine ambiguïté — maintien du contexte jusqu'au pullback
+
+`BLOCKED_HUMAN_GATE — REGIME_CONTEXT_V2_EVENT_LIFETIME_REQUIRED`
+
+Pour un événement qualifié à la clôture k, quelle règle causale maintient
+REGIME_CONTEXT_V2 actif jusqu'au futur pullback EMA20 ? Définir sa durée en
+bougies clôturées, ses conditions d'invalidation et de consommation, ainsi que
+le traitement d'un nouvel événement avant le pullback. Aucun délai, indicateur
+ou remplacement de contexte n'est choisi ici. Les prochaines formalités
+momentum/EMA20/pullback restent distinctes. Aucun replay ni ouverture OOS.

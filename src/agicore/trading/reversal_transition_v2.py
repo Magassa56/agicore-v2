@@ -1,21 +1,22 @@
-"""Causal prior-direction, rejection and opposite-transition prerequisites.
+"""Causal V2 reversal event assembled from three frozen prerequisites.
 
 Prior direction reads only the five closes before t. Rejection reads OHLC of
 closed t and the extrema of those same five bars, with no candle-color filter.
 Confirmation reads only Open/Close of closed t+1, behind a closed-bar clock.
-These prerequisites emit no complete reversal event or entry signal.
+The complete event is known at Close[t+1], with separate rejection provenance.
+No entry signal, context lifetime or later invalidation is defined here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import MAX_EMAX, MIN_EMIN, Decimal, Inexact, localcontext
 from enum import StrEnum
 from itertools import pairwise
 
-from .regime_context_v2 import RegimeDirection
+from .regime_context_v2 import RegimeDirection, RegimeEvent, RegimeEventType
 
 PRIOR_DIRECTION_LOOKBACK = 5
 PRIOR_DIRECTION_MIN_STEPS = 3
@@ -165,6 +166,72 @@ class ReversalOppositeTransitionEvaluation:
     def rejection_qualified(self) -> bool:
         """Keep rejection qualification separate from transition confirmation."""
         return self.rejection.rejection_qualified
+
+
+@dataclass(frozen=True)
+class ReversalTransitionEventV2:
+    """Complete source event at t+1, retaining the prior direction and rejection t."""
+
+    event_direction: RegimeDirection
+    prior_direction: ReversalPriorDirection
+    rejection_bar_index: int
+    event_bar_index: int
+    rejection_timestamp: datetime
+    event_timestamp: datetime
+    event_type: str = field(default="REVERSAL_TRANSITION", init=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.prior_direction, ReversalPriorDirection)
+            or self.prior_direction is ReversalPriorDirection.NONE
+        ):
+            raise ReversalTransitionV2Error("complete reversal requires UP or DOWN prior direction")
+        expected = (
+            RegimeDirection.SHORT
+            if self.prior_direction is ReversalPriorDirection.UP
+            else RegimeDirection.LONG
+        )
+        if self.event_direction is not expected:
+            raise ReversalTransitionV2Error("event direction must oppose the prior direction")
+        # Reuse the frozen UTC/index guards; these records validate metadata only.
+        PriorDirectionBarV2(self.rejection_bar_index, self.rejection_timestamp, None, True)
+        PriorDirectionBarV2(self.event_bar_index, self.event_timestamp, None, True)
+        if self.event_bar_index != self.rejection_bar_index + CONFIRMATION_WINDOW_CLOSED_BARS:
+            raise ReversalTransitionV2Error("complete reversal must belong to t+1")
+        if self.event_timestamp <= self.rejection_timestamp:
+            raise ReversalTransitionV2Error("event timestamp must follow rejection timestamp")
+
+    def as_regime_event(self) -> RegimeEvent:
+        """Adapt the source label to the existing, unchanged composition family."""
+        return RegimeEvent(
+            RegimeEventType.REVERSAL_TRANSITION_EVENT,
+            self.event_direction,
+            self.event_bar_index,
+            self.event_timestamp,
+        )
+
+
+@dataclass(frozen=True)
+class ReversalTransitionEventEvaluation:
+    """All prerequisite results and an event only after their strict conjunction."""
+
+    opposite_transition: ReversalOppositeTransitionEvaluation
+    event: ReversalTransitionEventV2 | None
+
+    @property
+    def prior_direction(self) -> ReversalPriorDirectionEvaluation:
+        """Expose the unchanged close-only prior prerequisite."""
+        return self.opposite_transition.rejection.prior_direction
+
+    @property
+    def rejection(self) -> ReversalRejectionEvaluation:
+        """Expose the unchanged rejection prerequisite."""
+        return self.opposite_transition.rejection
+
+    @property
+    def reversal_transition_event_qualified(self) -> bool:
+        """A complete event exists only after closed t+1 confirms the transition."""
+        return self.event is not None
 
 
 def _finite_close(value: Decimal | int | None) -> Decimal | None:
@@ -471,6 +538,45 @@ def evaluate_reversal_opposite_transition_v2(
     )
 
 
+def evaluate_reversal_transition_event_v2(
+    *,
+    rejection_candidate_bar_index: int,
+    closed_bar_index: int,
+    bars_by_index: Mapping[int, RejectionBarV2],
+    end_of_data: bool = False,
+) -> ReversalTransitionEventEvaluation:
+    """Assemble only prior direction AND rejection AND confirmed opposite transition.
+
+    The frozen transition function calls the frozen rejection and prior
+    functions on the same observations. No predicate or threshold is changed.
+    Source metadata retains t, while event availability remains fixed at t+1.
+    """
+    transition = evaluate_reversal_opposite_transition_v2(
+        rejection_candidate_bar_index=rejection_candidate_bar_index,
+        closed_bar_index=closed_bar_index,
+        bars_by_index=bars_by_index,
+        end_of_data=end_of_data,
+    )
+    rejection = transition.rejection
+    prior = rejection.prior_direction
+    event = None
+    if (
+        prior.status is PriorDirectionStatus.EVALUATED
+        and prior.prior_direction is not ReversalPriorDirection.NONE
+        and rejection.rejection_qualified
+        and transition.transition_confirmed
+    ):
+        event = ReversalTransitionEventV2(
+            event_direction=prior.reversal_direction,
+            prior_direction=prior.prior_direction,
+            rejection_bar_index=rejection.rejection_candidate_bar_index,
+            event_bar_index=transition.confirmation_bar_index,
+            rejection_timestamp=rejection.known_at_timestamp,
+            event_timestamp=transition.known_at_timestamp,
+        )
+    return ReversalTransitionEventEvaluation(transition, event)
+
+
 __all__ = [
     "CONFIRMATION_WINDOW_CLOSED_BARS",
     "MIN_REJECTION_WICK_RATIO",
@@ -485,8 +591,11 @@ __all__ = [
     "ReversalPriorDirection",
     "ReversalPriorDirectionEvaluation",
     "ReversalRejectionEvaluation",
+    "ReversalTransitionEventEvaluation",
+    "ReversalTransitionEventV2",
     "ReversalTransitionV2Error",
     "evaluate_reversal_opposite_transition_v2",
     "evaluate_reversal_prior_direction_v2",
     "evaluate_reversal_rejection_bar_v2",
+    "evaluate_reversal_transition_event_v2",
 ]
