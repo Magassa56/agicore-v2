@@ -83,9 +83,10 @@ qualifié n'est pas encore un signal d'entrée. L'ordre prévu est : contexte,
 transition momentum, acceptation EMA20, pullback, puis entrée ; les prédicats
 intermédiaires restent à définir.
 
-Aucun seuil numérique de volume, d'étendue de bougie, de ratio de mèche, d'ATR
-ou de magnitude MACD n'est fixé. Aucun replay ni choix de paramètre à partir des
-contrats MNQ 03-26 ou MNQ 06-26 n'est autorisé.
+Le seuil d'étendue de bougie est désormais fixé dans son sous-contrat ci-dessous ;
+aucun seuil de volume, ratio de mèche, ATR ou magnitude MACD n'est fixé. Aucun
+replay ni choix de paramètre à partir des contrats MNQ 03-26 ou MNQ 06-26 n'est
+autorisé.
 
 ## Direction émergente avant l'impulsion — décision du propriétaire
 
@@ -114,13 +115,43 @@ participent pas à cette direction émergente. Aucun résultat de V1/V1A/V1B n'a
 servi à choisir ce prédicat. L'événement de retournement garde son prédicat
 distinct, encore à définir.
 
-## Prochaine ambiguïté — événement d'impulsion
+## Range de la bougie candidate — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED`
+Le 2026-10-03, `DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED` a été
+acquittée. Ce sous-contrat indépendant de LONG/SHORT est figé **avant tout
+replay**, sans optimisation ni recours aux résultats V1/V1A/V1B :
 
-L'accélération ou l'acceptation forte sur la bougie candidate `t` n'a pas encore
-de prédicat d'étendue défini. **Décision humaine unique demandée :** quelle
-règle causale exacte de range (mesure de `t`, référence sur bougies antérieures,
-fenêtre et seuil de comparaison) doit qualifier la composante d'amplitude de
-`DIRECTIONAL_IMPULSE_EVENT` ? Le volume et les mèches feront l'objet de gates
-distinctes. Aucun replay ni OOS avant la formalisation complète.
+```text
+RANGE_MEASURE = HIGH_LOW
+RANGE_REFERENCE = MEDIAN_PRIOR_20_CLOSED_BARS
+RANGE_MULTIPLIER = Decimal("1.50")
+range_t = High[t] - Low[t]
+prior_ranges = [High[i] - Low[i] for i in t-20 ... t-1]
+reference_range = exact_median(prior_ranges)
+range_qualified = range_t >= Decimal("1.50") * reference_range
+```
+
+La médiane des 20 étendues triées est la moyenne exacte des valeurs centrales
+10 et 11. L'égalité avec le seuil qualifie le range ; une valeur strictement
+inférieure échoue, sans arrondi préalable. `t` doit être clôturée. Moins de 20
+bougies antérieures clôturées donne `INSUFFICIENT_WARMUP` et
+`range_qualified = false`. Une médiane nulle ou négative donne
+`INVALID_REFERENCE_RANGE` et `range_qualified = false`. Une source incohérente
+est refusée. Aucune barre future n'est consultée et `t` ne participe pas à la
+référence. Seules `t` et les 20 bougies précédentes sont nécessaires.
+
+Le module `src/agicore/trading/directional_impulse_v2.py` calcule ce sous-prédicat
+avec des `Decimal` exacts. Il ne combine pas encore le range avec la direction
+émergente et n'émet ni `DIRECTIONAL_IMPULSE_EVENT` ni signal d'entrée. ATR,
+True Range, corps/mèche, direction de bougie, volume, EMA20, MACD et filtre de
+session ne participent pas au prédicat de range.
+
+## Prochaine ambiguïté — volume de l'impulsion
+
+`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_VOLUME_PREDICATE_REQUIRED`
+
+**Décision humaine unique demandée :** quelle règle causale exacte de volume
+(mesure sur `t`, référence sur barres antérieures, fenêtre et comparaison) doit
+qualifier la composante de volume relatif de l'impulsion ? Les relations
+corps/mèche restent distinctes et non définies. Aucun replay ni OOS avant la
+formalisation complète.
