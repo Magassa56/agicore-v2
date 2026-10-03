@@ -79,9 +79,9 @@ refuse toute métadonnée incohérente ou provenant d'une barre ultérieure.
 
 La qualification du contexte est l'OR des événements indépendants, sous réserve
 de la collision opposée. Aucun événement n'a priorité sur l'autre. Un contexte
-qualifié n'est pas encore un signal d'entrée. L'ordre prévu est : contexte,
-transition momentum, acceptation EMA20, pullback, puis entrée ; les prédicats
-intermédiaires restent à définir.
+qualifié n'est pas encore un signal d'entrée. L'ordre désormais figé est :
+événement complet, contexte actif, pullback qualifié et consommation unique.
+La future confirmation/momentum après le pullback et l'entrée restent à définir.
 
 Les seuils d'étendue, de volume et de géométrie des bougies sont désormais fixés
 dans leurs sous-contrats ci-dessous ; aucun ATR ou magnitude MACD n'est fixé. Aucun
@@ -540,7 +540,7 @@ la bougie de rejet t. La bougie e est toujours inéligible au pullback.
    opposé invalide l'ancien et crée un nouveau contexte à k, inéligible sur k ;
 4. même direction ACTIVE : source, étiquettes et âge conservés, aucune pile
    ni prolongation ; notice `SAME_DIRECTION_EVENT_IGNORED_NO_REFRESH` ;
-5. seulement ensuite, évaluation du futur `EMA20_PULLBACK_QUALIFIED` sur un
+5. seulement ensuite, évaluation de `EMA20_PULLBACK_QUALIFIED` sur un
    contexte ACTIVE existant et éligible ; true le consomme définitivement.
 
 À e+8 et exactement huit minutes, le contexte reste éligible. Si le pullback
@@ -561,11 +561,11 @@ pour une nouvelle source et une nouvelle opportunité. Les records retirés
 sur la bougie sont rendus au caller pour audit, sans modifier les snapshots
 précédents ni empiler plusieurs contextes actifs.
 
-La gate définit seulement une interface d'évaluateur formel causal, appelé
+Cette gate définissait une interface d'évaluateur formel causal, appelé
 avec le contexte, k et son timestamp après les contrôles ci-dessus. Aucun
 évaluateur fourni ou résultat false : aucune consommation. Un résultat autre
 que bool est refusé. Une touche/proximité EMA brute n'est pas une qualification
-formelle. La règle OHLC/EMA20 elle-même reste à définir dans la prochaine gate.
+formelle. La règle OHLC/EMA20 est désormais formalisée ci-dessous.
 
 Fin des données : `end_of_data=True` expire tout contexte restant ACTIVE après
 la dernière évaluation autorisée. `finish_regime_context_v2` termine aussi la
@@ -584,12 +584,103 @@ Aucune invalidation par prix/High/Low, franchissement EMA20, MACD, ATR, volume,
 filtre de session, limite quotidienne, stop, take profit ou exécution d'entrée.
 Aucun replay, accès OOS ou lecture de dataset réel.
 
-## Prochaine ambiguïté — pullback EMA20 V2
+## Pullback EMA20 V2 — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA20_PULLBACK_V2_REQUIRED`
+Le 2026-10-03, `EMA20_PULLBACK_V2_REQUIRED` est acquittée. Définition initiale
+pré-replay non optimisée, indépendante des résultats V1/V1A/V1B. Aucun seuil
+en ticks/points ni paramètre de proximité n'est choisi. Aucun ajustement à
+partir de MNQ 03-26 ou MNQ 06-26.
 
-Quel prédicat causal exact OHLC/EMA20, symétrique LONG/SHORT, rend
-`EMA20_PULLBACK_QUALIFIED` vrai ? Figer le calcul/warmup EMA20, les conditions
-de bougie et les comparateurs/frontières. La durée de vie ne définit aucune
-de ces conditions et n'hérite pas automatiquement du prédicat V1. Aucun replay
+```text
+EMA_PERIOD = 20
+ALPHA = 2/21
+EMA_RESET_AT_SESSION = FALSE
+EMA20[19] = sum(Close[0] ... Close[19]) / 20
+EMA20[i] = (2 * Close[i] + 19 * EMA20[i-1]) / 21, i >= 20
+ema_reference = EMA20[k-1]
+first possible pullback candidate = 20
+```
+
+`evaluate_ema20_v2` convertit exactement chaque Decimal fini en Fraction et
+effectue la moyenne d'initialisation et chaque récurrence en rationnels exacts.
+Entiers et Fraction exacts sont aussi admis ; les floats binaires sont refusés.
+Aucune division Decimal arrondie, conversion float ou approximation de seuil
+n'influence les comparaisons, même sous faible précision Decimal ambiante.
+
+Les indices énumèrent les observations réelles depuis zéro. Aucun reset
+quotidien/session, remplissage de gap, bougie synthétique ou seed ultérieur.
+Un gap d'horloge entre deux observations n'interrompt pas la récurrence ; seules
+les clôtures valides et terminées sont utilisées. L'API consulte explicitement
+0..k-1, jamais k ni les clés futures pour calculer la référence. Un Close
+nécessaire absent/non fini, une observation requise absente ou non clôturée
+donne `INVALID_EMA_INPUT` sans substitution ni saut de cette observation.
+Avant l'index 19, la première EMA n'existe pas : `INSUFFICIENT_EMA_WARMUP`.
+Le pullback exige au moins vingt clôtures antérieures et commence à k=20.
+
+Pour la candidate k clôturée, la référence est fixée par EMA20[k-1], entièrement
+connue avant k. Close[k] peut changer la géométrie qualifiée, mais jamais cette
+référence ; EMA20[k] n'est pas utilisée pour juger le contact.
+
+```text
+LONG = Close[k-1] > ema_reference
+       AND Open[k] >= ema_reference
+       AND Low[k] <= ema_reference
+       AND Close[k] > ema_reference
+
+SHORT = Close[k-1] < ema_reference
+        AND Open[k] <= ema_reference
+        AND High[k] >= ema_reference
+        AND Close[k] < ema_reference
+```
+
+| Frontière | LONG | SHORT |
+| --- | --- | --- |
+| Open égal à la référence | Autorisé | Autorisé |
+| Extrême égal à la référence | Low égal : contact accepté | High égal : contact accepté |
+| Extrême au-delà de la référence | Low inférieur autorisé | High supérieur autorisé |
+| Aucun contact | Low supérieur : FAIL | High inférieur : FAIL |
+| Close[k] égal à la référence | FAIL | FAIL |
+| Close[k-1] égal à la référence | FAIL | FAIL |
+
+Aucune couleur de bougie n'est exigée : LONG rouge, SHORT vert ou doji peuvent
+qualifier si toute la géométrie EMA est satisfaite. Aucun seuil de range, pente,
+magnitude ou ratio corps/mèche n'est ajouté au pullback.
+
+OHLC de k finis et cohérents requis : High >= max(Open, Close),
+Low <= min(Open, Close), High >= Low. Sinon `INVALID_OHLC` et false. Un Close[k]
+absent/non fini donne `INVALID_EMA_INPUT` et false. Les OHLC historiques ne sont
+pas employés pour l'EMA ; seules leurs clôtures et métadonnées causales le sont.
+Index, fermeture et timestamp UTC cohérents sont exigés ; les timestamps
+historiques doivent être strictement croissants et antérieurs à celui de k.
+
+`evaluate_ema20_pullback_v2` est la décision pure sur un contexte déjà ACTIVE,
+k dans e+1..e+8 et temps écoulé <=8 minutes. Un contexte absent, terminal,
+sur sa propre bougie source ou hors fenêtre est `INELIGIBLE_CONTEXT` et false.
+Ce prédicat ne crée ni ne prolonge le contexte. `advance_ema20_pullback_v2`
+le raccorde au cycle de vie figé : expiration, composition/invalidation,
+conservation sans refresh, puis seulement évaluation formelle. Invalidation
+opposée/ambiguë gagne toujours sur un pullback de l'ancien contexte sur k.
+
+True consomme à Close[k] et conserve context_source_event_types,
+context_direction, context_event_bar_index, context_event_timestamp,
+pullback_bar_index=k, pullback_timestamp et ema_reference=EMA20[k-1] dans la
+décision qualifiée. Le record CONSUMED du cycle de vie conserve aussi cette
+Fraction exacte avec sa source et son pullback ; elle reste disponible après
+des barres ultérieures ou le retrait de l'ancien record. Aucun second pullback
+ni réactivation après échec de future confirmation/entrée. Les règles de
+durée de vie et les détecteurs antérieurs sont inchangés.
+
+Aucun MACD, EMA slope/proximity, ATR, volume, couleur de bougie, SMA14/SMA21,
+filtre de session, stop, target ou exécution d'entrée. Aucune règle V1 héritée.
+Aucun replay, accès OOS ou lecture de dataset réel.
+
+## Prochaine ambiguïté — confirmation/momentum d'entrée V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM_REQUIRED`
+
+Après le pullback qualifié et consommé à Close[k], quelle confirmation exacte
+autorise la suite vers l'entrée ? Figer sa fenêtre, ses comparateurs OHLC et
+ses éventuelles conditions de momentum, sa disponibilité causale et son
+expiration. Aucun filtre, indicateur, délai ou signal d'entrée n'est choisi
+ici. Le contexte consommé ne sera pas réactivé en cas d'échec. Aucun replay
 ni ouverture OOS.

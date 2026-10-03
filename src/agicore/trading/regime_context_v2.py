@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
+from fractions import Fraction
 
 MAX_CONTEXT_AGE_CLOSED_BARS = 8
 MAX_CONTEXT_ELAPSED_TIME = timedelta(minutes=8)
@@ -171,6 +172,7 @@ class RegimeEventContextV2:
     source_event_timestamp: datetime | None = None
     pullback_bar_index: int | None = None
     pullback_timestamp: datetime | None = None
+    ema_reference: Fraction | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.state, RegimeContextLifetimeState):
@@ -186,6 +188,7 @@ class RegimeEventContextV2:
                     self.source_event_timestamp,
                     self.pullback_bar_index,
                     self.pullback_timestamp,
+                    self.ema_reference,
                 )
             ):
                 raise RegimeContextV2Error("inactive context cannot carry source or pullback")
@@ -220,7 +223,13 @@ class RegimeEventContextV2:
                 raise RegimeContextV2Error(
                     "consumed pullback must be within eight minutes after source"
                 )
-        elif self.pullback_bar_index is not None or self.pullback_timestamp is not None:
+            if self.ema_reference is not None and not isinstance(self.ema_reference, Fraction):
+                raise RegimeContextV2Error("consumed EMA reference must be an exact Fraction")
+        elif (
+            self.pullback_bar_index is not None
+            or self.pullback_timestamp is not None
+            or self.ema_reference is not None
+        ):
             raise RegimeContextV2Error("only consumed context may carry a qualified pullback")
 
     @property
