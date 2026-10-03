@@ -87,16 +87,40 @@ Aucun seuil numérique de volume, d'étendue de bougie, de ratio de mèche, d'AT
 ou de magnitude MACD n'est fixé. Aucun replay ni choix de paramètre à partir des
 contrats MNQ 03-26 ou MNQ 06-26 n'est autorisé.
 
-## Prochaine ambiguïté — prédicat d'impulsion
+## Direction émergente avant l'impulsion — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED`
+Le 2026-10-03, `DIRECTIONAL_IMPULSE_EVENT_EMERGING_DIRECTION_REQUIRED` a été
+acquittée. Le prérequis structurel non optimisé porte exclusivement sur trois
+bougies **clôturées** : `t-3`, `t-2` et `t-1`. La direction est connue dès
+`Close[t-1]` ; la bougie candidate `t` ne contribue jamais à ce calcul et un
+événement d'impulsion éventuel ne pourra être évalué qu'à `Close[t]`.
 
-La notion « direction déjà émergente » n'a pas encore de critère causal exact.
-**Décision humaine unique demandée :** quelle observation sur les barres déjà
-clôturées établit la direction émergente avant qu'une bougie puisse qualifier
-`DIRECTIONAL_IMPULSE_EVENT` ?
+| Direction | Clôtures des trois bougies | Extrêmes des trois bougies |
+| --- | --- | --- |
+| `LONG` | `Close[t-3] < Close[t-2] < Close[t-1]` | `Low[t-3] <= Low[t-2] <= Low[t-1]` |
+| `SHORT` | `Close[t-3] > Close[t-2] > Close[t-1]` | `High[t-3] >= High[t-2] >= High[t-1]` |
 
-La définition de l'événement de retournement reste distincte et suivra sa
-propre formalisation. Les autres prédicats, warmup, ordre, invalidation, durée de
-vie, position, sorties et risque restent ouverts avant tout nouveau dataset
-DEVELOPMENT et tout replay.
+Une égalité entre clôtures ou la rupture de l'ordre des extrêmes donne
+`emerging_direction = NONE` après évaluation. L'égalité entre lows LONG ou entre
+highs SHORT est autorisée. Si l'une des trois bougies requises manque ou que
+`t < 3`, le statut est `INSUFFICIENT_WARMUP` et la direction est `NONE`. Des
+barres préalables non clôturées ou dont les métadonnées sont incohérentes sont
+refusées. Le calcul est pur et ne lit ni la bougie `t` ni les suivantes.
+
+Le sous-contrat est dans `src/agicore/trading/directional_impulse_v2.py` ; il ne
+produit aucun `DIRECTIONAL_IMPULSE_EVENT`, signal d'entrée ou décision d'ordre.
+EMA20, MACD, ATR, volume, seuil d'étendue ou de mèche et filtre de session ne
+participent pas à cette direction émergente. Aucun résultat de V1/V1A/V1B n'a
+servi à choisir ce prédicat. L'événement de retournement garde son prédicat
+distinct, encore à définir.
+
+## Prochaine ambiguïté — événement d'impulsion
+
+`BLOCKED_HUMAN_GATE — DIRECTIONAL_IMPULSE_EVENT_RANGE_PREDICATE_REQUIRED`
+
+L'accélération ou l'acceptation forte sur la bougie candidate `t` n'a pas encore
+de prédicat d'étendue défini. **Décision humaine unique demandée :** quelle
+règle causale exacte de range (mesure de `t`, référence sur bougies antérieures,
+fenêtre et seuil de comparaison) doit qualifier la composante d'amplitude de
+`DIRECTIONAL_IMPULSE_EVENT` ? Le volume et les mèches feront l'objet de gates
+distinctes. Aucun replay ni OOS avant la formalisation complète.
