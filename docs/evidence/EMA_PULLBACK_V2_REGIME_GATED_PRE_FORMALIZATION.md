@@ -83,8 +83,8 @@ qualifié n'est pas encore un signal d'entrée. L'ordre prévu est : contexte,
 transition momentum, acceptation EMA20, pullback, puis entrée ; les prédicats
 intermédiaires restent à définir.
 
-Les seuils d'étendue et de volume sont désormais fixés dans leurs sous-contrats
-ci-dessous ; aucun ratio de mèche, ATR ou magnitude MACD n'est fixé. Aucun
+Les seuils d'étendue, de volume et de géométrie des bougies sont désormais fixés
+dans leurs sous-contrats ci-dessous ; aucun ATR ou magnitude MACD n'est fixé. Aucun
 replay ni choix de paramètre à partir des contrats MNQ 03-26 ou MNQ 06-26 n'est
 autorisé.
 
@@ -399,12 +399,62 @@ REVERSAL_TRANSITION_EVENT ni signal d'entrée. La transition opposée après le
 rejet sera formalisée séparément. Aucun replay, accès OOS ou ajustement sur
 MNQ 03-26/06-26.
 
-## Prochaine ambiguïté — transition opposée après le rejet
+## Transition opposée sur une seule bougie — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION_REQUIRED`
+Le 2026-10-03, `REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION_REQUIRED` est
+acquittée. `REVERSAL_TRANSITION_EVENT_OPPOSITE_TRANSITION` est une baseline
+pré-replay non optimisée, sans dérivation V1/V1A/V1B ni ajustement après résultats.
 
-Quelle règle causale exacte confirme l'inversion après la bougie de rejet
-clôturée `t` ? Définir les observations autorisées, comparateurs, frontières,
-délai et moment de disponibilité de la confirmation. Aucune règle de
-confirmation n'est choisie ici ; l'événement de retournement complet reste à
-formaliser avant tout replay ou ouverture OOS.
+```text
+REJECTION_BAR = t
+CONFIRMATION_BAR = t+1
+CONFIRMATION_WINDOW = exactly 1 closed bar
+rejection_body_low = min(Open[t], Close[t])
+rejection_body_high = max(Open[t], Close[t])
+SHORT = prior_direction == UP AND rejection_direction == SHORT
+        AND Close[t+1] < Open[t+1]
+        AND Close[t+1] < rejection_body_low
+LONG = prior_direction == DOWN AND rejection_direction == LONG
+       AND Close[t+1] > Open[t+1]
+       AND Close[t+1] > rejection_body_high
+```
+
+La fonction `evaluate_reversal_opposite_transition_v2` réutilise le prédicat de
+rejet figé. À Close[t], rejet qualifié mais transition non confirmée :
+`AWAITING_OPPOSITE_TRANSITION`. Elle reçoit une horloge `closed_bar_index` ;
+à t, aucune présence ni valeur de t+1 n'est consultée, même si l'historique
+fourni contient déjà des bougies futures. `end_of_data=True` est un signal
+de disponibilité de données, pas un filtre stratégique : une fin à t sans
+confirmation clôturée donne `INCOMPLETE_CONFIRMATION`. À partir de t+1,
+seule cette bougie de confirmation est consultée ; une absence ou non-clôture
+donne aussi `INCOMPLETE_CONFIRMATION`, transition fausse.
+
+Comparaisons strictes, en Decimal exact sans arrondi : Close égal à la borne
+concernée ou à Open échoue. Confirmation valide : `CONFIRMED`. Bougie t+1
+clôturée et prédicat faux : `EXPIRED_NO_TRANSITION`. Une bougie t+2 ou ultérieure
+ne peut jamais confirmer rétroactivement t. Une évaluation ultérieure utilise
+t+1 seulement et conserve son index/timestamp de disponibilité ; elle ne
+déplace pas la confirmation à la barre courante.
+
+Seuls Open/Close finis et exacts de t+1 sont requis ; High/Low ne participent
+pas à cette gate. Open/Close absents, non finis ou de type inexact :
+`INVALID_CONFIRMATION_INPUT`, transition fausse. Un rejet non qualifié donne
+`REJECTION_NOT_QUALIFIED`, conserve ses statuts imbriqués et ne lit pas t+1.
+Index/timestamps incohérents et horloge précédant t : erreur fail-closed.
+Les évaluations de transition valides, positives ou expirées, sont connues
+uniquement à Close[t+1] ; les états d'attente/incomplétude n'ont pas de timestamp
+de confirmation. Le rejet conserve sa disponibilité séparée à Close[t].
+
+Aucune cassure du Low[t] SHORT ou du High[t] LONG, magnitude de corps, seuil
+de range/volume sur t+1, EMA20, MACD, RSI, stochastic, ATR ou session. Symétrie
+LONG/SHORT stricte. Aucune lecture t+2/future, replay, OOS ou calibration MNQ.
+Ce sous-prédicat ne crée pas encore d'événement complet.
+
+## Prochaine étape autorisée — assemblage du retournement
+
+Après fusion de la confirmation, assembler exactement les trois composants
+figés : direction préalable qualifiée AND rejet qualifié AND transition
+opposée confirmée. L'événement conservera `event_type = REVERSAL_TRANSITION`,
+LONG/SHORT, direction préalable, index et timestamp du rejet t, index et
+timestamp de l'événement t+1. Ensuite seulement ouvrir la gate de maintien de
+REGIME_CONTEXT_V2 jusqu'au futur pullback EMA20. Aucun replay ou accès OOS.
