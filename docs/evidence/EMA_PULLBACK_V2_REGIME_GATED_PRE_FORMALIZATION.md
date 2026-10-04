@@ -1198,13 +1198,133 @@ Aucun replay, ouverture OOS, calibration MNQ, broker ou ordre réel. Aucun Risk
 Engine, sizing, quantité, coût, take profit, breakeven ou trailing ajouté dans
 cette gate. V2 reste PRE_FORMALIZATION, sans performance évaluée.
 
-## Prochaine ambiguïté — Risk Engine et sizing V2
+## Risk Engine et quantité MNQ à la confirmation — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED`
+Le 2026-10-04, `EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED` est
+acquittée par `EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING`. Baseline initiale
+pré-replay non optimisée, indépendante de V1/V1A/V1B et sans ajustement à partir
+des résultats MNQ 03-26 ou MNQ 06-26 déjà utilisés.
 
-Figer séparément le budget de risque, le calcul exact de quantité et les
-critères de refus d'une nouvelle entrée, avec leur moment causal et leurs
-interactions avec l'Open d'entrée et le stop structurel immuable. Aucun montant,
-plafond de quantité ou modèle de risque V1 n'est hérité. Coûts, take profit,
-breakeven, trailing et fin de données demeurent des gates distinctes.
-Sans replay ni ouverture OOS.
+```text
+INSTRUMENT = MNQ
+TICK_SIZE = Fraction(1, 4)
+POINT_VALUE_USD = Fraction(2, 1)
+TICK_VALUE_USD = Fraction(1, 2)
+PLANNED_RISK_BUDGET_USD = Fraction(100, 1)
+RISK_BUDGET_KIND = PLANNED_STRUCTURAL_PRICE_RISK_BUDGET
+MIN_CONTRACTS = 1
+MAX_CONTRACTS = 2
+NO_RESIZING_AFTER_CONFIRMATION = TRUE
+```
+
+La décision est entièrement connue à Close[q], avec confirmation formellement
+qualifiée, direction, stop initial EVALUATED connu à cette clôture et position
+FLAT. q reste k+1 ou k+2. La seule référence de prix est Close[q]. La gate ne
+consulte aucun Open/High/Low/Close/Volume de q+1 ni aucune autre barre future.
+Le stop initial doit conserver la provenance exacte de cette confirmation,
+la fenêtre k...q, son tick/buffer figé et aucun état d'armement futur injecté.
+
+| Direction | Distance structurelle prévue | Relation strictement exigée |
+| --- | --- | --- |
+| LONG | Close[q] - initial_stop_price | Close[q] > initial_stop_price |
+| SHORT | initial_stop_price - Close[q] | Close[q] < initial_stop_price |
+
+Égalité, mauvaise relation ou distance non positive : REJECT avec
+INVALID_STRUCTURAL_RISK_DISTANCE. Close[q] et initial_stop_price sont convertis
+exactement en Fraction ; leurs quotients par Fraction(1,4) doivent être des
+entiers exacts. Sinon INVALID_MNQ_TICK_GRID, sans arrondi au tick voisin.
+Les conversions suivent les conventions V2 Decimal fini/int/Fraction ; aucun
+float binaire, chaîne, bool ni arrondi intermédiaire. Un contexte EMA rationnel
+peut avoir une référence hors grille : ce n'est pas le prix brut du sizing.
+
+```text
+risk_per_contract_usd = stop_distance_points * Fraction(2, 1)
+raw_quantity = floor(Fraction(100, 1) / risk_per_contract_usd)
+quantity = min(2, raw_quantity)
+quantity < 1 => REJECT, RISK_PER_CONTRACT_EXCEEDS_BUDGET
+otherwise => APPROVE
+planned_total_risk_usd = quantity * risk_per_contract_usd <= Fraction(100, 1)
+```
+
+Le floor est exact, sans round-to-nearest. Sur APPROVE, quantity est un entier
+de 1 à 2 et planned_total_risk_usd est strictement positif, au plus 100 USD.
+
+| Risque prévu par contrat | Quantité / décision |
+| --- | --- |
+| 0 < risque <= 50 USD | 2 contrats |
+| 50 < risque <= 100 USD | 1 contrat |
+| risque > 100 USD | REJECT ; quantité approuvée 0 |
+
+50 USD exactement donne 2 contrats ; 100 USD exactement donne 1. Une distance
+de 15 points donne 30 USD/contrat, raw_quantity=3, quantité plafonnée à 2 et
+risque total 60 USD. 35 points donne 70 USD/contrat et 1 contrat. 55 points
+donne 110 USD/contrat, raw_quantity=0 et REJECT. Close[q]=20010 et stop LONG
+19990 donnent exactement 20 points, 40 USD/contrat et 2 contrats pour 80 USD.
+SHORT est le miroir exact de LONG.
+
+Le budget de 100 USD couvre seulement la distance entre la référence de
+confirmation et le stop structurel. Il ne garantit jamais une perte réalisée
+maximale de 100 USD : gap, STOP_MARKET, futurs coûts et slippage peuvent la
+dépasser. Aucun coût n'est incorporé dans ce budget initial.
+
+Rejet fail-closed aussi pour instrument différent de MNQ, confirmation absente
+ou non qualifiée, stop absent/non EVALUATED, provenance de stop incohérente,
+Close[q] ou stop absent/non fini, observation q non clôturée/incohérente,
+position non FLAT ou état de position invalide. Aucun fallback fixe de 1/2
+contrats ni stop arbitraire. Les arguments de clock exigent une clôture UTC
+réelle ; une invocation non causale est refusée avant lecture marché.
+
+`register_risk_position_sizing_v2` conserve RiskPositionSizingBookV2 immuable
+pour une instance de stratégie et une série. Il vérifie le même scope, le
+pullback réellement admis/consommé par la politique PR #294 et la décision de
+position à Close[q]. Une chaîne supprimée ou une politique absente/stale ne
+peut autoriser une nouvelle entrée. Une position déjà ouverte est rejetée
+avant toute lecture du prix de sizing.
+
+Seul APPROVE appelle `register_entry_execution_v2` de PR #291 et crée PENDING
+pour Open[q+1], avec quantité déjà figée. Les règles d'exécution, clocks,
+validation d'Open et états terminaux PR #291 restent inchangés. REJECT ne crée
+aucun record d'exécution et rend l'opportunité REJECTED_BY_RISK_ENGINE,
+terminale pour tout le pullback consommé : aucun retry à q+1, q+2 ou plus tard.
+Les appels répétés retournent la décision enregistrée avant toute relecture de
+prix/stop, sans adaptation aux résultats ni reconsidération d'une source rejetée.
+
+`execute_risk_approved_entry_open_v2` délègue seulement l'Open autorisé à PR #291.
+RiskSizedEntryRecordV2 lie le fill réel à sa décision canonique et expose sa
+quantité figée. Aucun redimensionnement après confirmation, que l'Open élargisse,
+réduise ou franchisse la distance au stop. BREACHED_AT_ENTRY_OPEN conserve
+l'entrée FILLED puis la sortie au même Open selon PR #292/#293, sans annulation
+rétroactive ni déplacement du stop. Les diagnostics actual_entry_price et
+actual_entry_to_stop_distance_points sont dérivés après fill et ne modifient
+jamais la décision ou la quantité. La distance diagnostique est signée :
+zéro/négative si l'entrée ouvre au niveau/au-delà du stop.
+
+Le record de décision conserve instrument, direction, familles/index/timestamp
+du régime source, pullback index/timestamp/ema_reference, confirmation
+index/timestamp, known_at=q/timestamp[q], sizing_reference_price=Close[q],
+initial_stop_price, stop_distance_points, point_value_usd, risk_per_contract_usd,
+risk_budget_usd/kind, raw_quantity, approved_quantity, planned_total_risk_usd,
+decision/rejection_reason et état de position à la décision. Les snapshots
+complets de source consommée, confirmation et stop sont conservés. Un rejet
+conserve les champs déjà validés et aucune quantité autorisée/risque total.
+Le registre possède les seules exécutions autorisées et leurs quantités ; une
+provenance altérée ou une exécution sans APPROVE est refusée. Chaque fill garde
+exactement une quantité, sans duplicate ou résurrection après expiry.
+
+Aucun pourcentage d'equity, PnL courant/passé, série gagnante/perdante,
+martingale/anti-martingale, volatilité, Kelly, score ou famille de régime dans
+le calcul : même risque structurel, même quantité. Aucun changement de stop,
+coût, commission, spread, slippage, take profit, breakeven ou trailing ajouté.
+Aucun replay, accès OOS, broker, ordre réel ou autorisation paper trading.
+V2 reste PRE_FORMALIZATION, sans performance évaluée.
+
+## Prochaine ambiguïté — coûts et slippage V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED`
+
+Figer séparément le modèle exact de commissions/frais et de slippage pour les
+fills offline déjà définis, avec conventions, provenance et arithmétique
+explicites. Aucun coût V1 n'est hérité et aucun montant n'est inventé à cette
+gate. Le prix de base d'entrée/stop, la quantité et le budget structurel figés
+restent distincts. Take profit, breakeven, trailing et fin de données demeurent
+des gates séparées. Sans replay ni ouverture OOS.

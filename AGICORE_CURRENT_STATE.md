@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -57,10 +57,11 @@ EMA_PULLBACK_V2_ENTRY_EXECUTION = PASS ;
 EMA_PULLBACK_V2_INITIAL_STOP = PASS ;
 EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = PASS ;
 EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = PASS ;
-EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED ;
+EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = PASS ;
+EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-open-position-signal-policy.
-Base GitHub vérifiée et récupérée : 466a64f666f903f1a7966374205a1e3503f37aeb.
+Branche de vérification : feature/ema-pullback-v2-risk-engine-position-sizing.
+Base GitHub vérifiée et récupérée : 5db43eb9ffa096344c4f1fc79fcb5104956bf323.
 
 ## Acquis vérifiés
 
@@ -1035,7 +1036,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`9740ea0379d709c8aa2e19258c008b80eaaa20518b763fed657bed1841fab3cc`. L'hypothèse porte sur une
+`fbbd56fa6db280dc47ccc53a23eb9280d819a40714009b655bccda15d3fe9974`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1809,10 +1810,90 @@ Aucun data/, dataset réel, replay, OOS ou ajustement MNQ 03-26/06-26. Aucun
 broker, ordre réel, coût, sizing, quantité, take profit, breakeven ou trailing.
 V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED.
-Figer budget de risque, quantité, critères de refus et moment causal, sans
-hériter de paramètres V1. Coûts, take profit, breakeven, trailing et fin de
-données restent séparés. Aucun replay ni ouverture OOS.
+La gate Risk Engine/position sizing est acquittée par la décision ci-dessous.
+
+## V2 — Risk Engine MNQ et quantité figée à Close[q]
+
+Point de départ vérifié : PR #294 fusionnée après CI intégrale #270 verte,
+run `37193299058`, head `a5408b5b489cfa62ccc1d194bf404ed86dec3538`,
+merge `5db43eb9ffa096344c4f1fc79fcb5104956bf323`, arbre
+`dfae5cc43fba7670092aad248b4614c41c044b4d`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING
+figée comme baseline initiale pré-replay non optimisée. Aucun paramètre dérivé
+des résultats V1/V1A/V1B, MNQ 03-26 ou MNQ 06-26.
+
+MNQ seulement : tick Fraction(1,4), valeur point Fraction(2,1), valeur tick
+Fraction(1,2), budget structurel prévu Fraction(100,1) USD ; minimum 1,
+maximum 2 contrats. Le budget couvre le risque de prix structurel prévu,
+sans coûts et sans garantie de perte réalisée maximale à 100 USD.
+
+La décision est connue à Close[q], après confirmation formelle et stop initial
+EVALUATED connu à q, avant toute donnée q+1. sizing_reference_price=Close[q]
+exclusivement ; aucune lecture de Open/High/Low/Close/Volume de q+1. LONG :
+distance=Close[q]-stop, strictement positive. SHORT : distance=stop-Close[q],
+strictement positive. Toucher/mauvais côté : INVALID_STRUCTURAL_RISK_DISTANCE.
+Close[q] et stop doivent être exactement sur la grille de 0.25 ; sinon
+INVALID_MNQ_TICK_GRID sans correction silencieuse. Fraction exact du début à
+la fin, conversion Decimal exacte sans float binaire ni arrondi intermédiaire.
+
+risk_per_contract_usd=distance*2 ; raw_quantity=floor(100/risk_per_contract) ;
+approved_quantity=min(2,raw_quantity). Quantité inférieure à 1 : REJECT avec
+RISK_PER_CONTRACT_EXCEEDS_BUDGET. Sinon APPROVE avec planned_total_risk_usd
+=quantity*risk_per_contract <=100. Exactement 50 USD/contrat donne 2 contrats ;
+exactement 100 donne 1 ; au-delà de 100, rejet. Les exemples 15/35/55 points
+donnent respectivement 2 contrats/60 USD, 1 contrat/70 USD et REJECT.
+L'exemple Close[q]=20010/stop LONG=19990 donne 40 USD/contrat et 2 contrats/80 USD.
+
+Fail-closed pour instrument non MNQ, confirmation absente/non qualifiée, stop
+absent/non EVALUATED, provenance incohérente, prix absent/non fini, clock de
+q invalide, position non FLAT ou état invalide. Aucun contrat fixe de fallback,
+stop par défaut, filtre de gap supplémentaire ou adaptation aux performances.
+Même risque structurel donne même quantité, quelle que soit la famille du
+régime ou l'histoire des décisions. Aucun equity/PnL/streak/martingale,
+volatilité, Kelly ou score utilisé.
+
+RiskPositionSizingBookV2 conserve une décision immuable par pullback consommé
+et le scope stratégie/série de la politique PR #294. L'autorisation vérifie la
+véritable source admise/consommée et l'état connu à Close[q] ; une chaîne
+supprimée/stale ne peut créer d'entrée. APPROVE seul crée PENDING PR #291 pour
+le seul Open[q+1] avec quantité figée. REJECT ne crée aucun record d'exécution,
+rend REJECTED_BY_RISK_ENGINE terminal et ne peut être reconsidéré plus tard.
+Les doublons rendent le snapshot canonique avant toute relecture de prix/stop.
+
+execute_risk_approved_entry_open_v2 réutilise PR #291 sans changer ses règles,
+et RiskSizedEntryRecordV2 conserve un seul lien fill/quantité/décision. Aucun
+redimensionnement au futur Open, même si le gap élargit/réduit/franchit le risque.
+BREACHED_AT_ENTRY_OPEN conserve l'entrée FILLED puis le stop au même Open
+PR #292/#293, quantité inchangée. Prix réel/distance signée réelle sont seulement
+diagnostiques ; ils ne modifient pas le sizing. Un gap adverse après APPROVE
+peut dépasser le budget prévu. Idempotence du fill/expiry et refus de provenance
+altérée conservés ; aucune exécution sans APPROVE ni résurrection.
+
+La décision conserve instrument/direction, régime/pullback/EMA/confirmation,
+known_at=q/timestamp[q], référence Close[q], stop, distance, valeur point,
+risque unitaire/budget/quantité brute/approuvée/risque total, décision/raison
+et état de position. Les records complets source/confirmation/stop restent
+liés immuablement. Un rejet garde les champs déjà validés, quantité autorisée 0
+et aucun risque total approuvé.
+
+Nouveau module src/agicore/trading/ema_pullback_risk_position_sizing_v2.py,
+SHA-256 `36002943acdd56a4600209c701f80a04f855a5b27450bf55ce85c934686b549a`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_risk_position_sizing_v2.py,
+SHA-256 `3f6e0a3554aef28b5368c3d93909c0624dbc982cc6e9ac05ea632ed580d7d4e2`.
+164 nouveaux tests synthétiques PASS en 1.25s ; 1512 tests V2 ciblés PASS en 4.22s.
+7796 tests de régression locaux PASS en 118.26s, 4 avertissements préexistants ;
+hors test_mcp.py bloqué dans ce sandbox, inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée avant
+fusion ; preuves et SHA de merge dans la PR. Périmètre de quatre fichiers ;
+tous les modules/tests V2 antérieurs, V1/V1A/V1B et résultats figés inchangés.
+Aucun data/, dataset réel, replay, OOS, calibration MNQ, broker ou ordre réel.
+Aucun coût, take profit, breakeven, trailing ou sortie additionnelle.
+V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
+
+Prochaine gate unique : EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED.
+Figer séparément frais/commissions/slippage avec prix de base et quantité figés
+conservés ; aucun montant ou modèle de coût V1 hérité. Take profit, breakeven,
+trailing et fin de données restent distincts. Aucun replay ni ouverture OOS.
 
 ## Limites du produit
 
