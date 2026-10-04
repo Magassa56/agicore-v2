@@ -1318,13 +1318,140 @@ coût, commission, spread, slippage, take profit, breakeven ou trailing ajouté.
 Aucun replay, accès OOS, broker, ordre réel ou autorisation paper trading.
 V2 reste PRE_FORMALIZATION, sans performance évaluée.
 
-## Prochaine ambiguïté — coûts et slippage V2
+## Frais et slippage MNQ des fills offline — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED`
+Le 2026-10-04, `EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED` est acquittée
+par `EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL`. Baseline initiale pré-replay
+non optimisée, exclusivement comptable/exécution offline. Les signaux, le
+stop structurel, les fills déterministes de base et la quantité approuvée
+par le Risk Engine demeurent inchangés.
 
-Figer séparément le modèle exact de commissions/frais et de slippage pour les
-fills offline déjà définis, avec conventions, provenance et arithmétique
-explicites. Aucun coût V1 n'est hérité et aucun montant n'est inventé à cette
-gate. Le prix de base d'entrée/stop, la quantité et le budget structurel figés
-restent distincts. Take profit, breakeven, trailing et fin de données demeurent
-des gates séparées. Sans replay ni ouverture OOS.
+La convention de coûts V1 est volontairement reprise pour comparer les futurs
+résultats à convention identique : 0.51 USD/contrat/fill et un tick adverse à
+chaque fill, sans débit séparé de spread. Ce choix explicite ne constitue
+aucune calibration de performance V2 ; aucun résultat MNQ ne sert à l'ajuster.
+Le runtime V1 et ses résultats figés ne sont pas modifiés ni invoqués pour
+comptabiliser V2. Aucun tarif broker réel n'est recherché.
+
+```text
+TICK_SIZE = Fraction(1, 4)
+POINT_VALUE_USD = Fraction(2, 1)
+TICK_VALUE_USD = Fraction(1, 2)
+FEE_PER_CONTRACT_PER_FILL_USD = Fraction(51, 100)
+ADVERSE_SLIPPAGE_TICKS_PER_FILL = 1
+ADVERSE_SLIPPAGE_POINTS_PER_FILL = Fraction(1, 4)
+SPREAD_MODEL = ABSORBED_IN_SLIPPAGE
+EXTRA_SPREAD_CHARGE = Fraction(0)
+SLIPPAGE_ACCOUNTED_EXACTLY_ONCE = TRUE
+NO_POST_CONFIRMATION_RESIZING = TRUE
+ROUND_TO_CENTS = ROUND_HALF_UP
+```
+
+Ne jamais écraser execution_price_before_costs ou base_stop_fill_price.
+FillCostRecordV2 conserve séparément base_fill_price et
+effective_fill_price_after_slippage, avec action, quantity, slippage_ticks,
+fee_usd et slippage_cost_usd diagnostique. Le tick est appliqué exactement
+une fois au prix de base de chaque fill effectivement exécuté.
+
+| Action offline | Cas | Prix effectif |
+| --- | --- | --- |
+| BUY | Entrée LONG | base + Fraction(1,4) |
+| SELL_SHORT | Entrée SHORT | base - Fraction(1,4) |
+| SELL | Stop LONG | base - Fraction(1,4) |
+| BUY_TO_COVER | Stop SHORT | base + Fraction(1,4) |
+
+Pour chaque fill : fee_usd=quantity*Fraction(51,100) et coût économique du
+slippage=quantity*Fraction(1,2). L'aller-retour explicite est 1.02 USD pour
+1 contrat et 2.04 USD pour 2 contrats ; le slippage économique de deux fills
+est respectivement 1.00 et 2.00 USD, déjà incorporé aux prix effectifs.
+Aucun coût de spread ou seconde soustraction du slippage dans le PnL.
+
+Entrée LONG de base 20000 donne 20000.25 effectif ; entrée SHORT donne
+19999.75. Stop LONG de base 19990 donne 19989.75 effectif ; stop SHORT
+de base 20010 donne 20010.25. Gap LONG : stop structurel 20000, prochain
+Open 19995 => base_stop_fill_price=19995 selon PR #293, puis prix effectif
+19994.75. Ne jamais remplacer cette base par l'ancien niveau 20000.
+
+BREACHED_AT_ENTRY_OPEN conserve les deux véritables fills au même Open de
+base, entrée puis stop immédiat. Pour 1 MNQ LONG à Open=20000, prix effectifs
+20000.25/19999.75 => perte de prix de 1.00 USD et frais de 1.02 USD, donc
+net_realized_pnl_usd=-Fraction(202,100). Pour 2 MNQ : -Fraction(404,100).
+SHORT est le miroir exact. Aucun trade annulé ou PnL nul artificiel.
+
+```text
+LONG gross_price_pnl_usd =
+    (effective_exit - effective_entry) * Fraction(2,1) * approved_quantity
+SHORT gross_price_pnl_usd =
+    (effective_entry - effective_exit) * Fraction(2,1) * approved_quantity
+total_fees_usd = entry_fee + exit_fee
+net_realized_pnl_usd = gross_price_pnl_usd - total_fees_usd
+```
+
+diagnostic_total_slippage_cost_usd est conservé pour l'audit uniquement.
+Il ne doit pas être soustrait du gross_price_pnl_usd calculé avec les prix
+effectifs. Les records calculent le PnL exact à partir de ces prix et des
+frais seuls, sans cumul dépendant du nombre d'appels.
+
+FeesAndSlippageBookV2 conserve un registre immuable pour une instance de
+stratégie et une série, de même scope que RiskPositionSizingBookV2.
+`account_entry_fill_v2` exige une source canonique du registre de risque et
+son véritable RiskSizedEntryRecordV2. Une confirmation APPROVE encore PENDING,
+un REJECT, une expiry ou un input d'exécution invalide sans fill ne paie rien
+et ne crée aucun record comptable. Seul un fill réel ajoute une entrée comptable.
+La quantité provient exclusivement de approved_quantity, sans redimensionnement,
+réduction/augmentation ou rejet rétroactif par les coûts.
+
+Enregistrement immédiat à l'entrée : prix de base/effectif, frais, tick de
+slippage et coût diagnostique. Tant qu'aucune sortie formelle n'est remplie,
+exit_type, stop_fill, exit, gross_price_pnl_usd et net_realized_pnl_usd sont
+None. Les frais d'entrée existent déjà, mais aucun PnL de trade réalisé ou
+prix de sortie n'est synthétisé, notamment en fin de données.
+
+`account_structural_stop_fill_v2` réutilise exclusivement un FILLED_STOP
+canonique de PR #293 ; c'est la seule sortie actuellement formalisée.
+ARMED, monitoring invalide/incomplet ou absence de fill ne produit aucun coût
+d'exit ni PnL réalisé. Les liens entrée/stop et leurs métadonnées doivent
+correspondre aux sources originales ; aucune lecture de barres/prix futurs,
+bid/ask ou mark price. Ce modèle ne déclenche aucun stop et ne change pas
+sa règle de trigger/fill, son niveau ou son moment causal.
+
+TradeCostRecordV2 conserve le RiskSizedEntryRecordV2 complet (régime, pullback,
+EMA, confirmation, décision de risque et entrée), les coûts d'entrée et,
+lorsqu'il existe, le StructuralStopFillRecordV2 complet et ses coûts d'exit.
+Il expose quantity, exit_type=STRUCTURAL_STOP, total_fees_usd,
+diagnostic_total_slippage_cost_usd, gross_price_pnl_usd et net_realized_pnl_usd.
+Les snapshots et prix de base restent immuables. Recompter la même entrée ou
+sortie rend le même registre, sans deuxième débit ; une provenance modifiée
+sous la même identité est refusée. Un ancien snapshot de stop non rempli
+ne peut effacer un exit déjà comptabilisé.
+
+Le budget prévu de PR #295 reste 100 USD de risque de prix structurel
+pré-trade, distinct des coûts. Les frais/slippage ne recalculent jamais la
+quantité ou le budget. Risque prévu versus perte nette réalisée restent
+auditables séparément ; à exactement 100 USD de risque prévu sur 2 contrats,
+un stop sans gap à la distance prévue donne -104.04 USD nets. Gaps, slippage
+et frais peuvent dépasser davantage 100 USD, sans masquage de cette perte.
+
+Prix, valeurs point/tick, slippage, frais et PnL restent Fraction exacts,
+sans float ni arrondi intermédiaire. `report_usd_cents_v2` convertit seulement
+la sortie monétaire en Decimal à deux décimales avec HALF_UP ; la valeur
+Fraction interne demeure disponible et inchangée. L'arrondi se fait par
+arithmétique entière exacte, indépendante de la précision du contexte Decimal,
+y compris aux demi-centimes positifs/négatifs et pour les rationnels périodiques.
+La comptabilité n'ajoute aucune réparation de grille ou condition de prix
+post-fill aux règles déjà figées de PR #291/#293.
+
+Aucun take profit, breakeven, trailing, sortie EMA/session, daily profit lock,
+max daily trades, equity, frais broker live, bid/ask replay ou slippage dynamique.
+Aucun replay, accès OOS, ajustement de performance MNQ, broker ou ordre réel.
+V2 reste PRE_FORMALIZATION ; la rentabilité n'est pas évaluée.
+
+## Prochaine ambiguïté — politique de sortie V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED`
+
+Décider séparément l'architecture de sortie V2 en conservant le stop structurel,
+son fill et les conventions de coûts déjà figés. Aucun take profit, breakeven,
+trailing, sortie EMA/session ou arbitrage intrabar n'est ajouté automatiquement.
+La politique de fin de données doit aussi être décidée explicitement avant une
+stratégie V2 complète. Sans replay ni ouverture OOS.
