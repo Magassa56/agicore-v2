@@ -884,13 +884,113 @@ de position et toutes les sorties restent requis avant une stratégie V2
 complète, et avant toute considération pour le paper trading. Aucune règle V1
 ni architecture de risque n'est héritée implicitement.
 
-## Prochaine ambiguïté — stop initial V2
+## Stop structurel initial V2 — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED`
+Le 2026-10-04, `EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED` est acquittée.
+`EMA_PULLBACK_V2_INITIAL_STOP` est une baseline initiale pré-replay non optimisée,
+indépendante de V1/V1A/V1B. Aucun ajustement sur MNQ 03-26 ou MNQ 06-26.
 
-Quel niveau de stop initial protège LONG/SHORT, à partir de quels prix déjà
-connus, et comment traiter un niveau invalide ? Cette première décision de
-risque doit précéder le sizing et les autres décisions de position/sortie.
-Aucun niveau, distance ou mécanisme de sortie n'est choisi ici. Risk Engine,
-sizing, coûts et autres sorties seront des gates distinctes. V2 reste
-PRE_FORMALIZATION, sans replay ni ouverture OOS.
+```text
+PULLBACK_BAR = k
+CONFIRMATION_BAR = q, q in {k+1, k+2}
+ENTRY_BAR = q+1
+STRUCTURAL_STOP_WINDOW = [k ... q] inclusive
+TICK_SIZE = Fraction(1, 4)
+STOP_BUFFER_TICKS = 1
+STOP_BUFFER = 0.25 point
+known_at = Close[q]
+INITIAL_STOP_RECALCULATION = FORBIDDEN
+```
+
+Toute la structure clôturée k..q participe : deux bougies pour q=k+1,
+trois pour q=k+2. Une extension sur k+1 ou sur la confirmation q compte
+autant que l'extrême du pullback k.
+
+| Direction | Extrême structurel | Stop initial exact |
+| --- | --- | --- |
+| LONG | min(Low[i] pour i=k..q) | structural_low - Fraction(1, 4) |
+| SHORT | max(High[i] pour i=k..q) | structural_high + Fraction(1, 4) |
+
+Exemple LONG : Low[k]=20000, Low[k+1]=19998, Low[k+2]=19999,
+confirmation q=k+2 : structural_low=19998, initial_stop=19997.75.
+Le niveau est entièrement connu à Close[q], avant l'entrée, puis immuable.
+Aucun Open, High, Low, Close ou Volume de q+1 n'entre dans son calcul.
+Aucune barre avant k ou après q n'est lue pour cette gate.
+
+L'interface structurelle ne lit que bar_index, timestamp_utc, is_closed,
+High et Low des indices requis. Chaque barre doit exister, être clôturée
+et porter des métadonnées cohérentes avec k..q et la confirmation qualifiée.
+Les métadonnées non causales/incohérentes sont refusées explicitement par
+InitialStopV2Error ; aucune horloge future ni longueur totale de série lue.
+
+| Données de la fenêtre | Statut | initial_stop |
+| --- | --- | --- |
+| Un indice requis absent, dont k+1 intermédiaire | INCOMPLETE_STRUCTURAL_STOP_WINDOW | NONE |
+| High/Low absent, non fini, inexact ou High < Low ; barre non clôturée | INVALID_STRUCTURAL_STOP_INPUT | NONE |
+| Tous les indices contigus k..q valides | EVALUATED | Extrême et buffer exacts |
+
+High et Low doivent tous deux être présents et finis sur chaque barre,
+y compris le côté qui ne détermine pas l'extrême directionnel. High=Low
+est admis ici : aucun seuil de range ajouté. Decimal fini est converti
+exactement en Fraction ; entiers/Fraction admis, float binaire/chaîne/bool
+refusés selon les conventions V2. Aucun arrondi préalable ni ajustement
+sur la grille de ticks. Aucune validation du corps Open/Close supplémentaire.
+
+`evaluate_initial_stop_v2` produit le snapshot de Close[q].
+`register_initial_stop_v2` le conserve dans InitialStopBookV2, registre immuable
+d'une seule série offline à transmettre aux appels suivants. Réenregistrer la
+même confirmation ou une copie équivalente retourne le même registre avant
+toute lecture de la structure. Un snapshot invalide/incomplet ne se répare pas
+rétroactivement. Une provenance modifiée sous la même identité causale est
+refusée. Des confirmations distinctes conservent des stops indépendants.
+
+Après le fill déjà défini par la PR #291, vérifier séparément la relation
+avec entry_price=execution_price_before_costs=Open[q+1] :
+
+| Direction | ARMED | BREACHED_AT_ENTRY_OPEN |
+| --- | --- | --- |
+| LONG | initial_stop < entry_price | entry_price <= initial_stop |
+| SHORT | initial_stop > entry_price | entry_price >= initial_stop |
+
+L'égalité donne BREACHED_AT_ENTRY_OPEN. `bind_initial_stop_to_entry_v2`
+utilise uniquement le record FILLED déjà conservé dans EntryExecutionBookV2,
+sans interface de bougie ni accès marché. Aucun stop armé avant un fill réel
+du modèle offline ; une exécution pending/expirée/invalide laisse le snapshot
+inchangé. Un stop indisponible reste NONE, sans remplacement ni nouvelle
+politique d'annulation d'entrée.
+
+Un Open valide au-delà du niveau ne déplace pas le stop, ne le recalcule pas,
+n'élargit pas le risque et n'annule pas rétroactivement le fill. FILLED reste
+FILLED. La fermeture exacte d'une position BREACHED_AT_ENTRY_OPEN sera
+définie par la prochaine gate de trigger/fill. Lier plusieurs fois le même
+fill conserve le même registre ; un autre fill ne peut remplacer le lien.
+Un ancien snapshot PENDING ne désarme pas un stop déjà lié à son fill.
+
+Le record de stop conserve source_regime_event_types/bar_index/timestamp,
+source_regime_event_direction, pullback_bar_index=k/timestamp/ema_reference,
+confirmation_bar_index=q/timestamp, structural_window_first_bar=k,
+structural_window_last_bar=q, structural_extreme, stop_buffer_ticks=1,
+tick_size exact, initial_stop_price, stop_known_at_bar_index=q et
+stop_known_at_timestamp=timestamp[q], ainsi que le EntryConfirmationRecordV2
+complet. Après fill, le lien immuable ajoute entry_bar_index=q+1,
+entry_bar_timestamp, entry_price, stop_state et le record d'exécution complet.
+La chaîne événement -> pullback consommé -> confirmation -> stop/fill reste
+conservée sans mutation des snapshots précédents.
+
+Aucune distance minimale/maximale en ticks, aucun stop ATR, pourcentage ou
+montant fixe. Un stop très large reste valide structurellement. Refuser un
+trade pour son risque appartient aux futures gates Risk Engine et sizing.
+Aucun trailing, breakeven, mouvement EMA20, nouveau swing, mise à jour ATR,
+élargissement ou resserrement. Aucun trigger, prix de sortie, take profit,
+quantité, coût ou ordre broker ajouté dans cette gate.
+
+## Prochaine ambiguïté — déclenchement et fill du stop structurel V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED`
+
+Définir séparément quand le niveau initial se déclenche et à quel prix le
+stop est rempli, notamment en cas de gap et de BREACHED_AT_ENTRY_OPEN.
+L'entrée figée et le niveau connu à Close[q] ne doivent pas être modifiés
+rétroactivement. Aucun take profit, breakeven ou trailing à cette étape.
+Risk Engine, sizing et autres règles de position/sortie restent distincts.
+V2 reste PRE_FORMALIZATION, sans replay ni ouverture OOS.

@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -54,10 +54,11 @@ REGIME_CONTEXT_V2_EVENT_LIFETIME = PASS ;
 EMA20_PULLBACK_V2 = PASS ;
 EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM = PASS ;
 EMA_PULLBACK_V2_ENTRY_EXECUTION = PASS ;
-EMA_PULLBACK_V2_INITIAL_STOP = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED ;
+EMA_PULLBACK_V2_INITIAL_STOP = PASS ;
+EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-entry-execution.
-Base GitHub vérifiée et récupérée : 3ee742fa10ecc58dfb03c6dcfb99ba153ecb925a.
+Branche de vérification : feature/ema-pullback-v2-initial-stop.
+Base GitHub vérifiée et récupérée : 077474d1b6a90415cafd838e31b5c40e5a849d8a.
 
 ## Acquis vérifiés
 
@@ -1032,7 +1033,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`2386c83f01dda8e34ca0ec5053ddc93d77b2f0e68d4744f1b715e199ed42044c`. L'hypothèse porte sur une
+`3eb04cf9c83e849301cab06f019a4741ef97db3834c5b3bb8996d438703f6527`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1603,11 +1604,75 @@ quantité, stop, take profit, breakeven ou trailing. Ce modèle n'autorise ni
 stratégie V2 complète ni paper trading ; Risk Engine, sizing et toutes les
 sorties devront être formalisés. Rentabilité V2 toujours non évaluée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED.
-Figer le risque initial LONG/SHORT : niveau, sources déjà connues et traitement
-d'un stop invalide, avant le sizing et les autres règles de position/sortie.
-Aucun stop ou autre mécanisme de sortie choisi ici ; coûts, Risk Engine et
-autres décisions restent séparés. V2 reste PRE_FORMALIZATION, sans replay ni OOS.
+La gate stop initial est acquittée par la décision ci-dessous.
+
+## V2 — stop initial structurel exact connu avant l'entrée
+
+Point de départ vérifié : PR #291 fusionnée après CI #264 verte, merge
+`077474d1b6a90415cafd838e31b5c40e5a849d8a`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_INITIAL_STOP
+figée comme baseline initiale pré-replay non optimisée, indépendante de V1/V1A/V1B.
+Pullback k, confirmation q dans {k+1,k+2}, entrée q+1. Fenêtre structurelle
+k..q inclusive : deux ou trois bougies clôturées, aucun prix futur.
+TICK_SIZE=Fraction(1,4), STOP_BUFFER_TICKS=1, STOP_BUFFER=0.25 point.
+LONG=min Low[k..q]-1 tick ; SHORT=max High[k..q]+1 tick.
+known_at=Close[q] ; INITIAL_STOP_RECALCULATION=FORBIDDEN.
+
+L'extrême du pullback, de la barre intermédiaire ou de la confirmation compte.
+Exemple LONG [20000,19998,19999] : extrême 19998, stop exact 19997.75.
+Aucune lecture avant k ou après q, dont aucun Open/High/Low/Close/Volume q+1.
+High/Low requis présents, finis et High>=Low ; sinon
+INVALID_STRUCTURAL_STOP_INPUT et initial_stop=NONE. Indice requis absent,
+dont barre intermédiaire : INCOMPLETE_STRUCTURAL_STOP_WINDOW et NONE.
+Métadonnées cohérentes, causales, UTC et observations clôturées exigées.
+Decimal fini converti exactement en Fraction, sans arrondi ni correction
+de grille de ticks. High=Low admis ; aucun filtre range/corps/prix positif
+sur le stop, ni distance minimale/maximale, ATR, pourcentage ou montant fixe.
+Un stop large reste valide ; son acceptation relève du futur Risk Engine/sizing.
+
+InitialStopBookV2 conserve le snapshot immuable de Close[q] pour une seule
+série offline. register_initial_stop_v2 retourne le même registre pour une
+confirmation équivalente, avant toute relecture du marché. Aucun recalcul,
+élargissement, resserrement ou réparation rétroactive d'un snapshot invalide.
+Provenance changée sous la même identité refusée ; confirmations distinctes
+indépendantes. evaluate_initial_stop_v2 calcule le snapshot initial exact.
+
+Après fill PR #291, bind_initial_stop_to_entry_v2 utilise uniquement les
+records immuables de l'exécution : aucun input de bougie supplémentaire.
+LONG stop<entry ou SHORT stop>entry : ARMED. LONG entry<=stop ou SHORT
+entry>=stop : BREACHED_AT_ENTRY_OPEN, égalité incluse. Le stop ne bouge pas
+et FILLED reste FILLED : aucune annulation rétroactive ou sortie choisie.
+Exécution pending/expirée/invalide : aucun armement. Stop indisponible : NONE,
+sans substitution ni nouvelle politique d'entrée. Lier le même fill est
+idempotent ; un autre fill ne remplace pas le lien conservé.
+
+Provenance du stop : source_event_types/index/timestamp/direction,
+pullback index=k/timestamp/ema_reference, confirmation index=q/timestamp,
+structural_window_first_bar=k/last_bar=q/extreme, buffer_ticks=1/tick_size,
+initial_stop_price, stop_known_at_bar_index=q/timestamp[q] et confirmation
+complète. Après fill : entry_bar_index=q+1/timestamp, entry_price, stop_state
+et exécution complète. Records, niveaux et provenance immuables.
+
+Nouveau module src/agicore/trading/ema_pullback_initial_stop_v2.py,
+SHA-256 `533643ea6efa9ba13972b10f86555e7dd5dcf7e10bfa5ea6b76af740d08846b4`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_initial_stop_v2.py,
+SHA-256 `45366d4613ac1acf1befcfc3a966078bf8ff25a4696da608f143ae6b1463231a`.
+134 nouveaux tests synthétiques PASS ; 1094 tests V2 ciblés PASS.
+7378 tests de régression locaux PASS, 4 avertissements préexistants ;
+hors test_mcp.py bloqué dans ce sandbox, inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée
+avant fusion ; preuves et SHA de merge dans la PR.
+Tous les modules/tests V2 antérieurs, dont entrée PR #291, V1/V1A/V1B et
+résultats figés inchangés. Aucun data/, dataset réel, replay, OOS ni calibration
+MNQ 03-26/06-26. Aucun broker, trigger/fill de sortie, take profit, breakeven,
+trailing, sizing, quantité, coût ou modification EMA/swing/ATR.
+V2 reste PRE_FORMALIZATION ; aucune rentabilité évaluée ni stratégie complète.
+
+Prochaine gate unique : EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED.
+Définir le déclenchement et le prix de fill du stop, particulièrement les gaps
+et BREACHED_AT_ENTRY_OPEN, sans modifier l'entrée ni le niveau initial figés.
+Ne pas encore définir take profit, breakeven ou trailing. Risk Engine, sizing
+et autres règles de position/sortie restent distincts. Aucun replay ni OOS.
 
 ## Limites du produit
 
