@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -59,10 +59,11 @@ EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = PASS ;
 EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = PASS ;
 EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
-EMA_PULLBACK_V2_EXIT_POLICY = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED ;
+EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
+EMA_PULLBACK_V2_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-fees-and-slippage-model.
-Base GitHub vérifiée et récupérée : ee02674b75273a82748c2e77f873fed6b5bd3313.
+Branche de vérification : feature/ema-pullback-v2-exit-policy.
+Base GitHub vérifiée et récupérée : 8576dc560bd6e99f4f7ab0aab2fec9ae1a58d642.
 
 ## Acquis vérifiés
 
@@ -1037,7 +1038,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`d8c4e26bca32d13daf0bc8fc9e9341c6b1e930d5eb7e9fb858691b73c9eb2a85`. L'hypothèse porte sur une
+`c878a285db4a58665e5c19f236fc4bcd0b5e4f7eb3934d06791bfabb5781822d`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1982,10 +1983,98 @@ take profit, breakeven, trailing, EMA/session exit, daily profit lock,
 max daily trades, equity, tarif broker live, bid/ask replay ou slippage dynamique.
 V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED.
-Décider séparément la politique de sortie et de fin de données avant une
-stratégie V2 complète ; aucun mécanisme ajouté automatiquement. Stop initial,
-fills, quantité et coûts déjà figés conservés. Aucun replay ni ouverture OOS.
+La gate EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED est acquittée ci-dessous.
+
+## V2 — politique de sortie stop immuable et EMA20 au prochain Open
+
+Point de départ vérifié : PR #296 fusionnée après CI intégrale #274 verte,
+run `37224696729`, head `8728c414e4190c7c68b42f988bb7e3cad3f41343`,
+merge `8576dc560bd6e99f4f7ab0aab2fec9ae1a58d642`, arbre
+`528392afe0cfd193ed1382fa58d502f8f22f2b66`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_EXIT_POLICY figée
+comme baseline initiale pré-replay, non optimisée, sans aucun résultat V2.
+
+Exactement deux sorties : IMMUTABLE_STRUCTURAL_STOP (PR #292/#293 inchangées)
+et EMA20_POSITION_EXIT. TAKE_PROFIT, BREAKEVEN, TRAILING_STOP, TIME_EXIT et
+SESSION_EXIT = NONE. Le stop initial n'est jamais déplacé/recalculé.
+
+L'EMA20 de sortie est evaluate_ema20_v2, même seed exact à 19 par moyenne des
+20 closes, même récurrence Fraction(2,21), aucun reset de session ni bougie
+synthétique. La décision à Close[r] utilise Close[r] et EMA20[r], tous deux
+connus. LONG strictement sous EMA => signal ; SHORT strictement au-dessus
+=> signal ; égalité => HOLD. Une EMA indisponible/invalide ne signale pas.
+La clôture d'entrée e peut déjà signaler, sans durée minimale de détention,
+si son stop n'a pas fermé la position auparavant.
+
+Signal => PENDING_EMA20_EXIT, jamais de fill sur r. Seul Open[r+1] est
+exécutable MARKET : SELL LONG, BUY_TO_COVER SHORT. Prix de base exact=Open.
+À l'Open, seuls index/timestamp/Open sont lus, sans H/L/C/Volume. Barre absente
+=> EXPIRED_NO_EXIT_EXECUTION ; écart >1 minute => EXPIRED_EXIT_GAP ; exactement
+une minute admissible. Aucun report du même ordre sur r+2, aucun prix remplacé.
+Horloge non causale/Open invalide échouent sans fill EMA inventé.
+
+process_exit_policy_open_v2 vérifie d'abord le gap du stop structurel. S'il
+est déclenché, fill stop au même Open, motif STRUCTURAL_STOP et annulation
+EMA pending. Sinon un EMA pending admissible remplit au même Open avant
+toute lecture du range. Si la position reste ouverte seulement, la phase
+process_exit_policy_close_v2 observe l'extrême adverse et résout le stop
+intrabar avant l'évaluation de clôture EMA. Un stop intrabar empêche donc
+tout signal EMA sur sa barre, sans lecture de l'historique EMA pour cette sortie.
+
+Les fills stop proviennent directement de l'observateur PR #293 inchangé.
+Grand gap temporel/session autorisé pour un stop actif entre observations
+indexées consécutives ; saut d'indice reste fail-closed selon PR #293.
+L'expiration de l'ordre EMA ne désarme pas le stop et ne devient jamais un
+fill différé. Une nouvelle clôture peut produire son propre nouveau signal
+si la position reste ouverte ; l'ancien record terminal reste expiré.
+
+PositionRecordV2 accepte le fill terminal EMA avec sa provenance complète,
+passe à FLAT et retire le stop actif ; un nouveau régime formé au Close de
+cette barre peut alors être admis selon PR #294. Aucun ancien contexte
+supprimé n'est restauré. BREACHED_AT_ENTRY_OPEN conserve entrée réelle puis
+stop au même Open, deux fills et coûts, état final FLAT.
+
+account_ema20_exit_fill_v2 étend PR #296 à la sortie formelle EMA sans modifier
+ses constantes/formules. Quantité approuvée figée, frais=0.51 USD/contrat/fill,
+slippage adverse=1 tick : SELL base-0.25, BUY_TO_COVER base+0.25. Base et
+effectif restent distincts. PnL effectif moins frais, slippage diagnostique
+jamais déduit une deuxième fois, aucun extra spread. Une position ne peut
+être réalisée deux fois par un stop puis une EMA ou inversement.
+
+Fin de données sans fill réel : OPEN_UNREALIZED, realized PnL=None, stop
+non synthétisé, signal pending expiré, aucune liquidation forcée à Close.
+Un stop déjà réellement rempli reste terminal. Valorisation unrealized
+éventuelle seulement diagnostique. Les records immuables retiennent régime,
+pullback, EMA de référence, confirmation, risque, entrée, quantité, stop,
+type/index/timestamp du signal, close_at_signal, ema20_at_signal,
+index/timestamp d'exécution, motif, prix de base/effectif et coûts.
+Idempotence des phases/comptes ; provenance altérée/doublons refusés.
+
+Nouveau runtime src/agicore/trading/ema_pullback_exit_policy_v2.py,
+SHA-256 `ddac039586bf4fe0ec5fbe9b55607aecdc42836066d11f0fe5fb257c45a2cac7`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_exit_policy_v2.py,
+SHA-256 `7e6f5933a2d08a6fc569597f79fd805e05055482d422bbc498dc6b89699946c4`.
+Extension de types/lifetime position, SHA-256
+`23be07a150feb11a693257d54dfa24f14e7d28b945906813a225b98f0aa39095` ;
+extension comptable EMA, SHA-256
+`f68ae2feb6eb37e1f1ad5707aae1e8317abc2888deb24478a831711634aee12d`.
+91 nouveaux tests synthétiques PASS en 0.70s ; 1711 tests V2 PASS en 4.94s.
+7995 tests de régression locaux PASS en 132.91s, 4 avertissements préexistants ;
+hors test_mcp.py (blocage sandbox préexistant), inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée sur
+le head exact avant fusion ; preuves et SHA de merge conservés dans la PR.
+Six fichiers cohérents : runtime/tests, extensions des records position et
+comptabilité pour une vraie sortie EMA terminale, charte et checkpoint.
+EMA20, stop initial, trigger/fill stop et sizing byte-identiques au parent ;
+aucun test antérieur, règle V1/V1A/V1B ou résultat figé modifié.
+Aucun data/, dataset réel, replay, OOS, calibration MNQ, broker ou ordre réel.
+V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
+
+Prochaine gate unique : EMA_PULLBACK_V2_FORMALIZATION_REQUIRED.
+Formalisation complète V2 / end-to-end deterministic assembly : composer
+les composants déjà figés, leurs états et phases, provenance et tests
+synthétiques complets sans modifier aucune baseline. Aucun replay, ouverture
+OOS, seuil nouveau ou paramètre optimisé n'est autorisé par cette gate.
 
 ## Limites du produit
 

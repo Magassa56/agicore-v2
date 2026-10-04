@@ -25,6 +25,7 @@ from .ema_pullback_entry_execution_v2 import (
     _confirmation_key,
     _valid_utc,
 )
+from .ema_pullback_exit_policy_v2 import EMA20ExitFillRecordV2
 from .ema_pullback_initial_stop_v2 import InitialStopAtEntryV2
 from .ema_pullback_structural_stop_trigger_fill_v2 import (
     LongStopObservationInputV2,
@@ -104,11 +105,11 @@ class PositionSignalDecisionV2:
 
 @dataclass(frozen=True)
 class PositionRecordV2:
-    """Actual entry followed, at most once, by the currently formalized stop exit."""
+    """Actual entry followed, at most once, by a formal stop or EMA20 exit fill."""
 
     entry: EntryExecutionRecordV2
     initial_stop_at_entry: InitialStopAtEntryV2
-    exit: StructuralStopFillRecordV2 | None = None
+    exit: StructuralStopFillRecordV2 | EMA20ExitFillRecordV2 | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -118,11 +119,25 @@ class PositionRecordV2:
         ):
             raise OpenPositionSignalPolicyV2Error("position requires the actual entry/stop link")
         if self.exit is not None and (
-            not isinstance(self.exit, StructuralStopFillRecordV2)
+            not isinstance(self.exit, (StructuralStopFillRecordV2, EMA20ExitFillRecordV2))
             or self.exit.initial_stop_at_entry != self.initial_stop_at_entry
-            or self.exit.trigger_bar_index < self.entry.execution_bar_index
+            or self.exit_bar_index < self.entry.execution_bar_index
         ):
             raise OpenPositionSignalPolicyV2Error("exit must retain the position's provenance")
+
+    @property
+    def exit_bar_index(self) -> int | None:
+        """The actual terminal fill bar, independent of the formal exit type."""
+        if isinstance(self.exit, EMA20ExitFillRecordV2):
+            return self.exit.exit_execution_bar_index
+        return None if self.exit is None else self.exit.trigger_bar_index
+
+    @property
+    def exit_timestamp(self) -> datetime | None:
+        """The actual exit bar clock; no exact intrabar stop time is invented."""
+        if isinstance(self.exit, EMA20ExitFillRecordV2):
+            return self.exit.exit_execution_timestamp
+        return None if self.exit is None else self.exit.trigger_bar_timestamp
 
     @property
     def state(self) -> PositionStateV2:
@@ -168,8 +183,8 @@ class OpenPositionSignalPolicyBookV2:
         for earlier, later in zip(self.positions, self.positions[1:], strict=False):
             if (
                 earlier.exit is None
-                or later.entry.execution_bar_index <= earlier.exit.trigger_bar_index
-                or later.entry.execution_bar_timestamp <= earlier.exit.trigger_bar_timestamp
+                or later.entry.execution_bar_index <= earlier.exit_bar_index
+                or later.entry.execution_bar_timestamp <= earlier.exit_timestamp
             ):
                 raise OpenPositionSignalPolicyV2Error("positions cannot overlap or go backward")
         if not isinstance(self.signal_decisions, tuple) or not all(
@@ -248,7 +263,7 @@ def _require_admitted_pullback(
             and (
                 not previous.positions
                 or confirmation.source_regime_event_bar_index
-                >= previous.positions[-1].exit.trigger_bar_index
+                >= previous.positions[-1].exit_bar_index
             )
         ):
             return

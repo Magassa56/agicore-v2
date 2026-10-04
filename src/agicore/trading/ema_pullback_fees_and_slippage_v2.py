@@ -1,4 +1,4 @@
-"""Exact offline MNQ accounting for actual V2 entry and structural-stop fills.
+"""Exact offline MNQ accounting for actual V2 entry, stop and EMA20 exit fills.
 
 Base fills, risk decisions and quantities remain immutable. One adverse tick
 is embedded in each distinct effective price; only explicit fees are deducted
@@ -11,9 +11,11 @@ from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from fractions import Fraction
+from typing import TYPE_CHECKING
 
 from .ema20_pullback_v2 import _exact_price
 from .ema_pullback_entry_execution_v2 import _confirmation_key
+from .ema_pullback_exit_policy_v2 import EMA20ExitFillRecordV2
 from .ema_pullback_risk_position_sizing_v2 import (
     MAX_CONTRACTS,
     MIN_CONTRACTS,
@@ -30,6 +32,9 @@ from .ema_pullback_structural_stop_trigger_fill_v2 import (
     StructuralStopFillRecordV2,
 )
 from .regime_context_v2 import RegimeDirection
+
+if TYPE_CHECKING:
+    from .ema_pullback_open_position_signal_policy_v2 import OpenPositionSignalPolicyBookV2
 
 FEE_PER_CONTRACT_PER_FILL_USD = Fraction(51, 100)
 ADVERSE_SLIPPAGE_TICKS_PER_FILL = 1
@@ -120,12 +125,13 @@ def calculate_fill_cost_v2(
 
 @dataclass(frozen=True)
 class TradeCostRecordV2:
-    """Full source chain with immediate entry costs and optional actual stop exit."""
+    """Full source chain with entry costs and at most one actual formal exit."""
 
     sized_entry: RiskSizedEntryRecordV2
     entry: FillCostRecordV2
     stop_fill: StructuralStopFillRecordV2 | None = None
     exit: FillCostRecordV2 | None = None
+    ema_exit_fill: EMA20ExitFillRecordV2 | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.sized_entry, RiskSizedEntryRecordV2) or not isinstance(
@@ -145,6 +151,24 @@ class TradeCostRecordV2:
             )
         ):
             raise FeesAndSlippageV2Error("entry accounting cannot change the actual sized fill")
+        if self.ema_exit_fill is not None:
+            fill = self.ema_exit_fill
+            if (
+                self.stop_fill is not None
+                or not isinstance(fill, EMA20ExitFillRecordV2)
+                or not isinstance(self.exit, FillCostRecordV2)
+                or fill.initial_stop_at_entry.execution != execution
+                or fill.initial_stop_at_entry.initial_stop_record
+                != self.sized_entry.risk_decision.initial_stop_record
+                or fill.quantity != self.quantity
+                or self.exit.quantity != self.quantity
+                or self.exit.base_fill_price != fill.base_exit_fill_price
+                or self.exit.action.value != fill.protective_action.value
+            ):
+                raise FeesAndSlippageV2Error(
+                    "EMA accounting must retain the actual entry/exit chain"
+                )
+            return
         if self.stop_fill is None and self.exit is None:
             return
         if not isinstance(self.stop_fill, StructuralStopFillRecordV2) or not isinstance(
@@ -202,7 +226,9 @@ class TradeCostRecordV2:
 
     @property
     def exit_type(self) -> str | None:
-        """Only the already-formalized structural stop can realize this baseline."""
+        """Preserve the actual terminal exit reason, without double realization."""
+        if self.ema_exit_fill is not None:
+            return self.ema_exit_fill.exit_reason
         return None if self.stop_fill is None else "STRUCTURAL_STOP"
 
     @property
@@ -335,6 +361,8 @@ def account_structural_stop_fill_v2(
     if not evaluation.stop_triggered:
         return current
     fill = evaluation.fill
+    if record.ema_exit_fill is not None:
+        raise FeesAndSlippageV2Error("a position already realized by EMA cannot also stop out")
     if record.stop_fill is not None:
         if record.stop_fill != fill:
             raise FeesAndSlippageV2Error("accounted stop provenance cannot change")
@@ -345,6 +373,48 @@ def account_structural_stop_fill_v2(
         quantity=record.quantity,
     )
     updated = replace(record, stop_fill=fill, exit=costs)
+    return replace(
+        current, trades=tuple(updated if item is record else item for item in current.trades)
+    )
+
+
+def account_ema20_exit_fill_v2(
+    *,
+    previous: FeesAndSlippageBookV2,
+    risk_sizing: RiskPositionSizingBookV2,
+    decision: RiskSizingDecisionRecordV2,
+    positions: OpenPositionSignalPolicyBookV2,
+) -> FeesAndSlippageBookV2:
+    """Account one actual EMA MARKET exit with the unchanged PR #296 cost arithmetic."""
+    from .ema_pullback_open_position_signal_policy_v2 import OpenPositionSignalPolicyBookV2
+
+    current = account_entry_fill_v2(previous=previous, risk_sizing=risk_sizing, decision=decision)
+    if not isinstance(positions, OpenPositionSignalPolicyBookV2) or (
+        positions.strategy_instance_id,
+        positions.series_id,
+    ) != (current.strategy_instance_id, current.series_id):
+        raise FeesAndSlippageV2Error("EMA accounting requires the canonical scoped position book")
+    if not any(item.sized_entry.risk_decision == decision for item in current.trades):
+        return current
+    record = current.for_decision(decision)
+    position = next(
+        (item for item in positions.positions if item.entry == record.sized_entry.execution), None
+    )
+    if position is None or not isinstance(position.exit, EMA20ExitFillRecordV2):
+        return current
+    fill = position.exit
+    if record.ema_exit_fill is not None:
+        if record.ema_exit_fill != fill:
+            raise FeesAndSlippageV2Error("accounted EMA exit provenance cannot change")
+        return current
+    if record.stop_fill is not None:
+        raise FeesAndSlippageV2Error("a stopped position cannot acquire a second EMA exit")
+    costs = calculate_fill_cost_v2(
+        base_fill_price=fill.base_exit_fill_price,
+        action=FillActionV2(fill.protective_action),
+        quantity=record.quantity,
+    )
+    updated = replace(record, ema_exit_fill=fill, exit=costs)
     return replace(
         current, trades=tuple(updated if item is record else item for item in current.trades)
     )
@@ -381,6 +451,7 @@ __all__ = [
     "FillActionV2",
     "FillCostRecordV2",
     "TradeCostRecordV2",
+    "account_ema20_exit_fill_v2",
     "account_entry_fill_v2",
     "account_structural_stop_fill_v2",
     "calculate_fill_cost_v2",

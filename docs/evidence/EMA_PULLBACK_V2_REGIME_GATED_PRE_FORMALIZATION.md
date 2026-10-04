@@ -1446,12 +1446,134 @@ max daily trades, equity, frais broker live, bid/ask replay ou slippage dynamiqu
 Aucun replay, accès OOS, ajustement de performance MNQ, broker ou ordre réel.
 V2 reste PRE_FORMALIZATION ; la rentabilité n'est pas évaluée.
 
-## Prochaine ambiguïté — politique de sortie V2
+## EMA_PULLBACK_V2_EXIT_POLICY — deux sorties offline déterministes
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED`
+`EMA_PULLBACK_V2_EXIT_POLICY = PASS`
 
-Décider séparément l'architecture de sortie V2 en conservant le stop structurel,
-son fill et les conventions de coûts déjà figés. Aucun take profit, breakeven,
-trailing, sortie EMA/session ou arbitrage intrabar n'est ajouté automatiquement.
-La politique de fin de données doit aussi être décidée explicitement avant une
-stratégie V2 complète. Sans replay ni ouverture OOS.
+Décision du propriétaire du 2026-10-04 : baseline initiale pré-replay,
+non optimisée et indépendante de tout résultat V2. L'ancienne gate
+EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED est acquittée par cette définition.
+
+La politique possède exactement deux sorties :
+
+| Sortie | Définition |
+|---|---|
+| EXIT_1 | IMMUTABLE_STRUCTURAL_STOP, PR #292/#293 inchangées |
+| EXIT_2 | EMA20_POSITION_EXIT, signal à Close puis MARKET au prochain Open |
+| TAKE_PROFIT / BREAKEVEN / TRAILING_STOP | NONE |
+| TIME_EXIT / SESSION_EXIT | NONE |
+
+Le stop initial demeure immuable. Aucun déplacement, recalcul, resserrement
+ou élargissement ; ni priorité stop/take-profit à inventer.
+
+### Signal EMA20 à la clôture courante
+
+Réutiliser `evaluate_ema20_v2` de EMA20_PULLBACK_V2, sans autre EMA :
+
+```text
+EMA20[19] = sum(Close[0..19]) / 20
+EMA20[i] = EMA20[i-1] + Fraction(2,21) * (Close[i] - EMA20[i-1])
+EMA_RESET_AT_SESSION = FALSE
+
+LONG OPEN : Close[r] < EMA20[r] => signal
+SHORT OPEN: Close[r] > EMA20[r] => signal
+Close[r] == EMA20[r] => HOLD
+```
+
+Close[r] et EMA20[r] sont connus ensemble à Close[r]. Contrairement au
+pullback qui conserve EMA20[k-1], cette sortie utilise l'EMA courante.
+Conversion exacte des prix décimaux, Fraction, aucun float ni arrondi préalable.
+Seuls les closes clôturés et leurs métadonnées causales participent à l'EMA.
+Une EMA invalide/indisponible ne produit aucun signal. Aucun reset de session,
+aucune bougie synthétique lors des gaps de temps.
+
+Le signal est autorisé dès Close[e], clôture de la barre d'entrée, si le stop
+n'a pas déjà fermé la position. Aucune durée minimale de détention.
+
+### Exécution distincte au prochain Open
+
+```text
+Close[r] => PENDING_EMA20_EXIT, aucun fill sur r
+expected_exit_bar = r+1
+MAX_EXIT_EXECUTION_AGE_CLOSED_BARS = 1
+MAX_EXIT_EXECUTION_ELAPSED_TIME = 1 minute
+LONG  => SELL MARKET
+SHORT => BUY_TO_COVER MARKET
+base_exit_fill_price = Open[r+1]
+```
+
+À l'Open, seuls index, timestamp et Open sont lus. Le prix de base ne provient
+jamais de Close[r], EMA20[r], ni de High/Low/Close[r+1]. Le range de r+1
+n'est pas consulté lorsqu'une sortie a déjà été remplie à son Open.
+Le prix de base reste distinct du prix effectif après coûts.
+
+r+1 absent => EXPIRED_NO_EXIT_EXECUTION, sans fill synthétique ni report du
+même signal sur r+2. Écart strictement supérieur à une minute => EXPIRED_EXIT_GAP ;
+exactement une minute reste admissible. Le stop reste actif sur les prochaines
+observations réelles. Son contrat PR #293 reste applicable : les indices observés
+sont consécutifs ; un saut d'indice fait échouer le monitoring sans fill inventé,
+alors qu'un grand écart de timestamp entre deux indices consécutifs est autorisé.
+Horloge non causale ou Open invalide échoue sans fabriquer de sortie EMA.
+Une nouvelle clôture, si la position reste ouverte, peut produire son propre
+nouveau signal ; elle ne réactive jamais l'ordre expiré.
+
+### Priorité et phases causales
+
+```text
+Open[r]:
+  1. structural-stop opening gap
+  2. gap déclenché => STRUCTURAL_STOP au même Open, annulation EMA pending
+  3. sinon EMA pending admissible => EMA20_POSITION_EXIT à Open[r]
+  4. uniquement si la position reste ouverte => monitoring intrabar
+
+Intrabar[r]: structural-stop adverse extreme
+Close[r]: uniquement si la position reste ouverte => signal EMA20
+```
+
+Même prix potentiel à l'Open => motif STRUCTURAL_STOP si le niveau protecteur
+est franchi/contacté. Le stop gagne également à travers un gap de session.
+Un stop intrabar ferme avant la décision EMA de cette clôture ; aucun signal
+EMA n'est alors créé et l'historique EMA n'est pas consulté pour cette position.
+BREACHED_AT_ENTRY_OPEN conserve entrée et sortie réelles au même Open, les
+deux coûts, et un état final FLAT ; aucune annulation rétroactive d'entrée.
+
+`process_exit_policy_open_v2` et `process_exit_policy_close_v2` imposent ces
+deux phases séparées. Les fills stop sont délégués au moteur PR #293 sans
+modifier ses règles ; les niveaux structurels restent ceux de PR #292.
+Après un fill EMA, PositionRecordV2 accepte cette sortie formelle terminale,
+passe à FLAT et retire le stop actif. Un nouveau régime formé à la clôture
+de la barre de sortie peut être admis selon PR #294 ; aucun ancien contexte
+ou signal supprimé n'est restauré.
+
+### Coûts, fin des données et provenance
+
+Appliquer PR #296 exactement une fois aux fills EMA réels : quantité approuvée
+inchangée, frais Fraction(51,100) USD/contrat/fill, un tick adverse Fraction(1,4).
+SELL => base-0.25 ; BUY_TO_COVER => base+0.25. Aucun spread supplémentaire,
+aucune deuxième déduction du slippage diagnostique dans le PnL.
+
+Sans sortie réellement remplie à la fin des données : OPEN_UNREALIZED,
+realized PnL=None ; aucune liquidation forcée sur la dernière clôture.
+Un signal encore pending expire sans fill. La valorisation unrealized éventuelle
+reste du reporting, jamais un prix de sortie. Un fill stop déjà connu reste réel.
+
+ExitPolicyBookV2 conserve le scope stratégie/série, la position, le registre de
+risque et les coûts. Les records immuables contiennent la provenance complète
+régime -> pullback consommé -> confirmation -> risque -> entrée -> stop,
+quantité figée, niveau du stop, type/index/timestamp du signal, close_at_signal,
+ema20_at_signal, index/timestamp d'exécution, motif STRUCTURAL_STOP ou
+EMA20_POSITION_EXIT, prix de base et prix effectif. Les appels répétés ne
+créent ni deuxième exit ni double débit ; une provenance altérée est refusée.
+
+Aucun replay, accès OOS, résultat V2, calibration MNQ, broker ou ordre réel.
+V2 demeure PRE_FORMALIZATION ; aucune performance ou rentabilité démontrée.
+
+## Prochaine gate — formalisation complète V2 et assemblage déterministe
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED`
+
+Formaliser séparément le contrat end-to-end : composition des composants déjà
+figés, états terminaux, ordre Open/intrabar/Close, provenance et tests synthétiques
+de la chaîne complète. Ne changer aucun seuil, signal, fenêtre, stop, quantité,
+fill ou coût. Cette gate ne constitue pas un protocole ni une autorisation de
+replay, de sélection de paramètres, d'accès OOS ou de paper/live trading.
