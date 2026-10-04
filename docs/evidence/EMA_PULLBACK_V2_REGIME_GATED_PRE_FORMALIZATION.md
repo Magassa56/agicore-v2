@@ -1,6 +1,7 @@
 # EMA_PULLBACK_V2_REGIME_GATED — charte de recherche
 
 Date de décision : 2026-10-03 UTC. Statut : `PRE_FORMALIZATION`.
+Dernière formalisation : 2026-10-04 UTC.
 `EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION`.
 
 ## Clôture de la voie V1
@@ -81,8 +82,8 @@ La qualification du contexte est l'OR des événements indépendants, sous rése
 de la collision opposée. Aucun événement n'a priorité sur l'autre. Un contexte
 qualifié n'est pas encore un signal d'entrée. L'ordre désormais figé est :
 événement complet, contexte actif, pullback qualifié et consommation unique,
-puis confirmation prix/momentum sur une clôture ultérieure. L'exécution d'entrée
-reste à définir séparément.
+puis confirmation prix/momentum sur une clôture ultérieure et base fill offline
+à l'Open de la seule barre suivante. Risque, position et sorties restent à définir.
 
 Les seuils d'étendue, de volume et de géométrie des bougies sont désormais fixés
 dans leurs sous-contrats ci-dessous ; aucun ATR ou magnitude MACD n'est fixé. Aucun
@@ -788,12 +789,108 @@ quotidien, limite de trades/jour, filtre de session, SMA14/SMA21, RSI,
 stochastic, volume supplémentaire ou seuil de magnitude MACD. Aucune règle
 d'entrée V1 héritée, aucun replay ni ouverture OOS.
 
-## Prochaine ambiguïté — exécution d'entrée V2
+## Exécution d'entrée offline V2 — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED`
+Le 2026-10-04, `EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED` est acquittée.
+Baseline initiale pré-replay non optimisée, choisie indépendamment de V1/V1A/V1B.
+Aucun ajustement sur MNQ 03-26 ou MNQ 06-26, aucun replay ni ouverture OOS.
 
-Quand et comment une confirmation qualifiée à Close[q] devient-elle une entrée
-exécutable ? Figer séparément son instant causal, son mode/prix d'exécution et
-le traitement d'une prochaine barre indisponible. Aucune règle d'exécution
-n'est choisie ici ; les sorties restent hors de cette prochaine gate. Aucun
-replay ni ouverture OOS.
+```text
+CONFIRMATION_BAR = q
+ENTRY_DECISION_MOMENT = Close[q]
+EXECUTION_BAR = q+1
+EXECUTION_POINT = Open[q+1]
+ORDER_SEMANTICS = MARKET
+MAX_EXECUTION_AGE_CLOSED_BARS = 1
+MAX_EXECUTION_ELAPSED_TIME = 1 minute
+NO_FILL_ON_q
+NO_MAX_ENTRY_GAP_FILTER
+```
+
+La confirmation clôturée qualifiée crée PENDING_NEXT_BAR_OPEN à Close[q],
+sans fill ni lecture de prix d'exécution. q ne peut jamais porter sa propre
+exécution. Seule q+1 peut exécuter : LONG porte la sémantique BUY MARKET,
+SHORT SELL_SHORT MARKET. Ce sont des étiquettes offline, aucun ordre soumis.
+Le prix de base exact est execution_price_before_costs=Open[q+1].
+
+| Champs de q+1 | Accès au moment du fill |
+| --- | --- |
+| bar_index | Autorisé, pour exiger q+1 |
+| timestamp_utc | Autorisé, pour valider l'horloge |
+| Open | Autorisé seulement après index/horloge valides |
+| High, Low, Close, Volume | Interdits |
+| is_closed | Non lu : la décision se fait à l'ouverture |
+
+Le protocole d'observation ne déclare que ces trois champs autorisés.
+L'évaluateur lit uniquement ces attributs, même si le caller détient déjà
+l'OHLCV complet de q+1. Aucune validation OHLC ni condition sur les prix
+ultérieurs de cette barre. Des observations minimales et des bougies complètes
+gardées par un test d'accès donnent exactement le même résultat.
+
+Exiger index=q+1 et 0 < timestamp[q+1]-timestamp[q] <=1 minute. Exactement
+une minute est inclusif. Une coupure supérieure à une minute expire avant
+toute lecture de l'Open. Un timestamp non croissant, absent, non UTC/cohérent
+ou un index antérieur incohérent refuse le fill : INVALID_EXECUTION_CLOCK.
+L'état technique terminal FAILED_INVALID_EXECUTION_CLOCK conserve ce refus,
+sans réactivation. Répéter la propre barre q avec son timestamp connu conserve
+PENDING, sans lire son Open ni produire de fill.
+
+| Situation | État d'exécution | Statut particulier | Fill |
+| --- | --- | --- | --- |
+| Confirmation qualifiée à Close[q] | PENDING_NEXT_BAR_OPEN | NOT_EVALUATED | Aucun |
+| q+1 valide, Open fini et positif | FILLED | EVALUATED | Exactement Open[q+1] |
+| q+1 absent / fin des données | EXPIRED_NO_EXECUTION | EVALUATED | Aucun |
+| Une barre ultérieure arrive après q+1 manquant | EXPIRED_NO_EXECUTION | EVALUATED | Aucun |
+| q+1 avec temps écoulé >1 minute | EXPIRED_EXECUTION_GAP | EVALUATED | Aucun |
+| Horloge non causale/invalide | FAILED_INVALID_EXECUTION_CLOCK | INVALID_EXECUTION_CLOCK | Aucun |
+| Open absent, non fini ou <=0 | FAILED_INVALID_EXECUTION_INPUT | INVALID_EXECUTION_INPUT | Aucun |
+
+Une barre ultérieure est rejetée par son seul index, sans consultation de
+son timestamp ou de ses prix. Aucun report q+2/q+3, bougie ou fill synthétique.
+Open absent/non fini/non positif n'est jamais remplacé par Close[q], Close[q+1],
+midpoint, EMA20 ou un prix antérieur. Decimal fini converti exactement en
+Fraction ; entiers/Fraction exacts admis, float binaire/chaîne/bool refusés
+selon les conventions V2. Aucun arrondi préalable. Un gap de prix valide,
+même très grand, remplit à l'Open valide, sans seuil de distance ni annulation.
+
+`register_entry_execution_v2` valide la provenance de la décision CONFIRMED
+et l'enregistre à Close[q] dans EntryExecutionBookV2. Ce registre immuable
+appartient à une seule série offline et doit être transmis aux appels suivants.
+Réenregistrer la même confirmation, y compris une copie équivalente, retourne
+le même registre sans remettre son état à PENDING. Modifier une provenance
+déjà enregistrée sous la même identité causale est refusé explicitement.
+Des confirmations distinctes gardent des états indépendants ; aucune politique
+de position ou limite de trades n'est ajoutée ici.
+
+`execute_entry_open_v2` traite uniquement une confirmation déjà enregistrée.
+opening_bar=None signifie absence définitive de q+1, dont fin de données,
+pas une interrogation avant disponibilité de l'Open. Tous les états terminaux
+retournent le même registre, le même état et le même record sans aucun accès
+marché. FILLED reste FILLED ; aucun deuxième fill. Les expirations et échecs
+restent terminaux, même si une barre future aurait permis un fill.
+
+Le record immuable conserve source_regime_event_types/bar_index/timestamp/
+direction, pullback_bar_index/timestamp/ema_reference, confirmation_bar_index=q
+et son timestamp, execution_bar_index=q+1, execution_bar_timestamp,
+execution_side=LONG|SHORT, execution_price_before_costs exact et les étiquettes
+MARKET/BUY|SELL_SHORT. Il conserve aussi le EntryConfirmationRecordV2 complet,
+avec son MACD exact. Le lien événement -> pullback consommé -> confirmation
+-> exécution n'est jamais remplacé ni muté.
+
+Cette gate ne définit que le base fill déterministe. Aucun slippage, commission,
+spread, quantité, stop, take profit, breakeven ou trailing. Aucun broker,
+Apex/Rithmic ou ordre NinjaTrader live connecté. Risk Engine, sizing, politique
+de position et toutes les sorties restent requis avant une stratégie V2
+complète, et avant toute considération pour le paper trading. Aucune règle V1
+ni architecture de risque n'est héritée implicitement.
+
+## Prochaine ambiguïté — stop initial V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED`
+
+Quel niveau de stop initial protège LONG/SHORT, à partir de quels prix déjà
+connus, et comment traiter un niveau invalide ? Cette première décision de
+risque doit précéder le sizing et les autres décisions de position/sortie.
+Aucun niveau, distance ou mécanisme de sortie n'est choisi ici. Risk Engine,
+sizing, coûts et autres sorties seront des gates distinctes. V2 reste
+PRE_FORMALIZATION, sans replay ni ouverture OOS.

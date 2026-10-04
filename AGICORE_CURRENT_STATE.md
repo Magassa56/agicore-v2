@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-03 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED ;
+Date : 2026-10-04 UTC.
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -53,10 +53,11 @@ REVERSAL_TRANSITION_EVENT = PASS ;
 REGIME_CONTEXT_V2_EVENT_LIFETIME = PASS ;
 EMA20_PULLBACK_V2 = PASS ;
 EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM = PASS ;
-EMA_PULLBACK_V2_ENTRY_EXECUTION = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED ;
+EMA_PULLBACK_V2_ENTRY_EXECUTION = PASS ;
+EMA_PULLBACK_V2_INITIAL_STOP = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-entry-confirmation-momentum.
-Base GitHub vérifiée et récupérée : 227714be7ec45a67177e6bd273a66f5afdf1a63a.
+Branche de vérification : feature/ema-pullback-v2-entry-execution.
+Base GitHub vérifiée et récupérée : 3ee742fa10ecc58dfb03c6dcfb99ba153ecb925a.
 
 ## Acquis vérifiés
 
@@ -1031,7 +1032,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`9a4b67de05bf5dbef42e67d0e6a2aaef71fe4593296cd4b09044dd37a1b4421c`. L'hypothèse porte sur une
+`2386c83f01dda8e34ca0ec5053ddc93d77b2f0e68d4744f1b715e199ed42044c`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1536,10 +1537,77 @@ Aucun fill/ordre, stop/target, breakeven/trailing, sizing, objectif quotidien,
 limite de trades, filtre session, SMA14/SMA21, RSI/stochastic ou volume ajouté.
 Aucune rentabilité V2 démontrée ; programme toujours PRE_FORMALIZATION.
 
-Prochaine gate unique : EMA_PULLBACK_V2_ENTRY_EXECUTION_REQUIRED.
-Décider quand et comment la confirmation clôturée devient une entrée exécutable,
-en fixant séparément instant causal, mode/prix et prochaine barre indisponible.
-Aucune exécution choisie ici, aucune sortie définie, aucun replay ni ouverture OOS.
+La gate exécution d'entrée est acquittée par la décision ci-dessous.
+
+## V2 — base fill offline à la seule ouverture suivante
+
+Point de départ vérifié : PR #290 fusionnée après CI #262 verte, merge
+`3ee742fa10ecc58dfb03c6dcfb99ba153ecb925a`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_ENTRY_EXECUTION
+figée comme baseline initiale pré-replay non optimisée, indépendante de V1/V1A/V1B.
+Confirmation sur q, décision à Close[q], exécution uniquement à Open[q+1],
+ORDER_SEMANTICS=MARKET, MAX_EXECUTION_AGE_CLOSED_BARS=1,
+MAX_EXECUTION_ELAPSED_TIME=1 minute. NO_FILL_ON_q ; NO_MAX_ENTRY_GAP_FILTER.
+Close[q] crée PENDING_NEXT_BAR_OPEN sans fill. LONG=BUY, SHORT=SELL_SHORT,
+étiquettes offline uniquement ; prix de base exact execution_price_before_costs=Open[q+1].
+
+Interface d'ouverture limitée à bar_index, timestamp_utc et Open. L'évaluateur
+n'accède ni à High, Low, Close, Volume, ni à is_closed, même avec une OHLCV
+complète en mémoire. Index/horloge validés avant toute lecture de l'Open.
+Exiger q+1 et 0 < timestamp[q+1]-timestamp[q] <=1 minute, frontière inclusive.
+Temps >1 minute : EXPIRED_EXECUTION_GAP avant lecture du prix. Timestamps
+non croissants/invalides : INVALID_EXECUTION_CLOCK, aucun fill, état technique
+terminal FAILED_INVALID_EXECUTION_CLOCK. Propre barre q répétée avec son
+timestamp connu : PENDING conservé, sans lecture Open ni auto-exécution.
+
+q+1 absent ou fin des données : EXPIRED_NO_EXECUTION sans fill synthétique.
+Si q+2 ou plus arrive sans q+1, expiration par son seul index sans lire son
+timestamp/prix ; aucun report. Open absent/non fini/non positif :
+INVALID_EXECUTION_INPUT / FAILED_INVALID_EXECUTION_INPUT, aucun remplacement
+par Close, midpoint, EMA20 ou prix antérieur. Conversion exacte Decimal fini
+en Fraction ; entiers/Fraction admis, float/chaîne/bool refusés selon V2.
+Aucun arrondi préalable. Gap de prix valide même très grand : fill à l'Open,
+sans filtre de distance, clamp ou annulation arbitraire.
+
+EntryExecutionBookV2 est le registre immuable d'une seule série offline,
+transmis aux appels suivants. register_entry_execution_v2 exige la décision
+CONFIRMED et valide sa provenance avant enregistrement. Réenregistrer la même
+confirmation ou une copie équivalente conserve l'état canonique, sans remise
+à PENDING ni nouveau fill. Provenance changée sous la même identité refusée.
+execute_entry_open_v2 n'opère que sur un record enregistré ; None signifie
+absence définitive de q+1, pas attente anticipée de son ouverture.
+FILLED, expirations et échecs restent terminaux et rendent le même registre
+sans lecture marché. Les confirmations distinctes gardent leurs états séparés ;
+aucune règle de position, limite de trades ou quantité introduite.
+
+Record immuable : source_regime_event_types/index/timestamp/direction,
+pullback index/timestamp/ema_reference, confirmation index=q/timestamp,
+execution index=q+1/timestamp/side et prix avant coûts exact. Sémantique MARKET
+et BUY/SELL_SHORT conservée, avec le EntryConfirmationRecordV2 complet.
+Chaîne événement -> pullback consommé -> confirmation -> exécution préservée,
+sans mutation des snapshots précédents ni réactivation du contexte source.
+
+Nouveau module src/agicore/trading/ema_pullback_entry_execution_v2.py,
+SHA-256 `87e32388c022b66cb3b5583b9399fc1091f1bc449c3d58e35466b5a6d1224998`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_entry_execution_v2.py,
+SHA-256 `94ccf50189ade95bcf4002232cd16d18f4698c6cdee57582215619bb5b5f5777`.
+119 nouveaux tests synthétiques PASS ; 960 tests V2 ciblés PASS.
+7244 tests de régression locaux PASS, 4 avertissements préexistants ;
+hors test_mcp.py bloqué dans ce sandbox, inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée
+avant fusion ; preuves et SHA de merge dans la PR.
+Tous les modules et tests V2 antérieurs, V1/V1A/V1B et résultats figés inchangés.
+Aucun data/, dataset réel, replay, OOS ni calibration MNQ 03-26/06-26.
+Aucun broker/Apex/Rithmic/NinjaTrader live, slippage/commission/spread,
+quantité, stop, take profit, breakeven ou trailing. Ce modèle n'autorise ni
+stratégie V2 complète ni paper trading ; Risk Engine, sizing et toutes les
+sorties devront être formalisés. Rentabilité V2 toujours non évaluée.
+
+Prochaine gate unique : EMA_PULLBACK_V2_INITIAL_STOP_REQUIRED.
+Figer le risque initial LONG/SHORT : niveau, sources déjà connues et traitement
+d'un stop invalide, avant le sizing et les autres règles de position/sortie.
+Aucun stop ou autre mécanisme de sortie choisi ici ; coûts, Risk Engine et
+autres décisions restent séparés. V2 reste PRE_FORMALIZATION, sans replay ni OOS.
 
 ## Limites du produit
 
