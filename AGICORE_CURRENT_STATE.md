@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -55,10 +55,11 @@ EMA20_PULLBACK_V2 = PASS ;
 EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM = PASS ;
 EMA_PULLBACK_V2_ENTRY_EXECUTION = PASS ;
 EMA_PULLBACK_V2_INITIAL_STOP = PASS ;
-EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED ;
+EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = PASS ;
+EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-initial-stop.
-Base GitHub vérifiée et récupérée : 077474d1b6a90415cafd838e31b5c40e5a849d8a.
+Branche de vérification : feature/ema-pullback-v2-structural-stop-trigger-fill.
+Base GitHub vérifiée et récupérée : 48a89ae0602a7d80fb54b9918e2511f5e96dc864.
 
 ## Acquis vérifiés
 
@@ -1033,7 +1034,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`3eb04cf9c83e849301cab06f019a4741ef97db3834c5b3bb8996d438703f6527`. L'hypothèse porte sur une
+`7441e8b5a24e7a746406b7cc195175c93b1d1b8c41a016f860b3a5de79330516`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1668,11 +1669,86 @@ MNQ 03-26/06-26. Aucun broker, trigger/fill de sortie, take profit, breakeven,
 trailing, sizing, quantité, coût ou modification EMA/swing/ATR.
 V2 reste PRE_FORMALIZATION ; aucune rentabilité évaluée ni stratégie complète.
 
-Prochaine gate unique : EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED.
-Définir le déclenchement et le prix de fill du stop, particulièrement les gaps
-et BREACHED_AT_ENTRY_OPEN, sans modifier l'entrée ni le niveau initial figés.
-Ne pas encore définir take profit, breakeven ou trailing. Risk Engine, sizing
-et autres règles de position/sortie restent distincts. Aucun replay ni OOS.
+La gate déclenchement/fill du stop est acquittée par la décision ci-dessous.
+
+## V2 — stop marché structurel, contacts et gaps exacts
+
+Point de départ vérifié : PR #292 fusionnée après CI intégrale #266 verte,
+merge `48a89ae0602a7d80fb54b9918e2511f5e96dc864`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL
+figée comme baseline initiale pré-replay non optimisée. STOP_ORDER_SEMANTICS=STOP_MARKET,
+STOP_TOUCH_IS_TRIGGER=TRUE ; niveau PR #292 immuable, aucun recalcul.
+LONG protective_action=SELL ; SHORT BUY_TO_COVER, étiquettes offline sans broker.
+
+BREACHED_AT_ENTRY_OPEN déclenche immédiatement après le fill d'entrée PR #291,
+sur e=q+1 : ENTRY_OPEN, base_stop_fill_price=entry_price=Open[e]. Aucun accès
+High/Low/Close/Volume e ni prix de stop périmé favorable. L'entrée reste FILLED,
+sans annulation/refus/no-trade rétroactif. Exemple LONG stop20000/Open19998.50 :
+entrée et sortie de base à 19998.50, jamais sortie artificielle à 20000.
+
+ARMED protège e dès son Open : monitoring_first_bar=e. Open[e] est déjà
+retenu par le fill ; aucun second test de gap ni nouvel accès Open requis.
+Low[e]<=stop LONG / High[e]>=stop SHORT : fill INTRABAR au stop exact.
+Sur r>e, priorité au gap : Open[r]<=stop LONG / >=stop SHORT remplit à cet
+Open avant toute lecture de l'extrême. Sinon Low[r]<=stop LONG / High[r]>=stop
+SHORT remplit au niveau initial. Toutes les égalités déclenchent ; aucun coût.
+
+Accès limités à index/timestamp et Open + Low LONG / High SHORT lorsque
+nécessaires. Jamais Close, Volume, extrême opposé, is_closed, EMA20, MACD ou ATR.
+Open fini, puis si gap exclu extrême fini et Low<=Open / High>=Open, sinon
+FAILED_INVALID_STOP_OBSERVATION. Decimal/int/Fraction exacts ; pas d'arrondi,
+float binaire, substitution ou validation OHLC complète ajoutée. Le test de
+gap ne dépend pas de la qualité d'un extrême futur non lu.
+
+Observations réelles e,e+1,e+2... traitées une à une, sans préfixe futur.
+Indice sauté, dont e non surveillée : FAILED_INCOMPLETE_STOP_OBSERVATION
+avant prix/horloge, sans supposer le stop intact ni fabriquer un fill.
+Index/horloge invalide ou relecture d'une observation active déjà traitée :
+FAILED_INVALID_STOP_OBSERVATION. Timestamps cohérents UTC et croissants ;
+écarts de session de plusieurs heures/jours autorisés sur l'indice suivant.
+Aucune expiration de temps/session ; stop encore actif au prochain vrai Open.
+
+StructuralStopExecutionBookV2 est immuable et porté par le caller pour une
+seule série offline. register_structural_stop_execution_v2 exige le stop déjà
+lié à son fill, puis enregistre ARMED ou directement FILLED_STOP à ENTRY_OPEN.
+observe_structural_stop_v2 examine seulement l'observation fournie : gap connu
+à Open[r], sinon extrême adverse complet disponible au plus tard à Close[r].
+INTRABAR ne fournit aucune heure précise : exact_intrabar_timestamp=None,
+trigger_known_at=NO_LATER_THAN_CLOSE[r]. Timestamp de barre conservé comme
+métadonnée, pas comme heure inventée de contact.
+
+FILLED_STOP et les deux erreurs sont terminaux : appels répétés sans accès
+marché, deuxième fill, reset ou réparation rétroactive. Source de stop/fill
+altérée sous la même identité refusée. Provenance complète immuable : événement,
+pullback, EMA exacte, confirmation, entrée, stop/extreme/tick/buffer/state_at_entry,
+trigger index/timestamp/phase/known_at, base_stop_fill_price et action STOP_MARKET,
+avec InitialStopAtEntryV2 et ses records imbriqués. Stop initial et snapshots
+antérieurs inchangés, dont l'exécution d'entrée toujours FILLED.
+
+Fin de données avec ARMED : observation=None rend le même registre, aucun fill,
+expiry ou clôture synthétique. Politique de fin de données séparée.
+
+Nouveau module src/agicore/trading/ema_pullback_structural_stop_trigger_fill_v2.py,
+SHA-256 `1bc60d1fac22d1c6b5a3ed44023051a1bfce8a066ce5617b64b4ea35316f3efd`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_structural_stop_trigger_fill_v2.py,
+SHA-256 `f0770409c74f777bd2745af615f9096d779ed31629117677081838291784745f`.
+160 nouveaux tests synthétiques PASS ; 1254 tests V2 ciblés PASS.
+7538 tests de régression locaux PASS, 4 avertissements préexistants ;
+hors test_mcp.py bloqué dans ce sandbox, inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée ; SHA
+de merge dans la PR. Tous les modules/tests antérieurs, dont PR #291/#292,
+V1/V1A/V1B et résultats figés restent inchangés. Aucun data/, dataset réel,
+replay, OOS ni calibration MNQ 03-26/06-26. Aucun broker, coûts/slippage,
+take profit, sortie EMA20, breakeven, trailing, time/session exit, Risk Engine
+ou sizing. Aucune priorité entre sorties ni quantité définie silencieusement.
+V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
+
+Prochaine gate unique : EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED.
+Figer le traitement des nouvelles confirmations/opportunités lorsqu'une
+position V2 est déjà ouverte et la capacité de positions simultanées, avant
+le sizing et les limites du Risk Engine. Aucune politique V1 ou réactivation
+d'un contexte consommé héritée. Coûts, take profit, breakeven, trailing et
+fin de données demeurent des gates séparées. Aucun replay ni ouverture OOS.
 
 ## Limites du produit
 

@@ -984,13 +984,127 @@ Aucun trailing, breakeven, mouvement EMA20, nouveau swing, mise à jour ATR,
 élargissement ou resserrement. Aucun trigger, prix de sortie, take profit,
 quantité, coût ou ordre broker ajouté dans cette gate.
 
-## Prochaine ambiguïté — déclenchement et fill du stop structurel V2
+## Déclenchement et fill du stop structurel V2 — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED`
+Le 2026-10-04, `EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL_REQUIRED`
+est acquittée. Baseline initiale pré-replay non optimisée, indépendante
+des performances V1/V1A/V1B. Aucun ajustement MNQ 03-26 ou MNQ 06-26.
 
-Définir séparément quand le niveau initial se déclenche et à quel prix le
-stop est rempli, notamment en cas de gap et de BREACHED_AT_ENTRY_OPEN.
-L'entrée figée et le niveau connu à Close[q] ne doivent pas être modifiés
-rétroactivement. Aucun take profit, breakeven ou trailing à cette étape.
-Risk Engine, sizing et autres règles de position/sortie restent distincts.
-V2 reste PRE_FORMALIZATION, sans replay ni ouverture OOS.
+```text
+STOP_ORDER_SEMANTICS = STOP_MARKET
+INITIAL_STOP_RECALCULATION = FORBIDDEN
+STOP_TOUCH_IS_TRIGGER = TRUE
+ENTRY_BAR = e = q+1
+monitoring_first_bar = e
+```
+
+Le niveau S provient exclusivement du record EMA_PULLBACK_V2_INITIAL_STOP
+de la PR #292, connu à Close[q]. Il reste immuable. LONG porte protective_action
+SELL ; SHORT BUY_TO_COVER. Étiquettes offline uniquement, aucun ordre broker.
+
+| Situation | LONG | SHORT | Phase | Prix de fill de base |
+| --- | --- | --- | --- | --- |
+| BREACHED_AT_ENTRY_OPEN | Entry <= S | Entry >= S | ENTRY_OPEN | Entry = Open[e] |
+| Gap ultérieur r>e | Open[r] <= S | Open[r] >= S | BAR_OPEN_GAP | Open[r] |
+| Contact intrabar, gap exclu | Low[r] <= S | High[r] >= S | INTRABAR | S |
+| Aucun contact | Low[r] > S | High[r] < S | Aucun trigger | Aucun fill |
+
+Un stop franchi à l'entrée se déclenche immédiatement après le fill PR #291,
+sur e, sans lire High[e], Low[e], Close[e] ou Volume[e]. L'entrée reste FILLED,
+sans transformation rétroactive en CANCELLED/REJECTED/NO_TRADE.
+Exemple LONG : S=20000, Open[e]=19998.50 : entrée et stop exit à 19998.50,
+jamais au niveau favorable périmé 20000. Le prix déjà conservé par l'entrée
+suffit ; aucun nouvel accès à Open[e] nécessaire.
+
+ARMED protège immédiatement la barre e après son Open. Pour r=e, la relation
+Open[e]>S en LONG / Open[e]<S en SHORT est déjà établie par PR #292 : aucun
+second test de gap. Low[e]<=S en LONG / High[e]>=S en SHORT remplit à S.
+L'Open de référence pour valider cet extrême est le fill exact retenu de e.
+
+Pour r>e, valider l'Open fini puis tester le gap en premier. Si le gap passe,
+remplir à Open[r] et retourner avant toute lecture/validation de Low ou High.
+Cela reste vrai avec une OHLCV complète en mémoire ou un extrême ultérieur
+absent/invalide. Sinon seulement, consulter l'extrême adverse et tester le
+contact inclusif. Toutes les égalités Open/Low/High au niveau S déclenchent.
+
+| Phase d'accès | Champs utilisés |
+| --- | --- |
+| ENTRY_OPEN breach | Record d'entrée/stop immuable ; aucun input marché |
+| Barre e ARMED | bar_index, timestamp_utc, Low (LONG) ou High (SHORT) ; Open[e] retenu |
+| Barre ultérieure, gap | bar_index, timestamp_utc, Open ; aucun extrême |
+| Barre ultérieure, sans gap | bar_index, timestamp_utc, Open, Low (LONG) ou High (SHORT) |
+
+Aucune lecture de Close, Volume, extrême opposé, is_closed, EMA20, MACD ou ATR.
+Hors gap déjà déclenché, LONG exige Open et Low finis avec Low<=Open ; SHORT
+Open et High finis avec High>=Open. Extrême absent/non fini/malformé ou Open
+ultérieur absent/non fini : FAILED_INVALID_STOP_OBSERVATION, aucun fill.
+Les conversions exactes Decimal fini/int/Fraction suivent les conventions V2,
+sans float binaire/chaîne/bool ni arrondi. Aucun seuil positif ou distance
+supplémentaire ajouté aux observations ultérieures.
+
+`register_structural_stop_execution_v2` exige le stop lié à son fill PR #292
+et capture cette provenance dans StructuralStopExecutionBookV2, registre
+immuable d'une seule série offline à transmettre aux appels suivants.
+BREACHED_AT_ENTRY_OPEN crée directement FILLED_STOP ; ARMED attend sa première
+observation e. Réenregistrer une source équivalente conserve son état sans
+reset. Un niveau, fill ou provenance modifié sous la même identité est refusé.
+
+`observe_structural_stop_v2` traite une seule observation réelle à la fois,
+sans mapping/prefixe futur. Après e, les indices doivent être exactement
+r+1, r+2, etc. Un saut d'indice, dont e omise, donne
+FAILED_INCOMPLETE_STOP_OBSERVATION avant toute lecture de prix ou d'horloge,
+sans présumer un stop intact et sans fill synthétique. Index/horloge invalide,
+timestamp non causal ou relecture d'une observation active déjà traitée donne
+FAILED_INVALID_STOP_OBSERVATION. Les timestamps doivent être cohérents UTC,
+strictement croissants entre observations ; e conserve le timestamp d'entrée.
+
+Aucune durée maximale et aucun reset/expiry à la frontière de session.
+Un écart de temps de plusieurs heures/jours entre deux observations consécutives
+est valide. Le stop demeure actif puis un Open franchissant S remplit à cet Open.
+Les gaps ne créent pas de barres synthétiques. Si aucun gap ne déclenche,
+l'observation de l'extrême adverse complet doit être disponible avant son
+évaluation OHLC ; le caller ne transmet pas un range futur à l'ouverture.
+
+ENTRY_OPEN est entièrement connu à Open[e], BAR_OPEN_GAP à Open[r]. Un contact
+OHLC INTRABAR est survenu pendant r et connu au plus tard à Close[r].
+trigger_known_at=NO_LATER_THAN_CLOSE[r] ; exact_intrabar_timestamp=UNKNOWN,
+représenté par None. Le timestamp de barre est conservé comme métadonnée,
+sans inventer une heure précise de contact.
+
+Après fill : stop_execution_state=FILLED_STOP, terminal. Les échecs
+FAILED_INCOMPLETE_STOP_OBSERVATION/FAILED_INVALID_STOP_OBSERVATION sont aussi
+terminaux. Les appels ultérieurs rendent le même registre/record avant toute
+lecture marché, sans deuxième fill ni réparation rétroactive. Les snapshots
+antérieurs et le stop_state_at_entry restent inchangés.
+
+Le record conserve source_regime_event_types/index/timestamp/direction,
+pullback index/timestamp/ema_reference, confirmation index/timestamp,
+entry index/timestamp/price, initial_stop_price, structural_extreme,
+tick_size, stop_buffer_ticks, stop_state_at_entry, trigger_bar_index,
+trigger_bar_timestamp, trigger_phase, trigger_known_at, base_stop_fill_price,
+protective_action et STOP_MARKET. Le InitialStopAtEntryV2 complet conserve
+aussi les records imbriqués de stop initial, confirmation et exécution.
+Toutes ces données sont immuables ; aucune mutation du niveau structurel.
+
+Si les observations se terminent avec ARMED, aucun stop fill synthétique.
+observation=None retourne le même registre ARMED, sans expiration, clôture
+forcée ou résultat de performance inventé. La politique de fin de données
+reste à formaliser séparément.
+
+Aucun coût, commission, spread, slippage ou adverse-fill ticks : seulement
+base_stop_fill_price. Aucun take profit, sortie EMA20, breakeven, trailing,
+time stop, session close exit, Risk Engine ou sizing. La priorité intrabar
+avec une autre sortie sera une gate distincte lorsqu'une telle sortie existera.
+Aucun replay ou accès OOS ; aucune autorisation broker/paper trading.
+
+## Prochaine ambiguïté — nouveaux signaux pendant une position V2 ouverte
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED`
+
+Figer le traitement d'une nouvelle confirmation/opportunité d'entrée lorsque
+une position V2 est déjà ouverte, ainsi que la capacité de positions
+simultanées. Aucune politique V1 ni règle d'empilement, remplacement ou
+réactivation de contexte consommé n'est héritée implicitement. Cette décision
+de gestion de position précède le sizing et les limites du Risk Engine.
+Coûts, take profit, breakeven, trailing et fin de données restent séparés.
+V2 demeure PRE_FORMALIZATION, sans replay ni ouverture OOS.
