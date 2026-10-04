@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -56,10 +56,11 @@ EMA_PULLBACK_V2_ENTRY_CONFIRMATION_MOMENTUM = PASS ;
 EMA_PULLBACK_V2_ENTRY_EXECUTION = PASS ;
 EMA_PULLBACK_V2_INITIAL_STOP = PASS ;
 EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = PASS ;
-EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED ;
+EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = PASS ;
+EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-structural-stop-trigger-fill.
-Base GitHub vérifiée et récupérée : 48a89ae0602a7d80fb54b9918e2511f5e96dc864.
+Branche de vérification : feature/ema-pullback-v2-open-position-signal-policy.
+Base GitHub vérifiée et récupérée : 466a64f666f903f1a7966374205a1e3503f37aeb.
 
 ## Acquis vérifiés
 
@@ -1034,7 +1035,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`7441e8b5a24e7a746406b7cc195175c93b1d1b8c41a016f860b3a5de79330516`. L'hypothèse porte sur une
+`9740ea0379d709c8aa2e19258c008b80eaaa20518b763fed657bed1841fab3cc`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1743,12 +1744,75 @@ take profit, sortie EMA20, breakeven, trailing, time/session exit, Risk Engine
 ou sizing. Aucune priorité entre sorties ni quantité définie silencieusement.
 V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED.
-Figer le traitement des nouvelles confirmations/opportunités lorsqu'une
-position V2 est déjà ouverte et la capacité de positions simultanées, avant
-le sizing et les limites du Risk Engine. Aucune politique V1 ou réactivation
-d'un contexte consommé héritée. Coûts, take profit, breakeven, trailing et
-fin de données demeurent des gates séparées. Aucun replay ni ouverture OOS.
+La gate de politique des signaux pendant une position ouverte est acquittée
+par la décision ci-dessous.
+
+## V2 — une position par série, suppression avant contexte
+
+Point de départ vérifié : PR #293 fusionnée après CI intégrale #268 verte,
+merge `466a64f666f903f1a7966374205a1e3503f37aeb`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY
+figée comme baseline initiale pré-replay non optimisée. Une position simultanée
+maximum par instance de stratégie/instrument/série. PYRAMIDING, HEDGING,
+FLIP_ON_OPPOSITE_SIGNAL, SCALE_IN et SIGNAL_QUEUE_WHILE_OPEN désactivés.
+
+Seul le fill d'entrée canonique PR #291 produit OPEN_LONG/OPEN_SHORT ; un régime,
+contexte, pullback, confirmation ou PENDING ne suffit pas. Seul un fill terminal
+de sortie formelle produit FLAT ; actuellement FILLED_STOP PR #293. ARMED ou
+échec de monitoring sans fill conserve OPEN et bloque toute admission.
+
+Pendant OPEN_LONG ou OPEN_SHORT, tout nouveau régime/opportunité LONG ou SHORT
+est SUPPRESSED_POSITION_OPEN avant création de RegimeEventContextV2. Télémétrie
+brute de composition maintenue, EMA20/MACD/impulsion/retournement peuvent continuer
+séparément, mais aucun lifetime/pullback exécutable ni chaîne complète nouvelle.
+Aucune queue, attente, restauration après sortie, couverture, flip, deuxième
+position, augmentation de quantité ou recalcul de prix moyen. La source
+consommée antérieure reste immuable en audit et ne redevient jamais actionable.
+
+OpenPositionSignalPolicyBookV2 conserve le scope explicite et l'historique
+immuable de positions/décisions. apply_position_entry_fill_v2 exige FILLED après
+la confirmation connue et un pullback admis/consommé dans ce registre ; une
+chaîne supprimée, restaurée ou injectée depuis un autre chemin est refusée.
+Le stop lié doit être celui connu à l'Open d'entrée, sans importer son futur
+monitoring. Un même fill, y compris après sa sortie, ne crée pas une deuxième
+position ; provenance modifiée sous une identité existante refusée.
+
+advance_open_position_signal_policy_v2 résout d'abord le stop existant via la
+gate PR #293, actualise la position puis compose/admet les événements de
+Close[r]. Stop rempli à Open[r] ou intrabar r : FLAT à Close[r], donc nouveau
+régime admissible. Position encore ouverte : signal supprimé. Le nouveau
+contexte attend toujours r+1 pour un pullback. Aucun régime passé n'est restauré.
+
+BREACHED_AT_ENTRY_OPEN conserve le véritable fill d'entrée, puis son fill stop
+au même Open[e] : OPEN puis FLAT, prix de base et chaîne immuables. Aucun accès
+OHLCV e pour cette résolution, annulation rétroactive ou NO_TRADE. Nouveau
+régime de Close[e] admissible. Les erreurs de monitoring et fin de données ne
+fabriquent ni fill ni état FLAT ; gaps temporels/session n'expirent pas le stop.
+
+Clôture répétée/fill répété : même registre, sans duplicate ou réouverture.
+Suppression conservée avec index/timestamp/direction/familles, position_state,
+reason POSITION_ALREADY_OPEN et index/direction de l'entrée active. Aucun
+mapping OHLC ou barre future consulté pour une nouvelle opportunité pendant
+OPEN. Les tests protègent la symétrie LONG/SHORT et la provenance figée.
+
+Nouveau module src/agicore/trading/ema_pullback_open_position_signal_policy_v2.py,
+SHA-256 `a76b5a11a0be40e3eb404582483fd9b4c17355279bf9102e34fb671da2326954`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_open_position_signal_policy_v2.py,
+SHA-256 `6409a956d27efe25f4bf9522ab6b51cbe1d29545c414224137d7e9a31557c119`.
+94 nouveaux tests synthétiques PASS ; 1348 tests V2 ciblés PASS.
+7632 tests de régression locaux PASS, 4 avertissements préexistants ;
+hors test_mcp.py bloqué dans ce sandbox, inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée avant
+fusion ; preuves et SHA de merge dans la PR. Périmètre de quatre fichiers ;
+tous les modules/tests V2 antérieurs, V1/V1A/V1B et résultats figés inchangés.
+Aucun data/, dataset réel, replay, OOS ou ajustement MNQ 03-26/06-26. Aucun
+broker, ordre réel, coût, sizing, quantité, take profit, breakeven ou trailing.
+V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
+
+Prochaine gate unique : EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED.
+Figer budget de risque, quantité, critères de refus et moment causal, sans
+hériter de paramètres V1. Coûts, take profit, breakeven, trailing et fin de
+données restent séparés. Aucun replay ni ouverture OOS.
 
 ## Limites du produit
 
