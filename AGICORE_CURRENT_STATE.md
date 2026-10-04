@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -58,10 +58,11 @@ EMA_PULLBACK_V2_INITIAL_STOP = PASS ;
 EMA_PULLBACK_V2_STRUCTURAL_STOP_TRIGGER_FILL = PASS ;
 EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = PASS ;
-EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED ;
+EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
+EMA_PULLBACK_V2_EXIT_POLICY = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-risk-engine-position-sizing.
-Base GitHub vérifiée et récupérée : 5db43eb9ffa096344c4f1fc79fcb5104956bf323.
+Branche de vérification : feature/ema-pullback-v2-fees-and-slippage-model.
+Base GitHub vérifiée et récupérée : ee02674b75273a82748c2e77f873fed6b5bd3313.
 
 ## Acquis vérifiés
 
@@ -1036,7 +1037,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`fbbd56fa6db280dc47ccc53a23eb9280d819a40714009b655bccda15d3fe9974`. L'hypothèse porte sur une
+`d8c4e26bca32d13daf0bc8fc9e9341c6b1e930d5eb7e9fb858691b73c9eb2a85`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -1890,10 +1891,101 @@ Aucun data/, dataset réel, replay, OOS, calibration MNQ, broker ou ordre réel.
 Aucun coût, take profit, breakeven, trailing ou sortie additionnelle.
 V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL_REQUIRED.
-Figer séparément frais/commissions/slippage avec prix de base et quantité figés
-conservés ; aucun montant ou modèle de coût V1 hérité. Take profit, breakeven,
-trailing et fin de données restent distincts. Aucun replay ni ouverture OOS.
+La gate frais/slippage est acquittée par la décision ci-dessous.
+
+## V2 — frais/slippage exacts et comptabilité des fills réels offline
+
+Point de départ vérifié : PR #295 fusionnée après CI intégrale #272 verte,
+run `37202575782`, head `e3d2f320ef58c8705cbc370fc71453545e0911ab`,
+merge `ee02674b75273a82748c2e77f873fed6b5bd3313`, arbre
+`3251f8b93429dff08e350a9bf827551d17f1b895`.
+Décision du propriétaire du 2026-10-04 : EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL
+figée comme baseline initiale pré-replay non optimisée. Convention de coûts
+V1 volontairement reprise pour comparabilité, sans calibration de performance
+V2 ni ajustement d'après les résultats MNQ déjà utilisés.
+
+MNQ : tick Fraction(1,4), point Fraction(2,1), tick value Fraction(1,2).
+Frais=Fraction(51,100) USD par contrat et par fill ; slippage adverse=1 tick
+par fill. SPREAD_MODEL=ABSORBED_IN_SLIPPAGE ; EXTRA_SPREAD_CHARGE=Fraction(0).
+SLIPPAGE_ACCOUNTED_EXACTLY_ONCE et NO_POST_CONFIRMATION_RESIZING vrais.
+Aucune nouvelle hypothèse de signal, stop, quantité ou sortie.
+
+Les fills de base execution_price_before_costs/base_stop_fill_price demeurent
+immuables. FillCostRecordV2 conserve un prix effectif distinct : BUY ou
+BUY_TO_COVER => base+0.25 ; SELL ou SELL_SHORT => base-0.25. Chaque fill réel
+paie quantity*0.51 USD ; slippage économique quantity*0.50 USD diagnostique.
+Aller-retour : 1.02 USD de frais par contrat, 2.04 USD pour deux contrats.
+Prix LONG entry 20000 => 20000.25, stop 19990 => 19989.75 ; SHORT miroir.
+
+PnL LONG=(effective_exit-effective_entry)*2*quantity ; SHORT inverse exact.
+net_realized_pnl_usd=gross_price_pnl_usd-entry_fee-exit_fee. Le slippage est
+déjà dans les prix effectifs et n'est jamais soustrait une deuxième fois ;
+aucun spread additionnel. diagnostic_total_slippage_cost_usd est seulement
+une métrique d'audit. Aucun cumul de frais dépendant des appels.
+
+Gap stop PR #293 inchangé : LONG stop structurel 20000/Open suivant 19995
+=> base 19995, puis effectif 19994.75, sans retour favorable à l'ancien stop.
+BREACHED_AT_ENTRY_OPEN conserve deux fills de base au même Open ; chacun
+paie son slippage et ses frais. Net=-Fraction(202,100) par contrat et
+-Fraction(404,100) pour deux contrats, symétriquement LONG/SHORT. Aucun
+NO_TRADE/annulation/PnL nul fabriqué.
+
+FeesAndSlippageBookV2 partage le scope stratégie/série du registre de risque.
+account_entry_fill_v2 exige le RiskSizedEntryRecordV2 effectivement FILLED
+et sa source APPROVE canonique. PENDING, REJECT, expiry ou exécution invalide
+sans fill ne paient rien et ne créent aucun record. Quantité exclusivement
+approved_quantity figée à Close[q], sans redimensionnement ou rejet rétroactif.
+Les coûts d'entrée sont immédiatement enregistrés, mais gross/net realized
+PnL et exit sont None jusqu'à une sortie formelle réellement remplie.
+
+account_structural_stop_fill_v2 exige un FILLED_STOP canonique, seule sortie
+formalisée actuellement. ARMED/erreur de monitoring/absence de sortie ne
+créent aucun exit, frais d'exit ou PnL réalisé, notamment en fin de données.
+Le modèle de coûts ne lit aucune OHLCV, barre future ou mark price et ne
+déclenche pas lui-même le stop. Les niveaux, clocks et triggers restent figés.
+
+TradeCostRecordV2 conserve le record complet risque/entrée (régime, pullback,
+EMA, confirmation et quantité) et, si présent, le fill stop complet et les
+coûts d'exit. Les métadonnées d'exit doivent correspondre au stop/à l'entrée
+originaux. Prix de base/effectifs, ticks, frais, total fees, diagnostic
+slippage, PnL gross/net et exit_type sont immuables et traçables. Répéter
+l'entrée ou le stop rend le même registre sans second débit ; ancienne
+observation ARMED ne peut effacer une sortie déjà comptabilisée. Provenance
+altérée et doublons de source refusés.
+
+Le budget prévu de PR #295 demeure 100 USD de risque structurel pré-trade,
+sans révision par les coûts. Une perte nette peut le dépasser : à 100 USD
+prévus sur 2 contrats, stop sans gap => -104.04 USD nets ; un gap peut la
+dépasser davantage. Risque prévu et perte réalisée restent distincts.
+
+Prix, valeurs point/tick, frais, slippage et PnL en Fraction exacts, sans
+float ni arrondi intermédiaire. report_usd_cents_v2 utilise HALF_UP au seul
+reporting monétaire, avec Decimal à deux décimales et Fraction interne
+conservée. Arrondi entier exact indépendant du contexte Decimal, testé
+aux demi-centimes signés et sur rationnels périodiques/grands montants.
+Aucune nouvelle réparation de grille/condition post-fill ajoutée.
+
+Nouveau module src/agicore/trading/ema_pullback_fees_and_slippage_v2.py,
+SHA-256 `612c5397659ded830e43bd8b740442edc6852b389873e2667c37518ce0cfb0b6`.
+Nouveaux tests tests/unit/trading/test_ema_pullback_fees_and_slippage_v2.py,
+SHA-256 `8e791ea05d8a99e8fce664d63e17c8b38a710e121b2460df040bd9aed962dea1`.
+108 nouveaux tests synthétiques PASS en 1.06s ; 1620 tests V2 ciblés PASS en 6.16s.
+7904 tests de régression locaux PASS en 147.96s, 4 avertissements préexistants ;
+hors test_mcp.py (blocage sandbox préexistant), inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS. CI intégrale verte exigée avant
+fusion ; preuves et SHA de merge dans la PR. Périmètre de quatre fichiers ;
+modules/tests antérieurs V2, V1/V1A/V1B et résultats figés inchangés. Tests
+synthétiques de comptabilité composés avec les vraies gates EMA/confirmation,
+Risk Engine, fill de base et stop, sans replay de données de marché.
+Aucun data/, dataset réel, OOS, calibration MNQ, broker ou ordre réel. Aucun
+take profit, breakeven, trailing, EMA/session exit, daily profit lock,
+max daily trades, equity, tarif broker live, bid/ask replay ou slippage dynamique.
+V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
+
+Prochaine gate unique : EMA_PULLBACK_V2_EXIT_POLICY_REQUIRED.
+Décider séparément la politique de sortie et de fin de données avant une
+stratégie V2 complète ; aucun mécanisme ajouté automatiquement. Stop initial,
+fills, quantité et coûts déjà figés conservés. Aucun replay ni ouverture OOS.
 
 ## Limites du produit
 
