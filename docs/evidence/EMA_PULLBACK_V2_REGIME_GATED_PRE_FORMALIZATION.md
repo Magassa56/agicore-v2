@@ -83,7 +83,9 @@ de la collision opposée. Aucun événement n'a priorité sur l'autre. Un contex
 qualifié n'est pas encore un signal d'entrée. L'ordre désormais figé est :
 événement complet, contexte actif, pullback qualifié et consommation unique,
 puis confirmation prix/momentum sur une clôture ultérieure et base fill offline
-à l'Open de la seule barre suivante. Risque, position et sorties restent à définir.
+à l'Open de la seule barre suivante. Le stop structurel et la politique à une
+position sont figés ci-dessous ; Risk Engine/sizing et les autres décisions
+de gestion/sortie restent des gates séparées.
 
 Les seuils d'étendue, de volume et de géométrie des bougies sont désormais fixés
 dans leurs sous-contrats ci-dessous ; aucun ATR ou magnitude MACD n'est fixé. Aucun
@@ -1097,14 +1099,112 @@ time stop, session close exit, Risk Engine ou sizing. La priorité intrabar
 avec une autre sortie sera une gate distincte lorsqu'une telle sortie existera.
 Aucun replay ou accès OOS ; aucune autorisation broker/paper trading.
 
-## Prochaine ambiguïté — nouveaux signaux pendant une position V2 ouverte
+## Une position par série et admission des nouveaux signaux — décision du propriétaire
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED`
+Le 2026-10-04, `EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY_REQUIRED` est
+acquittée par `EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY`. Baseline initiale
+pré-replay non optimisée, indépendante des résultats V1/V1A/V1B et non ajustée
+sur MNQ 03-26 ou MNQ 06-26.
 
-Figer le traitement d'une nouvelle confirmation/opportunité d'entrée lorsque
-une position V2 est déjà ouverte, ainsi que la capacité de positions
-simultanées. Aucune politique V1 ni règle d'empilement, remplacement ou
-réactivation de contexte consommé n'est héritée implicitement. Cette décision
-de gestion de position précède le sizing et les limites du Risk Engine.
-Coûts, take profit, breakeven, trailing et fin de données restent séparés.
-V2 demeure PRE_FORMALIZATION, sans replay ni ouverture OOS.
+```text
+MAX_SIMULTANEOUS_POSITIONS_PER_SERIES = 1
+PYRAMIDING = DISABLED
+HEDGING = DISABLED
+FLIP_ON_OPPOSITE_SIGNAL = DISABLED
+SCALE_IN = DISABLED
+SIGNAL_QUEUE_WHILE_OPEN = DISABLED
+```
+
+Le scope est une instance de stratégie et un instrument/une série. Aucun
+plafond global de portefeuille, agrégation de compte ou exposition croisée.
+`OpenPositionSignalPolicyBookV2` porte explicitement strategy_instance_id et
+series_id ; le caller conserve le registre immuable de ce seul scope.
+
+| État / observation | Résultat |
+| --- | --- |
+| FLAT + nouveau régime complet LONG ou SHORT | Admission dans le lifetime/pullback V2 déjà figé |
+| EntryExecution FILLED LONG | OPEN_LONG |
+| EntryExecution FILLED SHORT | OPEN_SHORT |
+| OPEN_LONG ou OPEN_SHORT + nouvelle opportunité de l'un ou l'autre sens | SUPPRESSED_POSITION_OPEN ; aucun contexte exécutable |
+| StructuralStop FILLED_STOP de cette position | FLAT |
+| Stop ARMED ou échec de monitoring sans fill | Position conservée ouverte |
+
+Un événement, contexte, pullback consommé, confirmation ou exécution PENDING
+n'ouvre aucune position. Seul le fill d'entrée canonique PR #291 ouvre la
+position ; seul un fill terminal d'une sortie formelle la ferme. À cette gate,
+la seule sortie formalisée est FILLED_STOP PR #293. Les futures sorties devront
+respecter cette même machine d'état.
+
+Le blocage intervient avant `advance_ema20_pullback_v2` et toute création de
+RegimeEventContextV2. Pendant OPEN, la composition des événements bruts reste
+disponible en télémétrie, mais le lifetime/pullback n'est pas invoqué et aucun
+mapping OHLC historique/futur n'est consulté pour une nouvelle opportunité.
+Les EMA20, MACD, impulsions et retournements bruts peuvent continuer à être
+calculés séparément pour l'audit. Même une composition AMBIGUOUS reste
+non actionnable ; elle ne ferme ni ne retourne la position.
+
+Tout nouveau signal LONG/SHORT pendant OPEN est définitivement perdu pour
+l'entrée : aucun empilement, couverture, retournement, scale-in, augmentation
+de quantité, recalcul de prix moyen, ordre inverse pending, queue, report ou
+réactivation ultérieure. À l'entrée, le lifetime exécutable est retiré ; ses
+snapshots et la consommation antérieure restent immuables en audit. Après la
+sortie, aucun ancien événement/contexte/pullback/confirmation/pending né pendant
+OPEN n'est restauré. Une nouvelle chaîne doit commencer par un régime complet
+admis après le retour d'éligibilité.
+
+Ordre causal strict pour une nouvelle barre clôturée r :
+
+1. Résoudre le stop de la position existante, à son Open ou pendant r.
+2. Mettre à jour l'état de position à partir du fill terminal éventuel.
+3. Composer/admettre les événements de Close[r] selon cet état.
+4. Seulement si FLAT, appliquer le lifetime/pullback V2 déjà figé.
+
+Une sortie à Open[r] ou INTRABAR sur r permet donc un nouveau régime formé
+à Close[r]. Si la position reste ouverte, ce régime est supprimé. Le nouveau
+contexte admis à Close[r] ne peut jamais être consommé sur sa propre barre r.
+
+BREACHED_AT_ENTRY_OPEN conserve l'entrée FILLED à Open[e], puis son véritable
+stop FILLED_STOP au même Open[e] : OPEN_LONG/OPEN_SHORT puis FLAT, avec les deux
+records liés et leur prix de base exact. Aucune annulation rétroactive ni
+assimilation à NO_TRADE. La résolution à ENTRY_OPEN n'utilise aucun OHLCV de e ;
+le nouveau régime de Close[e] est ensuite admissible.
+
+`apply_position_entry_fill_v2` exige le fill canonique et son pullback réellement
+admis/consommé dans le registre, après sa confirmation clôturée. Cela refuse
+une chaîne externe issue d'un signal supprimé ou une ancienne source restaurée.
+Le stop lié doit être dans son état connu à l'Open d'entrée : aucun résultat
+intrabar ou futur déjà précalculé ne peut y être injecté.
+`resolve_position_stop_v2` réutilise exclusivement la gate PR #293 et ses champs
+autorisés, sans modifier le niveau ou le prix du fill. Monitoring invalide ou
+absent ne fabrique pas une sortie/FLAT. Les gaps temporels ne font pas expirer
+une position ni son stop ; les observations restent séquentielles.
+
+`advance_open_position_signal_policy_v2` assure l'ordre sortie/état/admission,
+puis conserve la décision de Close[r]. Répéter un fill canonique ou une même
+clôture rend le même registre, sans deuxième position ni deuxième transition
+FLAT. Rejouer un fill d'une position déjà clôturée ne la rouvre pas. Modifier
+une provenance ou les événements sous une identité déjà traitée est refusé.
+Les clocks et indices ne peuvent reculer et aucune observation future de stop
+n'est acceptée pour une décision courante.
+
+Suppression conservée : signal_bar_index, signal_timestamp, signal_direction,
+source_event_types, position_state, suppression_reason=POSITION_ALREADY_OPEN,
+active_position_entry_bar_index et active_position_direction. Les records
+d'entrée/stop/sortie conservent immuablement l'événement source, le pullback et
+son EMA exacte, la confirmation et le fill d'entrée. Aucun record supprimé ne
+sert à construire une chaîne d'entrée complète.
+
+Aucun replay, ouverture OOS, calibration MNQ, broker ou ordre réel. Aucun Risk
+Engine, sizing, quantité, coût, take profit, breakeven ou trailing ajouté dans
+cette gate. V2 reste PRE_FORMALIZATION, sans performance évaluée.
+
+## Prochaine ambiguïté — Risk Engine et sizing V2
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING_REQUIRED`
+
+Figer séparément le budget de risque, le calcul exact de quantité et les
+critères de refus d'une nouvelle entrée, avec leur moment causal et leurs
+interactions avec l'Open d'entrée et le stop structurel immuable. Aucun montant,
+plafond de quantité ou modèle de risque V1 n'est hérité. Coûts, take profit,
+breakeven, trailing et fin de données demeurent des gates distinctes.
+Sans replay ni ouverture OOS.
