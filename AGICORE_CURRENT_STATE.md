@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-04 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED ;
+Date : 2026-10-05 UTC.
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -38,6 +38,8 @@ EMA_PULLBACK_V1B_MNQ_03_26_SCREENING_VERDICT = NO_GO_VARIANT ;
 EMA_PULLBACK_V1B_MNQ_03_26_EXPERIMENT_OUTCOME = STOP_INCREMENTAL_EMA_PULLBACK_V1_PATH ;
 EMA_PULLBACK_V1_PATH = TERMINATED ;
 STRATEGY_FAMILY = EMA_PULLBACK_V2_REGIME_GATED ;
+STRATEGY_ID = EMA_PULLBACK_V2_REGIME_GATED_BASELINE ;
+FORMALIZATION_VERSION = 1 ; MODE = OFFLINE_DETERMINISTIC ;
 EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION_STATUS = PASS ;
@@ -60,10 +62,10 @@ EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = PASS ;
 EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
 EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
-EMA_PULLBACK_V2_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED ;
+EMA_PULLBACK_V2_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-exit-policy.
-Base GitHub vérifiée et récupérée : 8576dc560bd6e99f4f7ab0aab2fec9ae1a58d642.
+Branche de vérification : feature/ema-pullback-v2-formalization-audit.
+Base GitHub vérifiée et récupérée : a0a6bb931d2e47ce6bd5e5f54a83450e4b51db59.
 
 ## Acquis vérifiés
 
@@ -1038,7 +1040,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`c878a285db4a58665e5c19f236fc4bcd0b5e4f7eb3934d06791bfabb5781822d`. L'hypothèse porte sur une
+`09360d7f8190522420b288cb83b94efda281098d41be463cdda2cdab680c2fbc`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -2070,11 +2072,92 @@ aucun test antérieur, règle V1/V1A/V1B ou résultat figé modifié.
 Aucun data/, dataset réel, replay, OOS, calibration MNQ, broker ou ordre réel.
 V2 demeure PRE_FORMALIZATION ; rentabilité non évaluée.
 
-Prochaine gate unique : EMA_PULLBACK_V2_FORMALIZATION_REQUIRED.
-Formalisation complète V2 / end-to-end deterministic assembly : composer
-les composants déjà figés, leurs états et phases, provenance et tests
-synthétiques complets sans modifier aucune baseline. Aucun replay, ouverture
-OOS, seuil nouveau ou paramètre optimisé n'est autorisé par cette gate.
+La demande de formalisation du 2026-10-05 est traitée par l'audit ci-dessous.
+
+## V2 — audit des opportunités concurrentes avant le premier fill
+
+Point de départ vérifié : PR #297 fusionnée après CI intégrale #276 verte,
+run `37227320193`, head `cf95cdf6dcfce549bd62d91f64c58d7ed0dacfaf`,
+merge `a0a6bb931d2e47ce6bd5e5f54a83450e4b51db59`, arbre
+`10740a2d36a4cc7c33487114222cfeec921a3423`.
+Le 2026-10-05, le propriétaire demande EMA_PULLBACK_V2_REGIME_GATED_BASELINE,
+version 1, OFFLINE_DETERMINISTIC, par composition des 12 modules existants.
+REAL_DATA_ACCESS, OOS_ACCESS, REPLAY, BROKER_ACCESS, PAPER_TRADING et
+PARAMETER_OPTIMIZATION=FORBIDDEN. Aucun changement métier implicite autorisé.
+Le critère explicite impose une gate pending si deux opportunités actionnables
+concurrentes restent possibles avant l'ouverture d'une position.
+
+Verdict : EMA_PULLBACK_V2_FORMALIZATION=BLOCKED_HUMAN_GATE ;
+NEXT=EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED.
+EMA_PULLBACK_V2_REGIME_GATED demeure PRE_FORMALIZATION. Ni
+FORMALIZED_PRE_REPLAY, ni DEVELOPMENT_PROTOCOL_REQUIRED ne sont atteints.
+
+Contre-exemple causal synthétique composé avec les vraies gates : impulsion
+A à Close[32], pullback A consommé à Close[33], confirmation A attendue.
+À Close[34], A échoue sur le prix et reste AWAITING ; une vraie nouvelle
+impulsion B crée un contexte ACTIVE, la position étant FLAT. À Close[35],
+le pullback B consomme son contexte avant la confirmation finale de A.
+A confirme réellement sur 35, stop connu, risque APPROVE/2 contrats,
+PENDING_NEXT_BAR_OPEN attendu sur 36 ; B reste AWAITING_CONFIRMATION
+avec candidats 36/37. Deux sources distinctes et deux chaînes vivantes.
+Le même scénario existe symétriquement en SHORT, sans mock de prédicat
+ni record d'événement/pullback/confirmation/risque fabriqué.
+
+Le contexte consommé A est irréversible mais sa confirmation conserve son
+snapshot indépendant. La règle same-direction/no-refresh porte seulement
+sur ACTIVE. PR #294 bloque les nouveaux événements quand la position est
+OPEN, pas lorsqu'elle est FLAT avec une chaîne pending. Les registres
+dédupliquent par source ; aucune politique pending de série n'est définie.
+
+B n'est pas de la télémétrie seulement : valeur Open[36]=None dans toutes
+les vues de la même observation => exécution A FAILED_INVALID_EXECUTION_INPUT,
+aucune position. B échoue sur 36, confirme sur 37, stop/risque APPROVE,
+fill réel synthétique sur Open[38]. En variante avec A remplie sur 36,
+B est rejetée POSITION_ALREADY_OPEN si A reste ouverte ; si le stop A
+ferme intrabar sur 36, B est rejetée INVALID_POSITION_POLICY_INPUT car son
+événement 34 précède cette sortie 36. Aucun ancien contexte restauré.
+
+Invariant temporel vérifié séparément : consommation A à kA, première
+nouvelle source B au plus tôt kA+1, pullback B au plus tôt kA+2 ;
+qA<=kA+2 et qB>=kB+1>=kA+3. Les deux confirmations ne peuvent donc
+viser le même Open dans cette séquence causale. Open de A est traité
+avant le premier Close candidat de B. L'audit ne revendique aucune collision
+simultanée de fills ; le critère humain supplémentaire d'une politique
+pour les chaînes concurrentes avant fill reste non satisfait.
+
+Snapshot canonique docs/evidence/EMA_PULLBACK_V2_FROZEN_COMPONENTS_AUDIT_MANIFEST.json,
+SHA-256 `82694c53879a145024b288a53649179bb6484b10757882c8955700bfbe1f4ef6`.
+12 noms/SHA-256 et 80 constantes publiques issus des modules importés,
+id/version/MNQ/1 minute, entry/stop/exit/risk/cost semantics, interdictions
+et absences TP/BE/trailing/time/session. Fractions exactes, Decimal en
+chaîne et durées en microsecondes ; UTF-8, clés triées, séparateurs compacts,
+LF final. Rôle FROZEN_COMPONENT_SNAPSHOT_NOT_APPROVED_STRATEGY ; statut
+BLOCKED_HUMAN_GATE, pending_opportunity_policy=UNRESOLVED. Le manifest final
+approuvé et le hash futur de protocole restent à établir après la gate.
+
+Nouveaux tests tests/unit/trading/test_ema_pullback_v2_pending_opportunity_audit.py,
+SHA-256 `636378c313419224897de94503e8b8209e64023967ad9feaae2e606c80c2a568`.
+13 tests PASS en 0.51s : scénarios LONG/SHORT exécutés deux fois depuis
+des états neufs, égalité structurelle et des octets canoniques, sources,
+provenance, décisions, quantités, stops et fills identiques. Futur indisponible
+sans effet, terminal REJECT non réactivé, duplicate evaluation/fill sans
+doublon et hash manifest stable. 1724 tests V2 PASS en 6.43s.
+8008 régressions locales PASS en 146.12s, 4 avertissements préexistants ;
+hors test_mcp.py (blocage sandbox préexistant), inclus dans la CI intégrale.
+Ruff, format, compilation et diff-check PASS ; CI intégrale verte exigée
+sur le head exact avant publication fusionnée des preuves. Quatre fichiers :
+tests d'audit, snapshot JSON, charte et checkpoint. Les 12 modules runtime
+sont byte-identiques au parent ; aucun test antérieur ni seuil/règle modifié.
+Aucun orchestrateur choisissant A/B, replay, accès data/dataset réel, OOS,
+paper trading, optimisation MNQ, broker ou ordre réel. Rentabilité non évaluée.
+Les autres scénarios obligatoires end-to-end et fins de données restent
+à valider après résolution de cette gate ; tests verts de l'audit != PASS
+de formalisation complète.
+
+Décision métier nécessaire : figer le traitement d'un nouvel événement,
+contexte ou pullback lorsque la série possède déjà une confirmation ou
+une exécution next-Open en attente. Aucune priorité first/latest/LONG/SHORT/
+momentum sélectionnée. Reprendre ensuite l'assemblage complet, sans replay.
 
 ## Limites du produit
 
