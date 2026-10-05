@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-05 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED ;
+Statut : READY — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -62,10 +62,11 @@ EMA_PULLBACK_V2_OPEN_POSITION_SIGNAL_POLICY = PASS ;
 EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = PASS ;
 EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
 EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
-EMA_PULLBACK_V2_FORMALIZATION = BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED ;
+EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
+EMA_PULLBACK_V2_FORMALIZATION = REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-formalization-audit.
-Base GitHub vérifiée et récupérée : a0a6bb931d2e47ce6bd5e5f54a83450e4b51db59.
+Branche de vérification : feature/ema-pullback-v2-pending-opportunity-policy.
+Base GitHub vérifiée et récupérée : 6b8b3513c9850bae1210e32634e37b7f50dde74a.
 
 ## Acquis vérifiés
 
@@ -1040,7 +1041,7 @@ par cette décision ; elle reste une trace historique et ne constitue plus l'arr
 
 Le nouveau programme `EMA_PULLBACK_V2_REGIME_GATED` est `PRE_FORMALIZATION` ; sa charte est
 `docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_PRE_FORMALIZATION.md`, SHA-256
-`09360d7f8190522420b288cb83b94efda281098d41be463cdda2cdab680c2fbc`. L'hypothèse porte sur une
+`71078853b781a8156bc77ef26a7488840d52f49b602e024f8058eb59bb6a07f5`. L'hypothèse porte sur une
 transition de régime ou une impulsion directionnelle précédant le pullback EMA.
 Seule l'infrastructure validée est réutilisable ; les règles d'entrée V1 ne sont
 pas héritées. Le contrat `REGIME_CONTEXT_V2` devra définir événement impulsion/
@@ -2158,6 +2159,68 @@ Décision métier nécessaire : figer le traitement d'un nouvel événement,
 contexte ou pullback lorsque la série possède déjà une confirmation ou
 une exécution next-Open en attente. Aucune priorité first/latest/LONG/SHORT/
 momentum sélectionnée. Reprendre ensuite l'assemblage complet, sans replay.
+
+## EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY — gate définie
+
+Le 2026-10-05, le propriétaire fixe FIRST_CONSUMED_PULLBACK_LOCKS,
+MAX_ACTIONABLE_PENDING_OPPORTUNITIES_PER_SERIES=1, sans queue, remplacement,
+annulation par événement opposé ni refresh same-direction. Scope : une instance
+de stratégie et une série. Aucun scoring ou priorité LONG/SHORT/famille.
+La décision est pré-replay, non optimisée et indépendante de V1/V1A/V1B.
+
+La PR #298 a intégré le contre-exemple sur head
+7b4263cfd7abc8b6d0ae2e7a64ceec6681d35515, CI #278/run 37367147931 success,
+merge 6b8b3513c9850bae1210e32634e37b7f50dde74a,
+arbre ec3dda928a6a2566f3a88953d762c614566f1e49.
+Les preuves historiques BLOCKED restent conservées ci-dessus ; cette nouvelle
+gate résout leur ambiguïté, sans invalider l'audit des composants seuls.
+
+Module ajouté : src/agicore/trading/ema_pullback_pending_opportunity_policy_v2.py.
+Tests : tests/unit/trading/test_ema_pullback_pending_opportunity_policy_v2.py.
+SHA-256 module : ac5530a32df90076d4266a3495d3d60c9fcb99d90f1c4ec0af5e90413a8a8037.
+SHA-256 tests : 367b47771d9df64a9cc9143a93cf78611a67af182bf190d54b7631607196e9f7.
+Seuls ces deux fichiers, la charte et ce checkpoint changent. Les douze
+modules antérieurs, l'audit PR #298 et son manifest sont inchangés.
+
+IDLE avant un pullback formel CONSUMED. À Close[k], acquisition immédiate
+et unique -> AWAITING_CONFIRMATION. Résolution pending avant événements bruts.
+k+1 FAIL garde le verrou ; expiration normale ou Risk REJECT le libère
+avant l'admission du nouvel événement de cette même Close. APPROVE fige
+quantité/source et garde PENDING_ENTRY_EXECUTION jusqu'au prochain Open.
+Les événements pendant le verrou sont SUPPRESSED_PENDING_OPPORTUNITY,
+avec métadonnées minimales complètes, sans contexte/pullback/confirmation B.
+Même direction, direction opposée et composition AMBIGUOUS ne changent A.
+
+FILLED -> transfert atomique au livre de position, zéro opportunité pending.
+BREACHED_AT_ENTRY_OPEN -> entrée réelle puis stop réel au même Open,
+FLAT avant Close[e], nouvelle source courante admissible. Les expirations
+normales d'exécution libèrent ; les erreurs structurelles/non causales et
+les états FAILED restent fail-closed avec leurs preuves, sans déverrouillage
+silencieux. Aucun ancien signal supprimé ou source terminale restauré.
+
+Le scénario PR #298 est repris avec ses vrais événements et gates : A consomme
+à Close[33] ; B est supprimé à Close[34] ; à Close[35], A est approuvé pour
+deux MNQ et attend Open[36], sans contexte ni chaîne B. Miroir SHORT identique.
+Un fournisseur d'événements différé prouve l'ordre confirmation/stop/risque
+avant composition/admission brute. Tous les calculs restent délégués.
+
+64 nouveaux tests PASS en 1.43s. Les scénarios causaux comparés depuis
+des états neufs sont identiques structurellement et en octets canoniques.
+1788 tests V2 PASS en 6.67s ; 8072 régressions locales PASS en 139.64s,
+4 avertissements SQLAlchemy/Python 3.12 préexistants. Hors test_mcp.py
+(blocage local préexistant), inclus dans la CI intégrale avant fusion.
+Ruff/format PASS ; CI intégrale exigée sur le head exact avant fusion.
+
+Après fusion : EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY=PASS ;
+NEXT=EMA_PULLBACK_V2_FORMALIZATION_REQUIRED. Reprendre les scénarios synthétiques
+end-to-end et toutes les terminaisons depuis l'audit. PRE_FORMALIZATION reste
+le statut V2 ; aucun FORMALIZED_PRE_REPLAY ou DEVELOPMENT_PROTOCOL_REQUIRED
+avant cette certification complète. Le manifest d'audit garde le rôle
+FROZEN_COMPONENT_SNAPSHOT_NOT_APPROVED_STRATEGY et son SHA-256 inchangé
+82694c53879a145024b288a53649179bb6484b10757882c8955700bfbe1f4ef6.
+Un nouveau manifest approuvé avec son propre hash suivra seulement un PASS
+complet. Aucun replay, accès data/dataset réel, OOS, optimisation, paper,
+broker, ordre réel ni mesure de rentabilité.
 
 ## Limites du produit
 
