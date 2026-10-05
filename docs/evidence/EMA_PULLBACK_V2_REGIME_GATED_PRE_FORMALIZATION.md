@@ -1568,12 +1568,126 @@ créent ni deuxième exit ni double débit ; une provenance altérée est refus�
 Aucun replay, accès OOS, résultat V2, calibration MNQ, broker ou ordre réel.
 V2 demeure PRE_FORMALIZATION ; aucune performance ou rentabilité démontrée.
 
-## Prochaine gate — formalisation complète V2 et assemblage déterministe
+## EMA_PULLBACK_V2_REGIME_GATED_BASELINE — audit de formalisation demandé
 
-`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED`
+Décision du propriétaire du 2026-10-05 : STRATEGY_ID=
+EMA_PULLBACK_V2_REGIME_GATED_BASELINE, FORMALIZATION_VERSION=1,
+MODE=OFFLINE_DETERMINISTIC. REAL_DATA_ACCESS, OOS_ACCESS, REPLAY,
+BROKER_ACCESS, PAPER_TRADING et PARAMETER_OPTIMIZATION restent FORBIDDEN.
+Composer exclusivement les modules figés ; aucune variante locale, formule,
+constante, seuil, période, taille, coût, délai, fill ou priorité redéfini.
 
-Formaliser séparément le contrat end-to-end : composition des composants déjà
-figés, états terminaux, ordre Open/intrabar/Close, provenance et tests synthétiques
-de la chaîne complète. Ne changer aucun seuil, signal, fenêtre, stop, quantité,
-fill ou coût. Cette gate ne constitue pas un protocole ni une autorisation de
-replay, de sélection de paramètres, d'accès OOS ou de paper/live trading.
+Le contrat demandé enchaîne les vrais événements impulsion/retournement,
+composition du régime, contexte borné, pullback consommé, confirmation,
+stop connu, risque à Close[q], exécution next Open, position, deux sorties,
+coûts et record final. L'ordre requis est Open (entrée, armement, breach,
+stop gap, EMA pending), intrabar (stop), Close (position/EMA exit, événements
+bruts, admission/contexte/pullback, confirmations, stop/risque/next-Open).
+Aucune stratégie end-to-end validée n'est créée tant que la gate ci-dessous
+est ouverte ; tous les composants déjà PASS restent inchangés.
+
+### Verdict — chevauchement réel avant le premier fill
+
+```text
+EMA_PULLBACK_V2_FORMALIZATION = BLOCKED_HUMAN_GATE
+NEXT = EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED
+EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION
+```
+
+Le critère humain de cette formalisation impose cette gate si les composants
+permettent deux opportunités actionnables concurrentes. Un contre-exemple
+causal est reproduit avec des prix/volumes entièrement inventés, les deux
+moteurs d'événements bruts, le vrai pullback EMA, le vrai MACD, le stop et
+le Risk Engine. Aucun RegimeEvent, pullback, confirmation ou risque n'est
+fabriqué/mocking pour obtenir le résultat.
+
+| Moment | Chaîne A | Chaîne B | Position |
+|---|---|---|---|
+| Close[32] | Impulsion qualifiée, contexte ACTIVE | Absente | FLAT |
+| Close[33] | Pullback qualifié, contexte CONSUMED, AWAITING_CONFIRMATION | Absente | FLAT |
+| Close[34] | Premier candidat échoue sur le prix, reste AWAITING | Nouvelle impulsion qualifiée, nouveau contexte ACTIVE | FLAT |
+| Close[35], après pullback avant confirmation | A encore AWAITING | Pullback qualifié, CONSUMED, B AWAITING | FLAT |
+| Close[35], après confirmation/risque | CONFIRMED, risque APPROVE, 2 contrats, PENDING Open[36] | B reste AWAITING, premiers candidats Close[36]/Close[37] | FLAT |
+
+La politique PR #294 supprime les événements uniquement lorsque la position
+est OPEN. Le contexte A consommé est terminal, mais l'opportunité de
+confirmation A possède son propre snapshot. Le nouveau contexte B est donc
+admis alors que A attend encore. La règle same-direction/no-refresh porte
+sur un contexte ACTIVE ; elle n'empêche pas B après consommation de A.
+Les registres de risque/exécution dédupliquent par source, sans réserver
+globalement une chaîne d'entrée pending pour la série.
+
+B est effectivement actionnable : si Open[36] est manquant/invalide,
+l'exécution A échoue. Le même Open invalide est conservé dans toutes les
+vues de cette observation synthétique. B échoue sur Close[36], confirme
+réellement sur Close[37], obtient APPROVE et remplit une entrée à Open[38].
+Les OHLC/volumes/horloges sont synthétiques et toutes les décisions réutilisent
+les gates existantes, sans calcul de formules locales.
+
+Si A remplit réellement à Open[36], les contrôles actuels sont vérifiés :
+position encore OPEN à Close[36] => B REJECT/POSITION_ALREADY_OPEN ;
+stop A intrabar sur 36 => FLAT, mais B REJECT/INVALID_POSITION_POLICY_INPUT,
+car son événement source 34 précède la sortie 36. B ne peut donc restaurer
+un ancien contexte après cette position. Ces branches ne définissent aucune
+priorité A/B lorsque la position reste FLAT avant le premier fill.
+
+### Invariant temporel distinct — pas de collision de deux fills au même Open
+
+Pour deux consommations causales distinctes, A consommée à k implique que
+le premier nouveau contexte B peut apparaître à k+1, puis son pullback à
+k+2 au plus tôt. Les fenêtres figées donnent :
+
+```text
+kB >= kA + 2
+qA <= kA + 2
+qB >= kB + 1 >= kA + 3
+qB > qA
+Open[qB+1] est strictement postérieur à Open[qA+1]
+```
+
+Ce cas ne démontre donc pas deux fills simultanés sur un même Open. Le test
+de bornes, utilisant les constantes importées des gates, vérifie cet invariant.
+L'ordre Open avant Close traite A avant que B puisse être autorisée à son
+premier Close suivant. Il reste néanmoins deux chaînes vivantes/actionnables
+avant l'ouverture ; le critère humain explicite impose de formaliser leur
+politique au lieu de choisir silencieusement conservation, suppression ou
+remplacement dans un orchestrateur.
+
+### Manifest canonique des composants figés, statut bloqué
+
+Le snapshot `EMA_PULLBACK_V2_FROZEN_COMPONENTS_AUDIT_MANIFEST.json` conserve
+strategy_id, version 1, MNQ/1 minute, les 12 composants et leurs SHA-256,
+80 constantes publiques figées, les sémantiques entry/stop/exit/risk/costs,
+les six interdictions et TAKE_PROFIT/BREAKEVEN/TRAILING_STOP/TIME_EXIT/
+SESSION_EXIT=null. Les valeurs proviennent des modules importés, sans
+réécriture des prédicats. Fractions numérateur/dénominateur, Decimal en
+chaîne exacte, durées en microsecondes entières ; aucun float.
+
+UTF-8, clés triées, séparateurs JSON compacts, un LF final ; hash des octets :
+`82694c53879a145024b288a53649179bb6484b10757882c8955700bfbe1f4ef6`.
+Rôle explicite FROZEN_COMPONENT_SNAPSHOT_NOT_APPROVED_STRATEGY ; statut
+BLOCKED_HUMAN_GATE et pending_opportunity_policy=UNRESOLVED. Il documente
+les composants immuables de l'audit. Le manifest final de stratégie et son
+hash pour un futur protocole ne seront approuvés qu'après résolution de
+cette gate et PASS de l'assemblage complet.
+
+Les nouveaux tests exécutent chaque scénario causal deux fois depuis des
+états neufs et comparent états/provenance/décisions/risque/fills structurellement
+et en octets JSON canoniques. Ils couvrent les miroirs LONG/SHORT, les sources
+distinctes, la non-réactivation de B rejetée, les doubles appels, la mutation
+des barres futures indisponibles et la reproduction du manifest/hash.
+Les autres scénarios end-to-end, terminaisons de fin de données et certification
+de l'assemblage complet restent à valider après décision de la gate pending.
+Des tests verts de cet audit ne constituent pas un PASS de formalisation.
+
+## Prochaine gate — politique des opportunités en attente avant position
+
+`BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED`
+
+Définir explicitement le devenir d'un nouvel événement/contexte/pullback
+lorsqu'une confirmation ou une entrée next-Open est déjà en attente pour
+la série. Aucune priorité first/latest/LONG/SHORT/momentum choisie ici.
+Puis reprendre la formalisation complète avec cette règle figée et tous les
+scénarios end-to-end demandés. FORMALIZED_PRE_REPLAY et la gate
+EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL_REQUIRED ne sont pas atteints.
+Aucun replay, dataset réel, OOS, calibration, paper trading ou broker.
