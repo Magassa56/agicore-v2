@@ -1794,3 +1794,92 @@ l'audit synthétique. Un nouveau manifest canonique approuvé, avec son propre
 SHA-256, ne sera produit qu'après FORMALIZATION = PASS. Ne pas passer
 directement au DEVELOPMENT protocol. Aucun replay, données réelles/OOS,
 optimisation, paper trading, broker ou changement des autres règles figées.
+
+## 18. Formalisation end-to-end après la gate pending
+
+EMA_PULLBACK_V2_FORMALIZATION = PASS et
+EMA_PULLBACK_V2_REGIME_GATED = FORMALIZED_PRE_REPLAY après CI intégrale
+verte du head exact et fusion. Les sections 16/17 sont l'historique de
+l'audit puis de sa résolution ; la prochaine gate courante devient
+EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL_REQUIRED.
+
+`ema_pullback_regime_gated_baseline_v2.py` compose les douze modules
+initiaux plus `ema_pullback_pending_opportunity_policy_v2.py`, figé par
+PR #299 (merge 92964a2614682f4d16caf467a1429ca51bc67e37). Aucun de ces
+treize composants n'est modifié. Leurs formules/constantes restent dans
+leurs modules ; aucun seuil, période, coût, délai, quantité, prix ou priorité
+de fill n'est redéfini dans l'assemblage.
+
+L'entrée publique reçoit uniquement des observations inventées à leur moment
+de disponibilité ; elle ne lit aucun fichier de marché et n'importe aucun
+replay/broker. Chaque instance/série porte ses livres immuables, sans état
+de stratégie global caché. Le manifest et sa sérialisation sont indépendants
+de l'instance, de la série et des résultats synthétiques.
+
+Ordre de traitement :
+
+- Open : pending entry native -> bind du stop connu -> breach immédiat ->
+  position existante stop gap -> EMA market pending si le stop n'a pas gagné.
+- Observation OHLC complétée : stop adverse natif d'abord ; s'il ferme la
+  position, aucun signal EMA n'est évalué ensuite à cette Close. Le timestamp
+  exact du trigger intrabar reste inconnu, conformément à PR #293.
+- Close : position finale -> EMA20 exit si OPEN -> résolution confirmation/
+  stop/risque pending -> événements bruts différés -> admission de contexte/
+  pullback selon les gates de position et pending. REJECT/expiration normale
+  libère avant un nouvel événement de la même Close ; APPROVE garde le verrou.
+
+Les entrées et sorties à Open ne consultent jamais High/Low/Close/Volume.
+Seule une barre clôturée est ajoutée au préfixe connu des indicateurs et
+événements. Le registre raw garde l'impulsion, la reversal confirmée de la
+barre précédente et le rejet courant encore en attente. Une barre de rejet
+absente ne crée aucune reversal ; aucune observation synthétique n'est ajoutée.
+
+Le contre-exemple PR #298 et son miroir ne peuvent plus produire B actionnable.
+Les tests vérifient maximum une opportunité pending et une position par série
+après chaque phase, ainsi que zéro queue et zéro restauration de B/ancienne
+provenance après un fill, un rejet, une expiration ou une sortie.
+
+Audit du double événement sur une même Close r : les gates natives actuelles
+ne peuvent produire deux événements complets simultanés. Des directions
+opposées exigeraient les deux couleurs strictes du corps r. Dans le même sens,
+le balayage Low/High du rejet r-1 contredit les Low non décroissants / High
+non croissants exigés dans r-3...r-1 par l'impulsion. Les tests natifs établissent
+cette incompatibilité ; les tests défensifs séparés du compositeur établissent
+double même sens -> QUALIFIED et sens opposés -> AMBIGUOUS. Aucun événement
+complet artificiel n'est injecté dans les parcours end-to-end.
+
+Terminaisons réelles : context ACTIVE -> EXPIRED_END_OF_DATA ; confirmation
+attendue -> terminal incomplete ; pending entry -> EXPIRED_NO_EXECUTION ;
+pending EMA exit -> EXPIRED_NO_EXIT_EXECUTION ; open position -> OPEN_UNREALIZED,
+PnL réalisé absent. Pas de fill final, sortie Close, stop synthétique ni reset
+des objets terminaux. Les échecs structurels/non causaux sont fail-closed.
+
+La comptabilité finale conserve les records natifs position/risk/entry/exit
+et la totalité de leur provenance. Elle délègue tous les frais, slippage et
+PnL à PR #296/#297. Elle ne déduit jamais deux fois le slippage et ne change
+pas la quantité. Breach à l'entrée conserve entrée et stop au même Open de
+base, deux fills facturés ; -2.02 USD/contrat, -4.04 pour deux sur le fixture.
+
+Le nouveau manifest `EMA_PULLBACK_V2_REGIME_GATED_BASELINE_MANIFEST.json`
+contient les treize sources et leurs 86 constantes publiques exactes, le hash
+de l'assemblage, les sémantiques et interdictions. Sérialisation déterministe
+JSON UTF-8, clés triées, compact, LF final ; SHA-256 :
+`965b44c837477bac8a81bbcde5df354997fcd84a0afd4f66f76a30e0a654240a`.
+Ses octets candidats sont approuvés uniquement après CI complète verte du
+head exact et fusion, sans changement du hash. Le futur protocole doit citer
+ce hash précis. Le manifest d'audit historique demeure inchangé et non approuvé
+comme stratégie (SHA `82694c53879a145024b288a53649179bb6484b10757882c8955700bfbe1f4ef6`).
+
+98 nouveaux tests couvrent les parcours natifs LONG/SHORT impulsion/reversal,
+1/2 contrats/REJECT, intrabar/gap/breach, priorité stop, télémétrie suppressions,
+nouvelle admission après sortie, huitième barre/temps inclusif, confirmations,
+expirations d'entrée/sortie EMA, EOF, absence de PnL synthétique, comptabilité
+exacte, symétrie, doublons, causalité et intégrité. Chaque scénario de cycle
+est exécuté au moins deux fois depuis des états neufs ; records et snapshots
+canoniques complets, PnL et hash sont identiques. Les contrats double/AMBIGUOUS
+sont couverts séparément sans modifier les gates.
+
+Aucune observation de performance, aucune donnée réelle/OOS, aucun replay,
+paper trading, broker ou optimisation. La prochaine gate DEVELOPMENT devra
+préengager un nouveau dataset et les mesures/GO-NO_GO ; les données déjà
+utilisées V1 ne peuvent servir à choisir/ajuster V2.
