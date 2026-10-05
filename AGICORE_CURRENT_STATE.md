@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-05 UTC.
-Statut : READY — EMA_PULLBACK_V2_FORMALIZATION_REQUIRED ;
+Statut : READY — EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -40,7 +40,7 @@ EMA_PULLBACK_V1_PATH = TERMINATED ;
 STRATEGY_FAMILY = EMA_PULLBACK_V2_REGIME_GATED ;
 STRATEGY_ID = EMA_PULLBACK_V2_REGIME_GATED_BASELINE ;
 FORMALIZATION_VERSION = 1 ; MODE = OFFLINE_DETERMINISTIC ;
-EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION ;
+EMA_PULLBACK_V2_REGIME_GATED = FORMALIZED_PRE_REPLAY ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION = IMPULSE_OR_REVERSAL_DISTINCT ;
 REGIME_CONTEXT_V2_EVENT_COMPOSITION_STATUS = PASS ;
 DIRECTIONAL_IMPULSE_EMERGING_DIRECTION = PASS ;
@@ -63,10 +63,10 @@ EMA_PULLBACK_V2_RISK_ENGINE_POSITION_SIZING = PASS ;
 EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
 EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
 EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
-EMA_PULLBACK_V2_FORMALIZATION = REQUIRED ;
+EMA_PULLBACK_V2_FORMALIZATION = PASS ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-pending-opportunity-policy.
-Base GitHub vérifiée et récupérée : 6b8b3513c9850bae1210e32634e37b7f50dde74a.
+Branche de vérification : feature/ema-pullback-v2-end-to-end-formalization.
+Base GitHub vérifiée et récupérée : 92964a2614682f4d16caf467a1429ca51bc67e37.
 
 ## Acquis vérifiés
 
@@ -2222,6 +2222,106 @@ Un nouveau manifest approuvé avec son propre hash suivra seulement un PASS
 complet. Aucun replay, accès data/dataset réel, OOS, optimisation, paper,
 broker, ordre réel ni mesure de rentabilité.
 
+## V2 — formalisation end-to-end après résolution du verrou pending
+
+EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY intégré par PR #299 : head
+ba2f0b40e2e759e505de0ca3a1499b4a85917a85, CI #280 / run 37373397201
+success, tous jobs/étapes terminés ; 8076 tests, 5 avertissements en 129.19s.
+Merge 92964a2614682f4d16caf467a1429ca51bc67e37, arbre testé
+576bacd97774e3cb13d6524800260f11d58bc552 vérifié byte-identique et main propre.
+Le blocage PR #298 reste une preuve historique ; la gate pending le résout.
+
+EMA_PULLBACK_V2_FORMALIZATION=PASS ;
+EMA_PULLBACK_V2_REGIME_GATED=FORMALIZED_PRE_REPLAY après CI complète verte
+sur le head exact de cette phase et fusion. NEXT=
+EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL_REQUIRED. Ni protocole réel ni replay
+ne sont lancés dans cette phase.
+
+Assemblage ajouté : src/agicore/trading/ema_pullback_regime_gated_baseline_v2.py.
+Treize gates importées et composées, douze modules initiaux plus pending,
+tous byte-identiques à la base fusionnée. Aucun calcul de prédicat, EMA,
+MACD, stop, risque, quantité, coût ou fill dupliqué ; aucun seuil/période/
+délai/multiplicateur/priorité modifié. MODE=OFFLINE_DETERMINISTIC,
+INPUT_DOMAIN=SYNTHETIC_ONLY ; aucun loader de données, moteur de replay,
+broker, ordre réel, paper trading ou dépendance réseau ajouté.
+
+Open : exécution de l'unique source approuvée, bind du stop déjà connu,
+breach immédiat, puis stop gap avant sortie EMA pending. Seuls index,
+timestamp et Open sont lus. L'extrême adverse OHLC est fourni à la phase
+complétée ; la gate de sortie native résout le stop intrabar avant la
+position finale et le signal Close/EMA. Aucun horaire intrabar inventé.
+Ensuite pending confirmation/stop/risque précède le fournisseur brut et
+l'admission contextuelle, conformément à la décision pending. Les règles
+de durée de vie/consommation sont exclusivement celles des gates natives.
+
+Le scénario causal PR #298 est devenu impossible : A consomme Close[33],
+B est seulement SUPPRESSED_PENDING_OPPORTUNITY à Close[34], A est confirmé
+et approuvé à Close[35] avec une seule exécution pending Open[36]. Pas de
+contexte B, pas de seconde consommation, pas de queue ; invariants vérifiés
+après chaque phase des parcours LONG/SHORT. Une entrée FILLED transfère
+atomiquement à la position ; breach conserve ses deux fills et leurs coûts.
+Après sortie, seule une nouvelle source peut créer une nouvelle chaîne.
+
+Double événement natif sur une même Close : impossible avec ces gates.
+Directions opposées : leurs exigences strictes de couleur du corps sur la
+bougie événement se contredisent. Même direction : le rejet t=r-1 balaie
+strictement Low/High des cinq précédentes, ce qui contredit les Low non
+décroissants / High non croissants de l'émergence impulsive r-3...r-1.
+Cette impossibilité est testée sans forger d'événements métier complets.
+Les contrats défensifs double même sens et AMBIGUOUS sont testés séparément
+sur le compositeur natif ; les suppressions/invalidation demeurent couvertes
+par les tests de gates. Aucune nouvelle priorité stratégique implicite.
+
+Fin réelle de données : contexte ACTIVE -> EXPIRED_END_OF_DATA,
+confirmation attendue -> TERMINAL_INCOMPLETE_CONFIRMATION,
+entrée pending -> EXPIRED_NO_EXECUTION, sortie EMA pending ->
+EXPIRED_NO_EXIT_EXECUTION, position encore ouverte -> OPEN_UNREALIZED.
+Livres scellés et idempotents ; aucun fill final, liquidation Close,
+stop synthétique, restauration de source ou report vers une autre série.
+Les erreurs structurelles/non causales restent fail-closed.
+
+Positions finales : native position + native TradeCostRecord, provenance
+complète depuis régime/pullback/confirmation/stop/risque/entrée/sortie,
+quantité approuvée, fills base/effectifs distincts, frais, gross et net exacts.
+Le PnL provient uniquement de la gate de coûts ; slippage une seule fois.
+Entrée encore ouverte : frais réels d'entrée, PnL réalisé absent.
+BREACHED_AT_ENTRY_OPEN : -2.02 USD par contrat, -4.04 pour deux, sans
+annulation de l'entrée ni fill favorable au niveau stale du stop.
+
+Nouveau manifest canonique :
+docs/evidence/EMA_PULLBACK_V2_REGIME_GATED_BASELINE_MANIFEST.json.
+Rôle CANONICAL_PRE_REPLAY_STRATEGY, version 1, MNQ / 1 minute,
+13 noms/hashes de sources, 86 constantes exactes exportées, hash de
+l'assemblage, sémantiques entry/stop/exit/risk/cost/pending et interdictions.
+TAKE_PROFIT/BREAKEVEN/TRAILING_STOP/TIME_EXIT/SESSION_EXIT=NONE.
+UTF-8 JSON canonique trié compact + LF ; SHA-256 immuable à référencer
+exactement dans le futur protocole DEVELOPMENT :
+965b44c837477bac8a81bbcde5df354997fcd84a0afd4f66f76a30e0a654240a.
+Son approbation dépend de la CI intégrale du head exact et de la fusion ;
+ses octets ne changent pas à l'approbation. Le manifest historique conserve
+FROZEN_COMPONENT_SNAPSHOT_NOT_APPROVED_STRATEGY et SHA
+82694c53879a145024b288a53649179bb6484b10757882c8955700bfbe1f4ef6.
+
+98 tests end-to-end PASS en 7.93s, comprenant 25 scénarios natifs dans
+les deux directions, exécutés au moins deux fois depuis des états neufs,
+snapshots canoniques complets identiques, ainsi que les contrats défensifs
+de composition. Parcours impulsion/reversal, 1/2 contrats/REJECT, stops,
+priorités, admissions après sortie, expirations/EOF, symétrie, doublons,
+Open sans accès OHLCV futur, mutation future, causalité des étapes et
+provenance complète. 1886 tests V2 PASS en 13.91s ; 8170 régressions locales
+PASS en 140.92s, quatre avertissements SQLAlchemy/Python 3.12 préexistants.
+Seul test_mcp.py reste exclu localement pour son blocage préexistant ; il
+est inclus dans la CI intégrale exigée sur le head exact avant fusion.
+Ruff/format/compilation PASS, treize composants et manifest d'audit inchangés.
+SHA source assemblage : 28470b4275e889b753f3e478439fa7d5e46bf0ff394df23ba10eb8cdc29dbb76.
+SHA nouveaux tests : 231c361a4586e543c02499a5b86ec2e5542d89dfe3d79431d926a33ef4cdf2d7.
+
+Aucune donnée réelle ni résultat V2 observé ; aucun accès data/, OOS,
+MNQ 03-26/MNQ 06-26, optimisation ou réglage d'après V1/V1A/V1B.
+Les valeurs PnL citées sont des assertions sur prix inventés, pas une mesure
+de performance. La prochaine gate choisira séparément un nouveau dataset
+DEVELOPMENT et préengagera mesures/GO-NO_GO avant toute donnée réelle.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -2240,6 +2340,7 @@ La comptabilité non réalisée, le modèle versionné de coûts et le protocole
 DEVELOPMENT uniques de V1, V1A et V1B sont respectivement `NO_GO_BASELINE`, `NO_GO_VARIANT` et
 `NO_GO_VARIANT`. La réplication propre MNQ 03-26 de V1B est également `NO_GO_VARIANT` et échoue
 matériellement à reproduire l'edge DEVELOPMENT observé sur MNQ 06-26 ; la voie incrémentale V1 est
-terminée par décision humaine. V2 est un programme distinct en préformalisation.
+terminée par décision humaine. V2 est formalisée offline sur données synthétiques,
+sans validation de performance et sans autorisation de replay/paper/broker.
 Aucune performance indépendante n'est démontrée et l'OOS reste fermé. Cette
 stratégie demeure distincte de EMA19/50 V3 rejetée.
