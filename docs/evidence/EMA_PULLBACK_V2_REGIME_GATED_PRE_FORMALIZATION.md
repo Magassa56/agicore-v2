@@ -1680,7 +1680,7 @@ Les autres scénarios end-to-end, terminaisons de fin de données et certificati
 de l'assemblage complet restent à valider après décision de la gate pending.
 Des tests verts de cet audit ne constituent pas un PASS de formalisation.
 
-## Prochaine gate — politique des opportunités en attente avant position
+## Gate requise lors de l'audit PR #298 — politique pending
 
 `BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY_REQUIRED`
 
@@ -1691,3 +1691,106 @@ Puis reprendre la formalisation complète avec cette règle figée et tous les
 scénarios end-to-end demandés. FORMALIZED_PRE_REPLAY et la gate
 EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL_REQUIRED ne sont pas atteints.
 Aucun replay, dataset réel, OOS, calibration, paper trading ou broker.
+
+## 17. EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY — baseline figée
+
+Décision propriétaire du 2026-10-05, après le contre-exemple de PR #298 :
+
+```text
+MAX_ACTIONABLE_PENDING_OPPORTUNITIES_PER_SERIES = 1
+PENDING_OPPORTUNITY_LOCK = FIRST_CONSUMED_PULLBACK_LOCKS
+PENDING_OPPORTUNITY_QUEUE = DISABLED
+PENDING_OPPORTUNITY_REPLACEMENT = DISABLED
+OPPOSITE_EVENT_CANCELS_PENDING = FALSE
+SAME_DIRECTION_EVENT_REFRESHES_PENDING = FALSE
+EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS
+NEXT = EMA_PULLBACK_V2_FORMALIZATION_REQUIRED
+EMA_PULLBACK_V2_REGIME_GATED = PRE_FORMALIZATION
+```
+
+Scope : une instance de stratégie, un instrument/une série. Aucun plafond
+portfolio, scoring, priorité LONG/SHORT, impulse/reversal ou remplacement.
+Ces constantes pré-replay sont non optimisées et indépendantes des résultats
+V1/V1A/V1B. Les douze composants figés demeurent byte-identiques à PR #298.
+
+Le module `ema_pullback_pending_opportunity_policy_v2.py` compose leurs
+livres et fonctions existants. Un événement ou contexte ACTIVE n'acquiert
+pas le verrou. Les règles d'âge, d'invalidation et de remplacement d'un
+contexte avant pullback restent entièrement celles du module figé.
+
+Le premier EMA20 pullback formellement qualifié et CONSUMED à Close[k]
+acquiert le verrou : IDLE -> AWAITING_CONFIRMATION. Le candidat k+1 qui
+échoue conserve ce verrou jusqu'au second candidat autorisé. Une confirmation
+PASS appelle le stop initial puis le Risk Engine déjà figés à la même Close.
+APPROVE -> PENDING_ENTRY_EXECUTION, quantité et source originales conservées.
+Un événement same/opposite/AMBIGUOUS ne remplace ni n'invalide cette source.
+
+Ordre causal d'une clôture : résoudre la position existante ; résoudre la
+confirmation pending, le stop et le risque éventuels ; déterminer le verrou ;
+appeler le fournisseur des événements bruts ; composer et enregistrer la
+télémétrie ; filtrer les événements actionnables ; déléguer l'admission normale
+au module position/contexte seulement selon cette éligibilité. Un nouveau
+pullback consommé prend alors l'unique verrou.
+
+RISK REJECT ou expiration normale de confirmation libère le verrou avant
+l'admission d'un nouvel événement formé à cette même clôture. Le nouvel
+événement crée au plus un contexte frais, inéligible sur sa propre barre.
+Aucun événement précédemment supprimé n'est restauré. APPROVE conserve
+le verrou et supprime les nouveaux événements de cette même clôture.
+
+Le module position reçoit les seuls événements actionnables. La composition
+brute et les suppressions sont conservées séparément dans le livre pending.
+L'horloge Close requise par l'enregistrement du risque est fournie par un
+snapshot immuable du module position avec les entrées actionnables filtrées.
+En cas de REJECT, ce snapshot de travail n'est pas enregistré comme décision
+de régime : l'admission réelle est ensuite exécutée depuis le livre précédent,
+après libération, avec les événements courants. Aucune formule du risque,
+du stop, du contexte, du pullback ou de la confirmation n'est recopiée.
+
+À l'unique prochain Open autorisé, l'exécution reste celle de PR #291/#295.
+FILLED lie le stop déjà connu puis transfère atomiquement l'opportunité
+à la position formelle : aucun instant d'éligibilité entre fill et OPEN.
+BREACHED_AT_ENTRY_OPEN conserve l'entrée FILLED puis le stop FILLED_STOP
+au même Open ; la position est FLAT avant la nouvelle Close. La politique
+de position reprend l'admission et les sorties ; la source pending est terminale.
+EXPIRED_NO_EXECUTION/EXPIRED_EXECUTION_GAP libère le verrou, sans fill.
+
+Les incohérences d'horloge, de provenance, de transition ou d'observation
+obligatoire ne libèrent jamais silencieusement le verrou. Les exceptions
+des composants restent fail-closed. Les états FAILED d'exécution/monitoring
+conservent leur preuve canonique dans l'erreur de la boundary et arrêtent
+le scénario ; ils ne deviennent pas une expiration normale.
+
+Les suppressions conservent index/timestamp/direction/types de l'événement,
+source_event_bar/pullback_bar/direction/état du propriétaire, et la raison
+PENDING_OPPORTUNITY_ALREADY_ACTIVE. Elles n'engendrent aucun contexte,
+pullback, confirmation, décision de risque ou exécution B. Aucun stockage
+d'une queue ou mécanisme de réactivation n'existe.
+
+Chaque livre et record est immuable ; les doublons de consommation et les
+changements de provenance sont rejetés. Une Close répétée et une exécution
+terminale répétée ne relisent aucun prix ni fournisseur d'événements.
+À la fin réelle des données, une confirmation encore attendue est scellée
+TERMINAL_INCOMPLETE_CONFIRMATION sans faux candidat ; une entrée pending
+devient EXPIRED_NO_EXECUTION via la gate native. Contexte et position gardent
+leurs terminaisons dans leurs propres modules, pour l'assemblage suivant.
+
+64 tests synthétiques couvrent le scénario natif de PR #298 et son miroir,
+les événements same/opposite/AMBIGUOUS/duaux, le comportement contextuel avant
+verrou, les échecs k+1/k+2, REJECT/APPROVE à la même Close, les expirations,
+le transfert de position/breach, l'absence de restauration B, l'ordre effectif
+confirmation/stop/risque avant fournisseur brut, la causalité, l'idempotence,
+les incohérences fail-closed, la fin des données et la symétrie exacte.
+Les scénarios causaux sont comparés depuis des états neufs, structurellement
+et en octets JSON canoniques.
+
+Le manifest historique `EMA_PULLBACK_V2_FROZEN_COMPONENTS_AUDIT_MANIFEST.json`
+reste inchangé, SHA-256
+`82694c53879a145024b288a53649179bb6484b10757882c8955700bfbe1f4ef6`,
+FROZEN_COMPONENT_SNAPSHOT_NOT_APPROVED_STRATEGY. La nouvelle gate résout
+le blocage de concurrence ; elle ne certifie pas les autres scénarios
+end-to-end de la formalisation complète. Reprendre cet assemblage depuis
+l'audit synthétique. Un nouveau manifest canonique approuvé, avec son propre
+SHA-256, ne sera produit qu'après FORMALIZATION = PASS. Ne pas passer
+directement au DEVELOPMENT protocol. Aucun replay, données réelles/OOS,
+optimisation, paper trading, broker ou changement des autres règles figées.
