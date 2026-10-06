@@ -68,8 +68,8 @@ EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte 
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
 NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-lineage-human-attestation.
-Base GitHub vérifiée et récupérée : 60d86bd437f54a08f4ba7a20070a6cbeaa48ab99.
+Branche de vérification : feature/ema-pullback-v2-parent-raw-timezone-evidence.
+Base GitHub vérifiée et récupérée : 08472f763309ccca9de7e57624960ed3f2607c9f.
 
 ## Acquis vérifiés
 
@@ -2412,7 +2412,7 @@ CANONICAL_DATASET_ID=NONE ; SOURCE_RAW_SHA256=NONE ;
 REAL_STRATEGY_REPLAY=NOT_EXECUTED. Aucun RAW acquis/ouvert/hashé.
 Le rapport JSON canonique de blocage et son Markdown sont dans docs/evidence/.
 DATASET_LINEAGE_MANIFEST_SHA256 :
-99333bd31fbfe1d5c936fa5bd528bd0784da888cb2b6f04e02e705f707d9b079.
+934a3791a87f43f7025024b94fdc9213f2c61e60201564c96f0b1ee89b215af1.
 Ce hash identifie un audit BLOCKED, jamais un dataset approuvé ni une autorisation.
 Le reçu séparé fourni est uniquement un TEMPLATE_NOT_EVIDENCE, champs observés null.
 
@@ -2431,6 +2431,23 @@ via previous_lineage_manifest_sha256. PR #302 intégrée par merge
 60d86bd437f54a08f4ba7a20070a6cbeaa48ab99, CI #286 / run 37506050324
 success : 8245 tests, cinq avertissements, 148.58s.
 
+Preuve Windows/filesystem additionnelle reçue à 2026-10-06T21:55:55+02:00 :
+parent déclaré immuable, SHA-256
+fa41a98a56956a11ec3b2249eb579a699db7989378d06f971d22fa014cf277ad,
+taille 4724667 octets. Windows=Romance Standard Time, base=+01:00,
+SupportsDaylightSavingTime=TRUE ; horloge observée 21:47:58+02:00.
+LastWriteTime parent=21:36:45+02:00 / 19:36:45Z le même jour sur la même
+machine. Approximation filesystem du moment d'export, pas un horodatage
+natif NinjaTrader ; conversion par l'offset observé +02:00, jamais +01:00.
+Preuve EMA_PULLBACK_V2_DEVELOPMENT_DATASET_PARENT_RAW_TIMEZONE_EVIDENCE.json,
+SHA-256 37054e14f402a164b2205e9d25f2fe7e77858f3d945cc7c8e552dd98feaf2f46.
+Identité parent USER_DECLARED_NOT_LOCALLY_RECOMPUTED, zéro octet RAW lu.
+Aucun fuseau/sémantique des barres ou calendrier de session n'est inféré.
+Les cinq blocages restent ouverts ; le modèle de reçu vide est inchangé.
+Révisions de manifest précédentes conservées ; attestation inchangée.
+PR #303 intégrée par merge 08472f763309ccca9de7e57624960ed3f2607c9f,
+CI #288 / run 37510820582 success : 8245 tests, cinq avertissements, 143.80s.
+
 Métadonnées CME consultées sans prix : échéance précédente 18 juin 2026
 (Juneteenth le lendemain), échéance candidat 18 septembre 2026 à 08:30 Chicago
 / 13:30 UTC. Le candidat est terminé au 6 octobre. L'OPEN précis de la première
@@ -2438,7 +2455,8 @@ session MNQ après l'échéance précédente n'est pas prouvé dans la table pro
 Juneteenth récupérée ; la période canonique reste non fixée avant les prix.
 Les rolls usuels CME ne remplacent pas la convention post-expiration demandée.
 
-Autres preuves manquantes : un seul MNQ 09-26.Last.txt et son hash immédiat,
+Autres preuves manquantes : les octets MNQ 09-26.Last.txt et la vérification
+locale du SHA/taille parent déclarés,
 reçu d'export contemporain complet, paramètres observés et chaîne fournisseur,
 version NinjaTrader, timestamps/fuseaux/DST, puis tous les contrôles d'intégrité
 RAW. Last / 1 Minute / DoNotMerge / CME US Index Futures ETH restent prescrits ;
@@ -2446,7 +2464,7 @@ aucun Bid/Ask nécessaire. MNQ 06-26 et MNQ 03-26 restent exclus.
 Aucune transformation, bougie synthétique, donnée OOS, module stratégique,
 trade counting, PnL, optimisation ou replay. Reaction Engine reste rouge.
 Validation locale : 17 tests du contrat de filiation sur métadonnées synthétiques
-PASS en 0.51s ; sérialisation/hash rejoués deux fois, champs null et absence de
+PASS en 0.15s ; sérialisation/hash rejoués deux fois, champs null et absence de
 canonisation vérifiés, quatre documents uniquement et diff-check PASS.
 
 NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED, reprise de la même
