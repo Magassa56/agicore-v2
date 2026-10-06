@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-06 UTC.
-Statut : READY — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
+Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -64,10 +64,12 @@ EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
 EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
 EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
 EMA_PULLBACK_V2_FORMALIZATION = PASS ;
-EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS après CI complète verte et fusion ;
+EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte ;
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-development-protocol.
-Base GitHub vérifiée et récupérée : ffa4f13dd01f4870462c4e71aa0f3dd35f77f61a.
+Branche de vérification : feature/ema-pullback-v2-development-dataset-lineage-audit.
+Base GitHub vérifiée et récupérée : 547bdf60c5c71d67abbbe490b35c2f36d7d7354a.
 
 ## Acquis vérifiés
 
@@ -2396,6 +2398,52 @@ ses quatre tests restent inclus dans la CI intégrale requise avant fusion.
 Ruff, format, compilation et diff-check PASS. Périmètre de cinq fichiers.
 Aucun accès données réelles/OOS, broker, paper trading, replay, optimisation,
 ni résultat V2. Preuves du head exact et CI intégrale conservées dans la PR.
+
+## V2 — gate de filiation DEVELOPMENT bloquée avant lecture RAW
+
+Protocole intégré par PR #301, merge 547bdf60c5c71d67abbbe490b35c2f36d7d7354a,
+arbre 50f31d4ba6b390fcbde801b220dae05529f092fa ; CI #284 / run 37501047898
+success, 8245 tests et cinq avertissements en 146.21s. Les bindings recalculés
+restent exacts : manifest stratégie 965b44c837477bac8a81bbcde5df354997fcd84a0afd4f66f76a30e0a654240a,
+protocole 68dc6e6409aea4efb88e4a19e09a7ba17a68043a79f14ec23e569d3353267402.
+
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE=BLOCKED_HUMAN_GATE ;
+CANONICAL_DATASET_ID=NONE ; SOURCE_RAW_SHA256=NONE ;
+REAL_STRATEGY_REPLAY=NOT_EXECUTED. Aucun RAW acquis/ouvert/hashé.
+Le rapport JSON canonique de blocage et son Markdown sont dans docs/evidence/.
+DATASET_LINEAGE_MANIFEST_SHA256 :
+ae8b9a6a0cc438ff2ee3eff4d139e47544146cf2dda223a416a5f3b4c6dda8d6.
+Ce hash identifie un audit BLOCKED, jamais un dataset approuvé ni une autorisation.
+Le reçu séparé fourni est uniquement un TEMPLATE_NOT_EVIDENCE, champs observés null.
+
+Recherche des fichiers texte suivis et des diffs dans les refs Git locaux
+disponibles : quatre références procédurales au candidat et deux commits du
+protocole sans replay, aucun usage de performance trouvé dans le scope inspecté.
+Preuve partielle seulement : aucun usage externe ne peut être déduit de GitHub.
+Les deux attestations humaines explicites manquent ; la phrase citée dans
+la mission comme exemple n'est pas une attestation personnelle.
+
+Métadonnées CME consultées sans prix : échéance précédente 18 juin 2026
+(Juneteenth le lendemain), échéance candidat 18 septembre 2026 à 08:30 Chicago
+/ 13:30 UTC. Le candidat est terminé au 6 octobre. L'OPEN précis de la première
+session MNQ après l'échéance précédente n'est pas prouvé dans la table produit
+Juneteenth récupérée ; la période canonique reste non fixée avant les prix.
+Les rolls usuels CME ne remplacent pas la convention post-expiration demandée.
+
+Autres preuves manquantes : un seul MNQ 09-26.Last.txt et son hash immédiat,
+reçu d'export contemporain complet, paramètres observés et chaîne fournisseur,
+version NinjaTrader, timestamps/fuseaux/DST, puis tous les contrôles d'intégrité
+RAW. Last / 1 Minute / DoNotMerge / CME US Index Futures ETH restent prescrits ;
+aucun Bid/Ask nécessaire. MNQ 06-26 et MNQ 03-26 restent exclus.
+Aucune transformation, bougie synthétique, donnée OOS, module stratégique,
+trade counting, PnL, optimisation ou replay. Reaction Engine reste rouge.
+Validation locale : 17 tests du contrat de filiation sur métadonnées synthétiques
+PASS en 0.31s ; sérialisation/hash rejoués deux fois, champs null et absence de
+canonisation vérifiés, quatre documents uniquement et diff-check PASS.
+
+NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED, reprise de la même
+gate avec preuves ; après PASS seulement DEVELOPMENT_REPLAY_IMPLEMENTATION_REQUIRED.
+Une transformation nécessaire ouvrirait DATASET_TRANSFORMATION_REQUIRED séparément.
 
 ## Limites du produit
 
