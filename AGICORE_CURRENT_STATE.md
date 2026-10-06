@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-05 UTC.
-Statut : READY — EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL_REQUIRED ;
+Date : 2026-10-06 UTC.
+Statut : READY — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -64,9 +64,10 @@ EMA_PULLBACK_V2_FEES_AND_SLIPPAGE_MODEL = PASS ;
 EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
 EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
 EMA_PULLBACK_V2_FORMALIZATION = PASS ;
+EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS après CI complète verte et fusion ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-end-to-end-formalization.
-Base GitHub vérifiée et récupérée : 92964a2614682f4d16caf467a1429ca51bc67e37.
+Branche de vérification : feature/ema-pullback-v2-development-protocol.
+Base GitHub vérifiée et récupérée : ffa4f13dd01f4870462c4e71aa0f3dd35f77f61a.
 
 ## Acquis vérifiés
 
@@ -2321,6 +2322,80 @@ MNQ 03-26/MNQ 06-26, optimisation ou réglage d'après V1/V1A/V1B.
 Les valeurs PnL citées sont des assertions sur prix inventés, pas une mesure
 de performance. La prochaine gate choisira séparément un nouveau dataset
 DEVELOPMENT et préengagera mesures/GO-NO_GO avant toute donnée réelle.
+
+## V2 — protocole DEVELOPMENT préengagé, sans replay
+
+Formalisation précédente intégrée par PR #300 : head
+5a57458441357a303b2b14875a2f43a7cc345b6b, CI #282 / run 37376975961
+success, 8174 tests et cinq avertissements en 133.29s. Merge
+ffa4f13dd01f4870462c4e71aa0f3dd35f77f61a, arbre testé
+43560b62785c8ceebf952952cf44af4287063883. Base de cette phase vérifiée propre.
+
+EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL=PASS après CI intégrale verte sur
+le head exact et fusion ; NEXT=
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED. Aucun replay,
+aucun dataset canonique ni validation de performance V2 dans cette phase.
+
+Protocole canonique docs/evidence/EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL.json,
+UTF-8 compact, tri récursif et LF final ; DEVELOPMENT_PROTOCOL_SHA256 :
+68dc6e6409aea4efb88e4a19e09a7ba17a68043a79f14ec23e569d3353267402.
+Document compagnon Markdown et outil tools/ema_pullback_v2_development_protocol.py.
+Le digest reste hors du payload hashé, épinglé dans le Markdown et l'outil.
+Manifest de stratégie autorisé, immuable et byte-identique à la base :
+965b44c837477bac8a81bbcde5df354997fcd84a0afd4f66f76a30e0a654240a.
+Tous les modules trading restent inchangés. Hash incorrect = FAIL_CLOSED.
+
+Sélection préengagée sur expiration décroissante des contrats MNQ trimestriels
+terminés admissibles, 1 Minute / Last / DoNotMerge / CME US Index Futures ETH.
+MNQ 06-26 et MNQ 03-26 interdits ; MNQ 09-26 seulement candidat attendu,
+filiation NOT_EVALUATED. Aucun RAW lu/acquis, aucune preuve inventée, aucun
+résultat/graphique inspecté. Contamination V2 prouvée -> rejet et même règle
+sur le suivant. UNKNOWN ne devient jamais admissible par défaut.
+Rôle unique EXPOSED_DEVELOPMENT, irréversible au premier futur replay.
+
+Seuils NET après coûts V2 : 100 trades, +200 USD, PF 1.15, marked DD <=750 USD,
+loss streak <=8. Trois tiers chronologiques de temps écoulé ; frontières
+rationnelles de microsecondes connues avant résultats, attribution par fill
+de sortie. Minimum 15 trades chacun, deux segments net strictement positifs,
+PF >=0.80 et net >=-200 USD chacun. Aucun trade-count/PnL-based découpage.
+
+Outil pur hors runtime : vérification des deux documents et quatre hashes
+de run, sélection de métadonnées déclarées et screening exact Fraction.
+PF sans pertes avec gains = POSITIVE_INFINITY sérialisable ; sans gains =0.
+Trade net nul remet la loss streak à zéro. Mark requis à chaque Close réel,
+realized net réconcilié aux trades clôturés, plus unrealized de la position
+ouverte depuis l'entrée effective et son frais déjà payé. Aucun coût de
+sortie hypothétique ni liquidation finale. Initial equity=0 ; peak-to-trough
+marked drawdown exact, sans arrondi. Aucun prix OHLCV ni indicateur recalculé.
+
+RESULT_SCHEMA complet préengagé : comptes de toutes les étapes/quantités,
+LONG/SHORT, types de sortie, coûts distincts, net, statistiques, segments,
+marks, provenance et états terminaux. Frais clôturés/entrée ouverte séparés,
+slippage diagnostique jamais soustrait une seconde fois. Trades par jour/session
+diagnostiques seulement. La fonction de screening retourne un résumé et
+ne prétend pas produire un résultat de replay complet.
+
+INSUFFICIENT_SAMPLE prioritaire -> SAMPLE_EXTENSION_REQUIRED, ni GO ni NO_GO.
+Échantillon suffisant + tous critères -> GO_TO_INDEPENDENT_VALIDATION ;
+sinon NO_GO_BASELINE. Stratégie/seuils inchangés dans tous les cas ; aucune
+optimisation automatique. Une variante exige une nouvelle hypothèse explicite
+et son propre préengagement avant ses résultats.
+
+Futur run ONCE seulement après protocole PASS, filiation PASS et gate séparée,
+identité immutable strategy/protocol/RAW/runner SHA-256 enregistrée avant
+exécution. Rerun uniquement pour mêmes inputs/code/output hashes, sans remplacer
+le verdict original. Validation indépendante non sélectionnée, scellée jusqu'à GO.
+
+71 tests synthétiques ciblés PASS en 0.68s : frontières inclusives/strictes,
+insuffisance prioritaire, stabilité des tiers exacts, PF infini, zéro/reset,
+marked equity, open final sans clôture, hashes/rôles refusés, contamination,
+couverture/réconciliation et rerun/déterminisme/immutabilité sans I/O.
+Régression locale : 8241 PASS, quatre avertissements préexistants en 188.53s.
+Seul tests/unit/test_mcp.py exclu localement pour blocage de ports préexistant ;
+ses quatre tests restent inclus dans la CI intégrale requise avant fusion.
+Ruff, format, compilation et diff-check PASS. Périmètre de cinq fichiers.
+Aucun accès données réelles/OOS, broker, paper trading, replay, optimisation,
+ni résultat V2. Preuves du head exact et CI intégrale conservées dans la PR.
 
 ## Limites du produit
 
