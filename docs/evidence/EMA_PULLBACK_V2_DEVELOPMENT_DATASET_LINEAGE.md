@@ -12,7 +12,7 @@ aucun dataset et ne donne aucune autorisation de replay.
 | DATASET_ROLE | `EXPOSED_DEVELOPMENT` |
 | CANONICAL_DATASET_ID | `NONE` |
 | SOURCE_RAW_SHA256 | `NONE` |
-| DATASET_LINEAGE_MANIFEST_SHA256 | `ae8b9a6a0cc438ff2ee3eff4d139e47544146cf2dda223a416a5f3b4c6dda8d6` |
+| DATASET_LINEAGE_MANIFEST_SHA256 | `99333bd31fbfe1d5c936fa5bd528bd0784da888cb2b6f04e02e705f707d9b079` |
 | REAL_STRATEGY_REPLAY | `NOT_EXECUTED` |
 | NEXT | `EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED` |
 
@@ -55,15 +55,26 @@ de stratégie ou optimisation sur ce contrat n'a été trouvée dans ce scope.
 
 Ce résultat ne prouve pas l'absence d'usage externe, de refs non récupérés,
 de rapports Windows ou de données non suivies. Il ne remplace jamais les
-deux attestations humaines. Le message de mission cite une phrase à fournir
-si elle est vraie ; cette citation n'est pas une attestation personnelle.
+deux attestations humaines. Lors de l'audit initial, le message de mission
+citait une phrase à fournir, sans déclaration personnelle. Le 6 octobre à
+20:17:06 Europe/Paris (18:17:06 UTC), l'utilisateur de cette conversation a
+fourni cette déclaration explicitement : les deux exigences d'attestation
+sont désormais satisfaites.
 `MNQ 06-26` et `MNQ 03-26` restent explicitement exclus. Aucune contamination
 du candidat n'est prouvée, et aucun contrat de remplacement n'est choisi.
 
-La phrase suivante doit être fournie explicitement et sincèrement par
-l'humain ; auteur, date et référence de preuve devront être conservés :
+Déclaration reçue, conservée textuellement avec son auteur conversationnel,
+sa date de soumission et une preuve JSON distincte :
 
 > Je confirme que je n’ai pas utilisé MNQ 09-26 pour sélectionner, régler ou évaluer les performances de V2, et que je n’ai pas inspecté de résultat de performance V2 sur ce contrat avant la présente gate de filiation.
+
+Preuve : `EMA_PULLBACK_V2_DEVELOPMENT_DATASET_HUMAN_ATTESTATION.json`,
+SHA-256 `395b1f96429da11604248d0760fe6fc71e88acfa8c9b55aa7e9d078f0ba6a264`.
+Les deux champs
+`prior_performance_use` et `v2_performance_inspection` portent
+`RECEIVED_EXPLICIT`. Ce document conserve la déclaration humaine ; il
+ne constitue pas le reçu d’export. Le reçu réel reste à fournir.
+Le rapport précédent reste traçable par son hash `ae8b9a6a0cc438ff2ee3eff4d139e47544146cf2dda223a416a5f3b4c6dda8d6`.
 
 ## Période contractuelle avant les prix
 
@@ -127,8 +138,9 @@ reçu ; aucune sémantique UTC/Paris/Chicago n'est supposée pour le RAW.
 
 ## Contrôles RAW non exécutés
 
-Aucun RAW n'est fourni pour cette gate et l'éligibilité humaine reste
-bloquée. Aucun fichier candidat n'a été acquis, ouvert ou hashé. Les contrôles
+Aucun RAW n'est fourni pour cette gate ; la période exacte et les preuves
+d'export restent bloquées. Aucun fichier candidat n'a été acquis, ouvert ou
+hashé. Les deux attestations humaines sont reçues. Les contrôles
 de lisibilité, lignes et bornes, ordre strict, doublons, lignes malformées,
 OHLC finis et valides, volume fini non négatif, grille exacte 0.25,
 structure minute/gaps, DST/fuseaux, identité et absence de merge portent
@@ -146,11 +158,11 @@ transformation explicite, déterministe et hashée avec filiation parent.
 
 ## Reprise de la gate
 
-Les blocages précis sont les deux attestations manquantes, l'OPEN de la
-première session post-échéance non résolu, le RAW et son hash immédiat non
-fournis, le reçu contemporain absent, les sémantiques de timestamps/session
-non prouvées et l'intégrité RAW non évaluée. La réponse à une attestation
-ne vaut pas validation des autres points.
+Les deux blocages d'attestation sont levés. Les cinq blocages restants
+sont l'OPEN de la première session post-échéance non résolu, le RAW et son
+hash immédiat non fournis, le reçu contemporain absent, les sémantiques de
+timestamps/session non prouvées et l'intégrité RAW non évaluée. Le statut
+global reste `BLOCKED_HUMAN_GATE`.
 
 Une fois toutes les preuves suffisantes, seulement alors fixer MNQ 09-26
 comme canonique et construire l'identifiant depuis les huit premiers
@@ -166,11 +178,15 @@ exacts et reste hors du payload pour éviter une auto-référence circulaire.
 Le modèle de reçu utilise la même sérialisation déterministe.
 
 Vérifications locales : 17 tests existants du contrat de filiation sur
-métadonnées synthétiques PASS en 0.31s ; sérialisation canonique rejouée
+métadonnées synthétiques PASS en 0.51s ; sérialisation canonique rejouée
 deux fois, hashes recalculés, champs bloqués/null et modèle vide contrôlés,
 conversion de l'heure contractuelle Chicago/UTC exacte, périmètre limité
 aux quatre documents vérifié et `git diff --check` PASS. Aucun nouveau
 module Python de checklist ni calcul stratégique n'a été ajouté.
+
+Mise à jour d'attestation : déclaration exacte et horodatage local/UTC
+vérifiés, preuve JSON hashée, deux blocages retirés et cinq conservés.
+Le modèle de reçu vide et les champs RAW restent inchangés.
 
 Aucun appel à un module de signal V2, EMA20, MACD, risque, exécution,
 stop, sortie ou PnL ; aucun comptage de trades, graphique V2, donnée OOS,
