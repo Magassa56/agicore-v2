@@ -68,8 +68,8 @@ EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte 
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
 NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-development-dataset-lineage-audit.
-Base GitHub vérifiée et récupérée : 547bdf60c5c71d67abbbe490b35c2f36d7d7354a.
+Branche de vérification : feature/ema-pullback-v2-lineage-human-attestation.
+Base GitHub vérifiée et récupérée : 60d86bd437f54a08f4ba7a20070a6cbeaa48ab99.
 
 ## Acquis vérifiés
 
@@ -2412,7 +2412,7 @@ CANONICAL_DATASET_ID=NONE ; SOURCE_RAW_SHA256=NONE ;
 REAL_STRATEGY_REPLAY=NOT_EXECUTED. Aucun RAW acquis/ouvert/hashé.
 Le rapport JSON canonique de blocage et son Markdown sont dans docs/evidence/.
 DATASET_LINEAGE_MANIFEST_SHA256 :
-ae8b9a6a0cc438ff2ee3eff4d139e47544146cf2dda223a416a5f3b4c6dda8d6.
+99333bd31fbfe1d5c936fa5bd528bd0784da888cb2b6f04e02e705f707d9b079.
 Ce hash identifie un audit BLOCKED, jamais un dataset approuvé ni une autorisation.
 Le reçu séparé fourni est uniquement un TEMPLATE_NOT_EVIDENCE, champs observés null.
 
@@ -2420,8 +2420,16 @@ Recherche des fichiers texte suivis et des diffs dans les refs Git locaux
 disponibles : quatre références procédurales au candidat et deux commits du
 protocole sans replay, aucun usage de performance trouvé dans le scope inspecté.
 Preuve partielle seulement : aucun usage externe ne peut être déduit de GitHub.
-Les deux attestations humaines explicites manquent ; la phrase citée dans
-la mission comme exemple n'est pas une attestation personnelle.
+Les deux attestations humaines explicites sont reçues par déclaration de
+l'utilisateur à 2026-10-06T20:17:06+02:00 / 18:17:06Z. Preuve textuelle
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_HUMAN_ATTESTATION.json, SHA-256 :
+395b1f96429da11604248d0760fe6fc71e88acfa8c9b55aa7e9d078f0ba6a264.
+Les deux champs portent RECEIVED_EXPLICIT et leurs blocages sont retirés ;
+les cinq autres blocages demeurent. Aucun reçu d'export n'est créé à partir
+de cette déclaration. Le rapport précédent ae8b9a6a...dda8d6 demeure traçable
+via previous_lineage_manifest_sha256. PR #302 intégrée par merge
+60d86bd437f54a08f4ba7a20070a6cbeaa48ab99, CI #286 / run 37506050324
+success : 8245 tests, cinq avertissements, 148.58s.
 
 Métadonnées CME consultées sans prix : échéance précédente 18 juin 2026
 (Juneteenth le lendemain), échéance candidat 18 septembre 2026 à 08:30 Chicago
@@ -2438,7 +2446,7 @@ aucun Bid/Ask nécessaire. MNQ 06-26 et MNQ 03-26 restent exclus.
 Aucune transformation, bougie synthétique, donnée OOS, module stratégique,
 trade counting, PnL, optimisation ou replay. Reaction Engine reste rouge.
 Validation locale : 17 tests du contrat de filiation sur métadonnées synthétiques
-PASS en 0.31s ; sérialisation/hash rejoués deux fois, champs null et absence de
+PASS en 0.51s ; sérialisation/hash rejoués deux fois, champs null et absence de
 canonisation vérifiés, quatre documents uniquement et diff-check PASS.
 
 NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED, reprise de la même
