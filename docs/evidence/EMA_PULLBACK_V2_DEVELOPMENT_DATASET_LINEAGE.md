@@ -12,7 +12,7 @@ aucun dataset et ne donne aucune autorisation de replay.
 | DATASET_ROLE | `EXPOSED_DEVELOPMENT` |
 | CANONICAL_DATASET_ID | `NONE` |
 | SOURCE_RAW_SHA256 | `NONE` |
-| DATASET_LINEAGE_MANIFEST_SHA256 | `99333bd31fbfe1d5c936fa5bd528bd0784da888cb2b6f04e02e705f707d9b079` |
+| DATASET_LINEAGE_MANIFEST_SHA256 | `934a3791a87f43f7025024b94fdc9213f2c61e60201564c96f0b1ee89b215af1` |
 | REAL_STRATEGY_REPLAY | `NOT_EXECUTED` |
 | NEXT | `EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED` |
 
@@ -136,6 +136,51 @@ offset réel à l'export, sens des timestamps, fuseau de session et DST,
 preuve d'échéance, fenêtre complète et attestations. Ne pas antidater un
 reçu ; aucune sémantique UTC/Paris/Chicago n'est supposée pour le RAW.
 
+## Preuve Windows et horodatage filesystem du parent RAW
+
+Preuve additionnelle reçue le 2026-10-06 à 21:55:55 Europe/Paris
+(19:55:55 UTC), conservée dans
+`EMA_PULLBACK_V2_DEVELOPMENT_DATASET_PARENT_RAW_TIMEZONE_EVIDENCE.json`.
+SHA-256 de cette preuve : `37054e14f402a164b2205e9d25f2fe7e77858f3d945cc7c8e552dd98feaf2f46`.
+
+| Champ déclaré | Valeur |
+| --- | --- |
+| Parent RAW SHA-256 | `fa41a98a56956a11ec3b2249eb579a699db7989378d06f971d22fa014cf277ad` |
+| Parent RAW taille | `4 724 667` octets |
+| Windows timezone | `Romance Standard Time` |
+| Offset de base Windows | `+01:00` |
+| SupportsDaylightSavingTime | `TRUE` |
+| Horloge locale observée | `2026-10-06T21:47:58+02:00` |
+| Offset effectivement observé | `+02:00` |
+| Parent RAW LastWriteTime local | `2026-10-06T21:36:45+02:00` |
+| Parent RAW LastWriteTime UTC | `2026-10-06T19:36:45Z` |
+
+L'approximation du moment d'export est dérivée du `LastWriteTime` filesystem
+sur la même machine Windows, avec l'offset `+02:00` explicitement observé
+le même jour. La conversion exacte donne 19:36:45Z ; l'offset de base
+Windows `+01:00` n'est pas utilisé dans cette conversion. Ce n'est **pas
+un timestamp natif d'export NinjaTrader**. Aucun événement d'export natif
+n'est inventé.
+
+Le parent est déclaré immuable. Son SHA et sa taille sont conservés comme
+identité attendue, `USER_DECLARED_NOT_LOCALLY_RECOMPUTED` : aucun octet RAW
+n'est fourni, ouvert ou hashé ici. `raw_sha256` canonique et `dataset_id`
+restent `null`. Lors de l'accès ultérieur autorisé, comparer les octets
+reçus à ce SHA et cette taille avant l'audit ; aucun parent alternatif ne
+peut être substitué silencieusement.
+
+Cette preuve complète le volet Windows/filesystem et ne définit ni le
+fuseau des barres RAW, ni leur timestamp de début/fin, ni le fuseau/DST du
+template de session. Le reçu complet reste à fournir. Aucun champ ne sera
+présenté comme un horodatage natif NinjaTrader à partir de cette preuve ;
+le modèle vide de reçu reste inchangé. La preuve ne lève aucun des cinq
+blocages restants.
+
+Historique des rapports de blocage : révision 1
+`ae8b9a6a0cc438ff2ee3eff4d139e47544146cf2dda223a416a5f3b4c6dda8d6`,
+révision 2 `99333bd31fbfe1d5c936fa5bd528bd0784da888cb2b6f04e02e705f707d9b079` ; les bindings
+stratégie/protocole et la preuve d'attestation sont inchangés.
+
 ## Contrôles RAW non exécutés
 
 Aucun RAW n'est fourni pour cette gate ; la période exacte et les preuves
@@ -159,9 +204,11 @@ transformation explicite, déterministe et hashée avec filiation parent.
 ## Reprise de la gate
 
 Les deux blocages d'attestation sont levés. Les cinq blocages restants
-sont l'OPEN de la première session post-échéance non résolu, le RAW et son
-hash immédiat non fournis, le reçu contemporain absent, les sémantiques de
-timestamps/session non prouvées et l'intégrité RAW non évaluée. Le statut
+sont l'OPEN de la première session post-échéance non résolu, les octets RAW
+et leur hash/taille non vérifiés localement, le reçu complet absent, les
+sémantiques de timestamps/session non prouvées et l'intégrité RAW non évaluée.
+Le SHA/taille du parent et la preuve Windows/filesystem sont désormais
+reçus comme métadonnées déclarées, sans canonisation. Le statut
 global reste `BLOCKED_HUMAN_GATE`.
 
 Une fois toutes les preuves suffisantes, seulement alors fixer MNQ 09-26
@@ -178,7 +225,7 @@ exacts et reste hors du payload pour éviter une auto-référence circulaire.
 Le modèle de reçu utilise la même sérialisation déterministe.
 
 Vérifications locales : 17 tests existants du contrat de filiation sur
-métadonnées synthétiques PASS en 0.51s ; sérialisation canonique rejouée
+métadonnées synthétiques PASS en 0.15s ; sérialisation canonique rejouée
 deux fois, hashes recalculés, champs bloqués/null et modèle vide contrôlés,
 conversion de l'heure contractuelle Chicago/UTC exacte, périmètre limité
 aux quatre documents vérifié et `git diff --check` PASS. Aucun nouveau
@@ -187,6 +234,11 @@ module Python de checklist ni calcul stratégique n'a été ajouté.
 Mise à jour d'attestation : déclaration exacte et horodatage local/UTC
 vérifiés, preuve JSON hashée, deux blocages retirés et cinq conservés.
 Le modèle de reçu vide et les champs RAW restent inchangés.
+
+Mise à jour Windows/filesystem : conversion du même jour par `+02:00`
+vérifiée, offset de base `+01:00` exclu du calcul, approximation explicitée,
+preuve hashée liée au parent déclaré, cinq blocages préservés. Aucun octet
+RAW ni indicateur n'est lu pour ces vérifications.
 
 Aucun appel à un module de signal V2, EMA20, MACD, risque, exécution,
 stop, sortie ou PnL ; aucun comptage de trades, graphique V2, donnée OOS,
