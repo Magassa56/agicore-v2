@@ -1,6 +1,6 @@
 # EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE — audit bloqué
 
-Audit du 2026-10-06 UTC, effectué avant toute lecture de prix. Ce document
+Audit initial du 2026-10-06 UTC, complété le 2026-10-08 sans lecture de prix. Ce document
 enregistre les preuves disponibles et les preuves manquantes. Il ne canonise
 aucun dataset et ne donne aucune autorisation de replay.
 
@@ -12,7 +12,7 @@ aucun dataset et ne donne aucune autorisation de replay.
 | DATASET_ROLE | `EXPOSED_DEVELOPMENT` |
 | CANONICAL_DATASET_ID | `NONE` |
 | SOURCE_RAW_SHA256 | `NONE` |
-| DATASET_LINEAGE_MANIFEST_SHA256 | `934a3791a87f43f7025024b94fdc9213f2c61e60201564c96f0b1ee89b215af1` |
+| DATASET_LINEAGE_MANIFEST_SHA256 | `e4b3936d45c07f341370847f04fc577f2e55f8d2ae9cdfabb7196342ac443081` |
 | REAL_STRATEGY_REPLAY | `NOT_EXECUTED` |
 | NEXT | `EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED` |
 
@@ -181,10 +181,78 @@ Historique des rapports de blocage : révision 1
 révision 2 `99333bd31fbfe1d5c936fa5bd528bd0784da888cb2b6f04e02e705f707d9b079` ; les bindings
 stratégie/protocole et la preuve d'attestation sont inchangés.
 
+## Nouveau parent complet déclaré le 8 octobre — octets absents
+
+Preuve reçue à `2026-10-08T22:20:37+02:00` / `20:20:37Z`, conservée dans
+`EMA_PULLBACK_V2_DEVELOPMENT_DATASET_FULL_PARENT_RAW_EXPORT_EVIDENCE.json`.
+SHA-256 de la preuve : `a8b2189505c327882d6a4596c38d8d0e9ae80305f6d1b816c68345f4bbd37a64`.
+
+| Champ déclaré pour ce nouvel export | Valeur |
+| --- | --- |
+| Instrument UI | `MNQ 09-26` |
+| Dates demandées | `2026-06-01` à `2026-09-18` |
+| Intervalle UI / type | `Minute` / `Last` ; valeur numérique de l'intervalle non fournie |
+| Succès UI | `TRUE`, déclaré par l'utilisateur |
+| Nom du parent complet | `MNQ 09-26.Last.txt` |
+| Taille déclarée | `5 416 523` octets |
+| SHA-256 déclaré | `6e20320e06184673c745c1069753c77151fdccd4505b863210f6d63f3ff5fcd5` |
+| CreationTime filesystem | `2026-10-08T22:14:07+02:00` / `20:14:07Z` dérivé |
+| LastWriteTime filesystem | `2026-10-08T22:14:09+02:00` / `20:14:09Z` dérivé |
+| Rôle | `FULL_PARENT_RAW_PENDING_BYTE_VERIFICATION` |
+
+Ces heures sont **des preuves filesystem uniquement**, pas des timestamps
+natifs d'export NinjaTrader. La conversion UTC utilise l'offset explicite
+`+02:00` ; aucun fuseau de barre, template de session ou paramètre manquant
+n'est déduit des heures Windows ou de l'export précédent.
+
+Le nouveau SHA/taille définit une identité déclarée distincte du parent du
+6 octobre `fa41a98a...277ad` / 4 724 667 octets. Sa preuve immuable est
+conservée intégralement : aucun lien de transformation, aucune identité
+binaire et aucune substitution entre les deux exports n'est présumé.
+Le nouvel export ne devient pas le RAW canonique.
+
+La recherche du nom exact et des variantes ainsi que l'inventaire des
+uploads texte récents ne trouvent **aucun fichier de 5 416 523 octets**.
+Le candidat accessible le plus récent, `MNQ 09-26.Last(5).txt`, fait
+691 856 octets ; le fichier portant le nom exact fait 367 982 octets et
+remonte au 6 septembre. Ils ne sont ni téléchargés, ni ouverts, ni hashés
+comme substituts. Cette conclusion porte uniquement sur les fichiers
+accessibles au moment du contrôle, pas sur les octets du fichier Windows.
+
+Les contrôles demandés restent `NOT_EVALUATED` : SHA exact, lignes et
+bornes, ordre strict, doublons, lignes malformées, OHLC finis/valides,
+volume entier non négatif, grille exacte 0.25, structure minute et
+inventaire explicite des gaps, couverture jusqu'à la terminaison et
+présence de barres post-terminaison. Zéro octet RAW a été lu ; aucun
+résultat d'intégrité ne peut être annoncé.
+
+Les dates demandées du parent large ne remplacent pas la fenêtre
+canonique post-échéance déjà préengagée. La première session reste non
+résolue. La terminaison contractuelle de référence reste le 18 septembre
+à 08:30 Chicago / 13:30 UTC ; aucune comparaison avec le RAW ne sera faite
+sans ses octets et la preuve du fuseau et du sens des timestamps de barre.
+Le nombre de barres post-terminaison reste inconnu, et non zéro.
+Les métadonnées CME suivantes ont été reconsultées le 8 octobre, sans prix :
+[CME — dates d'expiration](https://www.cmegroup.com/trading/equity-index/rolldates.html)
+et [CME — chapitre MNQ 361](https://www.cmegroup.com/rulebook/CME/IV/350/361.pdf).
+
+Le reçu complet manque encore : chaîne fournisseur, version NinjaTrader,
+valeur `1` de l'intervalle Minute, `DoNotMerge`, template `CME US Index
+Futures ETH`, sémantique/fuseau des barres et fuseau/DST de session. Les
+champs observés du modèle vide restent null ; seules les déclarations
+explicitement reçues sont conservées dans cette nouvelle preuve séparée.
+La gate reste `BLOCKED_HUMAN_GATE`, aucun dataset ID ni RAW canonique.
+
+Pour poursuivre les contrôles autorisés, fournir le fichier complet
+inchangé de **5 416 523 octets**, puis comparer immédiatement son SHA au
+`6e20320e06184673c745c1069753c77151fdccd4505b863210f6d63f3ff5fcd5`. Un autre nom d'upload peut être tracé, mais jamais considéré
+équivalent sans vérification des octets. Aucune correction ni transformation
+n'est effectuée ; les éventuelles corrections restent une gate séparée.
+
 ## Contrôles RAW non exécutés
 
-Aucun RAW n'est fourni pour cette gate ; la période exacte et les preuves
-d'export restent bloquées. Aucun fichier candidat n'a été acquis, ouvert ou
+Aucun upload correspondant au nouveau parent complet n’est accessible ;
+la période exacte et les preuves d’export restent bloquées. Aucun fichier candidat n'a été acquis, ouvert ou
 hashé. Les deux attestations humaines sont reçues. Les contrôles
 de lisibilité, lignes et bornes, ordre strict, doublons, lignes malformées,
 OHLC finis et valides, volume fini non négatif, grille exacte 0.25,
@@ -207,8 +275,9 @@ Les deux blocages d'attestation sont levés. Les cinq blocages restants
 sont l'OPEN de la première session post-échéance non résolu, les octets RAW
 et leur hash/taille non vérifiés localement, le reçu complet absent, les
 sémantiques de timestamps/session non prouvées et l'intégrité RAW non évaluée.
-Le SHA/taille du parent et la preuve Windows/filesystem sont désormais
-reçus comme métadonnées déclarées, sans canonisation. Le statut
+Le SHA/taille du parent du 6 octobre et la preuve Windows/filesystem sont
+conservés ; le nouvel export complet du 8 octobre est également déclaré,
+mais ses octets ne sont pas accessibles. Aucune canonisation. Le statut
 global reste `BLOCKED_HUMAN_GATE`.
 
 Une fois toutes les preuves suffisantes, seulement alors fixer MNQ 09-26
@@ -244,3 +313,14 @@ Aucun appel à un module de signal V2, EMA20, MACD, risque, exécution,
 stop, sortie ou PnL ; aucun comptage de trades, graphique V2, donnée OOS,
 ordre broker, optimisation ni replay stratégique réel. Reaction Engine
 reste rouge ; aucun verdict de performance V2 n'existe dans cette gate.
+
+Mise à jour export complet : preuve UI/filesystem déclarée et hashée,
+conversion UTC exacte, ancien parent inchangé, inventaire des fichiers
+accessibles sans lecture des octets. Tous les contrôles du nouveau RAW
+restent NOT_EVALUATED et les cinq blocages de filiation sont conservés.
+
+Vérification de cette mise à jour du 8 octobre : 17 tests de filiation
+PASS en 0.14s ; assertions documentaires et conversions locales/UTC PASS,
+sérialisations déterministes identiques, hashes stratégie/protocole
+conformes, ancien parent/attestation/modèle inchangés, quatre documents
+uniquement, diff-check PASS. Aucun audit des octets RAW n’est annoncé.

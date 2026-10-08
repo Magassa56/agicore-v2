@@ -1,6 +1,6 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-06 UTC.
+Date : 2026-10-08 UTC.
 Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
@@ -68,8 +68,8 @@ EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte 
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
 NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-parent-raw-timezone-evidence.
-Base GitHub vérifiée et récupérée : 08472f763309ccca9de7e57624960ed3f2607c9f.
+Branche de vérification : feature/ema-pullback-v2-full-parent-export-evidence.
+Base GitHub vérifiée : 61a081d5e1ed9f4173735e6d54a20f600b8e02ec.
 
 ## Acquis vérifiés
 
@@ -2412,7 +2412,7 @@ CANONICAL_DATASET_ID=NONE ; SOURCE_RAW_SHA256=NONE ;
 REAL_STRATEGY_REPLAY=NOT_EXECUTED. Aucun RAW acquis/ouvert/hashé.
 Le rapport JSON canonique de blocage et son Markdown sont dans docs/evidence/.
 DATASET_LINEAGE_MANIFEST_SHA256 :
-934a3791a87f43f7025024b94fdc9213f2c61e60201564c96f0b1ee89b215af1.
+e4b3936d45c07f341370847f04fc577f2e55f8d2ae9cdfabb7196342ac443081.
 Ce hash identifie un audit BLOCKED, jamais un dataset approuvé ni une autorisation.
 Le reçu séparé fourni est uniquement un TEMPLATE_NOT_EVIDENCE, champs observés null.
 
@@ -2471,6 +2471,46 @@ NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED, reprise de la même
 gate avec preuves ; après PASS seulement DEVELOPMENT_REPLAY_IMPLEMENTATION_REQUIRED.
 Une transformation nécessaire ouvrirait DATASET_TRANSFORMATION_REQUIRED séparément.
 
+## V2 — nouveau parent complet déclaré, vérification bloquée faute d'upload
+
+Reçu conversationnel du 2026-10-08T22:20:37+02:00 / 20:20:37Z.
+UI déclarée : MNQ 09-26, dates demandées 2026-06-01..2026-09-18,
+Minute / Last, succès TRUE ; valeur numérique de l'intervalle non fournie.
+Nouveau parent MNQ 09-26.Last.txt, taille 5416523 octets, SHA déclaré
+6e20320e06184673c745c1069753c77151fdccd4505b863210f6d63f3ff5fcd5.
+CreationTime=22:14:07+02:00 / 20:14:07Z ; LastWriteTime=22:14:09+02:00 /
+20:14:09Z. Preuves filesystem seulement, jamais horodatage natif NinjaTrader.
+ROLE=FULL_PARENT_RAW_PENDING_BYTE_VERIFICATION.
+Preuve EMA_PULLBACK_V2_DEVELOPMENT_DATASET_FULL_PARENT_RAW_EXPORT_EVIDENCE.json, SHA-256
+a8b2189505c327882d6a4596c38d8d0e9ae80305f6d1b816c68345f4bbd37a64.
+
+Aucun upload de cette taille n'est accessible : le candidat récent
+MNQ 09-26.Last(5).txt fait 691856 octets ; le nom exact ancien fait
+367982 octets. Inventaire de métadonnées uniquement, aucune acquisition ni
+lecture de RAW alternatif. SHA local du nouveau parent, lignes, bornes,
+ordre/doublons, OHLC, volume entier, grille 0.25, gaps, couverture de
+terminaison et barres post-terminaison sont tous NOT_EVALUATED.
+
+La preuve immuable du parent précédent fa41a98a...277ad / 4724667 octets
+reste intégrale ; aucune substitution, transformation ou filiation entre
+ces deux exports n'est inventée. La période demandée du parent large ne
+remplace pas la fenêtre canonique ; celle-ci reste non résolue. Les
+paramètres fournisseur/NT/version/session/fuseau/merge doivent encore
+être établis pour ce nouvel export.
+
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE=BLOCKED_HUMAN_GATE ;
+CANONICAL_DATASET_ID=NONE ; SOURCE_RAW_SHA256=NONE ;
+DATASET_LINEAGE_MANIFEST_SHA256=e4b3936d45c07f341370847f04fc577f2e55f8d2ae9cdfabb7196342ac443081.
+NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED.
+Les cinq blocages restent ouverts. Aucun signal V2, trade, PnL, replay,
+optimisation, OOS ou broker. Aucun octet utilisateur modifié ; aucun
+module métier, stratégie ou protocole modifié. Le modèle de reçu demeure
+vide et l'attestation humaine déjà reçue reste valable et inchangée.
+
+PR #304 du volet Windows précédent intégrée par merge
+61a081d5e1ed9f4173735e6d54a20f600b8e02ec, arbre abaed930623232baa736e043fa9e0c82af42a8d6 ;
+CI #290 / run 37523466761 success : 8245 tests, cinq avertissements, 138.43s.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -2493,3 +2533,9 @@ terminée par décision humaine. V2 est formalisée offline sur données synthé
 sans validation de performance et sans autorisation de replay/paper/broker.
 Aucune performance indépendante n'est démontrée et l'OOS reste fermé. Cette
 stratégie demeure distincte de EMA19/50 V3 rejetée.
+
+Vérification de cette mise à jour du 8 octobre : 17 tests de filiation
+PASS en 0.14s ; assertions documentaires et conversions locales/UTC PASS,
+sérialisations déterministes identiques, hashes stratégie/protocole
+conformes, ancien parent/attestation/modèle inchangés, quatre documents
+uniquement, diff-check PASS. Aucun audit des octets RAW n’est annoncé.
