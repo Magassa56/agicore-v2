@@ -1,6 +1,6 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-08 UTC.
+Date : 2026-10-09 UTC.
 Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
@@ -66,10 +66,11 @@ EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
 EMA_PULLBACK_V2_FORMALIZATION = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
-NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION = PASS_PRECOMMITTED ;
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-full-parent-export-evidence.
-Base GitHub vérifiée : 61a081d5e1ed9f4173735e6d54a20f600b8e02ec.
+Branche de vérification : feature/ema-pullback-v2-timestamp-transformation-precommit.
+Base GitHub vérifiée : b10ea46104132acdcb5946870f65d3e1504610fe.
 
 ## Acquis vérifiés
 
@@ -2511,6 +2512,41 @@ PR #304 du volet Windows précédent intégrée par merge
 61a081d5e1ed9f4173735e6d54a20f600b8e02ec, arbre abaed930623232baa736e043fa9e0c82af42a8d6 ;
 CI #290 / run 37523466761 success : 8245 tests, cinq avertissements, 138.43s.
 
+## V2 — préengagement de transformation temporelle, sans exécution réelle
+
+Mission explicite du 2026-10-09T12:27:28+02:00 / 10:27:28Z.
+FULL_PARENT_RAW joint et vérifié en lecture seule : SHA
+6e20320e06184673c745c1069753c77151fdccd4505b863210f6d63f3ff5fcd5,
+5416523 octets, 101962 lignes, bornes UTC 2026-06-07T22:01:00Z /
+2026-09-18T13:31:00Z. Tous les compteurs structurels à zéro. 326 intervalles
+avec gap > une minute, jamais remplis ni utilisés comme filtre.
+
+Mission : RAW=NINJATRADER_END_OF_BAR, timezone=UTC ; session canonique
+2026-06-18T22:00:00Z ; garder uniquement timestamp >= 2026-06-18T22:01:00Z
+ET timestamp <= 2026-09-18T13:30:00Z. Aucun autre prédicat. Partition auditée :
+12120 avant, 89841 dans la fenêtre, 1 après. Pas de RAW dérivé construit.
+L'ancien rapport de filiation e4b3936d...443081 est un snapshot historique
+BLOCKED ; le nouveau protocole porte la preuve d'identité et d'intégrité
+courante. L'ancienne preuve parent fa41a98a...277ad reste inchangée.
+
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION=PASS_PRECOMMITTED.
+Protocole docs/evidence/EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION.json,
+SHA-256 bb47e6a9b867dd6e35516f5c43e56b9259aa00c526deb4978b050783a1e47f62.
+Source tools/ema_pullback_v2_dataset_transformation.py,
+SHA-256 3ec9aadf9e4852d1ad4ef10ad6fd3f958d716a9de5df792a744c6926cf26d44c. Manifest stratégie et protocole DEVELOPMENT inchangés.
+Implémentation sous tools/, aucun core métier modifié. Validation globale
+fail-closed avant sélection ; lignes retenues octet pour octet, fins de
+ligne incluses. CLI par défaut vérifie uniquement les documents ; le flag
+--execute ne peut être utilisé que dans la gate d'exécution séparée.
+
+REAL_PARENT_TRANSFORMATION=NOT_EXECUTED ; REAL_STRATEGY_REPLAY=NOT_EXECUTED.
+DERIVED_RAW_SHA256=NONE ; CANONICAL_DATASET_ID=NONE.
+DATASET_LINEAGE reste BLOCKED_HUMAN_GATE pour les autres preuves de
+provenance et celles du dérivé futur ; ce préengagement ne canonise rien.
+NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION_REQUIRED.
+Aucun signal V2, trade, PnL, replay, optimisation, OOS ou broker.
+Le filtre n'est pas automatiquement exécuté après fusion.
+
 ## Limites du produit
 
 V1_VALIDATED_OFFLINE_PAPER non atteint. D002 prouve le sink mémoire canonique ; les PR #241/#242
@@ -2539,3 +2575,10 @@ PASS en 0.14s ; assertions documentaires et conversions locales/UTC PASS,
 sérialisations déterministes identiques, hashes stratégie/protocole
 conformes, ancien parent/attestation/modèle inchangés, quatre documents
 uniquement, diff-check PASS. Aucun audit des octets RAW n’est annoncé.
+
+Validation locale de ce préengagement : 139 tests ciblés synthétiques/metadata
+PASS en 0.61s (51 nouveaux cas, filiation et protocole DEVELOPMENT inclus),
+Ruff check/format PASS, vérification CLI des documents sans RAW PASS,
+sérialisation et hashes conformes, périmètre de cinq fichiers et diff-check
+PASS. Aucune transformation réelle exécutée. La CI complète est requise
+avant fusion du préengagement.
