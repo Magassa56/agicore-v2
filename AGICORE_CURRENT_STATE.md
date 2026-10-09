@@ -66,11 +66,13 @@ EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
 EMA_PULLBACK_V2_FORMALIZATION = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
-EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION = PASS_PRECOMMITTED ;
-NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION_REQUIRED ;
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION = PASS_PRECOMMITTED, PR #306 fusionnée ;
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION = PASS ;
+REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED ;
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-timestamp-transformation-precommit.
-Base GitHub vérifiée : b10ea46104132acdcb5946870f65d3e1504610fe.
+Branche de vérification : feature/ema-pullback-v2-transformation-execution.
+Base GitHub vérifiée : 7e46769f3b12ba8cf71e20cdf99b057bef4c5310.
 
 ## Acquis vérifiés
 
@@ -2546,6 +2548,34 @@ provenance et celles du dérivé futur ; ce préengagement ne canonise rien.
 NEXT=EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION_REQUIRED.
 Aucun signal V2, trade, PnL, replay, optimisation, OOS ou broker.
 Le filtre n'est pas automatiquement exécuté après fusion.
+
+## Exécution unique du filtre temporel DEVELOPMENT V2 — 2026-10-09
+
+Autorisation explicite AGIcoreManager reçue à 10:57:20Z. Commande préengagée
+PR #306 invoquée une fois à 2026-10-09T11:01:36.680914Z, terminée
+à 2026-10-09T11:01:38.754119Z, code 0 et stderr vide.
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION = PASS.
+REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED.
+
+Parent 6e20320e...5fcd5 inchangé : 5 416 523 octets, 101 962 lignes.
+Partition : 12 120 avant, 89 841 retenues, 1 après ; lignes modifiées = 0.
+Dérivé MNQ_09-26_DEVELOPMENT_CANONICAL_V1.Last.txt : 4 785 270 octets,
+89 841 lignes, SHA-256 ee6eeed4871947b1fabe3c85bf4b5b319dc0d68e86edec7d2000815e22b2a126.
+Bornes UTC End-of-Bar : 2026-06-18T22:01:00Z / 2026-09-18T13:30:00Z.
+Chaque ligne retenue est byte-identical à la ligne parent, fin de ligne incluse.
+Audit indépendant sans import transformation/V2 : tous les compteurs d’erreur
+nuls, 71 gaps réels préservés ; classification finale réservée à la filiation.
+
+Reçu canonique docs/evidence/EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION.json,
+SHA-256 2b4c6b86da5749545a55b6173916a26be88644b252afb9afcaf6f86deb7ccbf1. Il lie commande et stdout exacts,
+horloge d’exécution, hashes figés, comptes avant/après et source/résultat de
+l’audit indépendant. Aucun RAW versionné ; aucune modification de data/,
+manifest stratégie, protocoles ou source de transformation.
+
+Le nom recommandé du dérivé ne canonise pas le dataset.
+CANONICAL_DATASET_ID = NONE ; DATASET_LINEAGE = BLOCKED_HUMAN_GATE.
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED.
+Aucun signal V2, trade, PnL, replay, screening, optimisation, OOS ou broker.
 
 ## Limites du produit
 
