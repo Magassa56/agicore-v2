@@ -71,8 +71,8 @@ EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION = PASS ;
 REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED ;
 NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-transformation-execution.
-Base GitHub vérifiée : 7e46769f3b12ba8cf71e20cdf99b057bef4c5310.
+Branche de vérification : feature/ema-pullback-v2-lineage-finalization.
+Base GitHub vérifiée après PR #307 : fbf4ccda9d3b55c4db2098a3a433d22d88cea168.
 
 ## Acquis vérifiés
 
@@ -2576,6 +2576,56 @@ Le nom recommandé du dérivé ne canonise pas le dataset.
 CANONICAL_DATASET_ID = NONE ; DATASET_LINEAGE = BLOCKED_HUMAN_GATE.
 NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED.
 Aucun signal V2, trade, PnL, replay, screening, optimisation, OOS ou broker.
+
+## Filiation DEVELOPMENT V2 réconciliée après PR #307 — 2026-10-09
+
+Autorisation AGIcoreManager reçue à 12:50:15Z, limitée à la finalisation de
+filiation. Reprise de main après merge PR #307 fbf4ccda9d3b55c4db2098a3a433d22d88cea168.
+La révision 4 e4b3936d...443081 est historique ; la révision 5 réévalue toutes
+les preuves plutôt que de conserver les blockers devenus obsolètes.
+
+Parent 6e20320e...5fcd5 et dérivé ee6eeed4...b2a126 revérifiés, inchangés :
+101962 / 89841 lignes, 5416523 / 4785270 octets. Partition PR #307 reprise :
+12120 avant, 89841 retenues, 1 après ; 0 ligne retenue modifiée, identique
+octet pour octet. Reçu PR #307 2b4c6b86da5749545a55b6173916a26be88644b252afb9afcaf6f86deb7ccbf1 lié dans la filiation ;
+aucune deuxième transformation. Les compteurs structurels restent à zéro.
+
+Fenêtre canonique et UTC End-of-Bar résolus par les preuves préengagées et
+les sources primaires courantes. Intervalle 1 Minute établi par UI native,
+documentation du format et structure vérifiée ; pas de valeur numérique
+d'intervalle fictive à demander. Attestation humaine inchangée et suffisante
+pour les deux exigences V2 ; les questions de contamination ne sont pas rouvertes.
+
+71 gaps conservés : 51 maintenance, 11 week-end, 3 jour férié/week-end,
+1 fermeture anticipée, 5 UNEXPECTED_DATA_GAP_PRESERVED. Ces cinq absences
+(70 minutes) ne bloquent pas automatiquement : le protocole ne requiert pas
+toutes les minutes. Une ligne réelle distincte reste inexpliquée pendant la
+fermeture du samedi 2026-07-04 à 14:40Z, ligne parent 26821 / dérivée 14701.
+Elle est préservée ; sa provenance/session doit être résolue, sans correction.
+
+Reçu d'export actuel créé à partir du full-parent du 8 octobre et de sa
+capture contemporaine ; LastWriteTime +02:00 converti en UTC explicitement
+filesystem-only, jamais timestamp natif NinjaTrader. Aucun réglage ou fuseau
+de l'ancien parent fa41... recopié. Toujours manquants pour cet export exact :
+version/build NinjaTrader, chaîne fournisseur/source, DoNotMerge, template
+CME US Index Futures ETH avec timezone/DST, identifiant Windows timezone,
+et explication de l'unique barre observée pendant la fermeture publiée.
+
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE.
+DATASET_LINEAGE_MANIFEST_SHA256 = ff232f99b8da9e186c9b47b35f841ddca420c8851f7585682e14c371dbba12e6.
+EXPORT_RECEIPT_SHA256 = 4e341ee372eb5729bafcaffd39ecb3642c365b2a37e0340f2f8f20d6676b1ff6 ; GAP_AUDIT_SHA256 = 386650569726c6f46a650a2eb16ff679264d7a2e3fedd7eae93f967c5eaf7005.
+CANONICAL_DATASET_ID = NONE ; SOURCE_RAW_SHA256 canonique = NONE.
+REAL_STRATEGY_REPLAY = NOT_EXECUTED ; aucun signal, trade, PnL, screening,
+optimisation, OOS, broker ou paper trading. Manifest stratégie, protocole
+DEVELOPMENT, source/protocole de transformation et preuves historiques inchangés.
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ; la gate
+REPLAY_IMPLEMENTATION_REQUIRED n'est pas ouverte avant PASS.
+
+Validation locale de cette réconciliation : 139 tests ciblés synthétiques/metadata
+PASS en 0.50s ; assertions documentaires, sérialisations canoniques, hashes
+figés et preuves historiques inchangés, inventaire des gaps identique à PR #307
+et diff-check PASS. Périmètre : cinq documents, aucun runtime modifié.
+La CI complète est requise avant fusion. Aucun calcul stratégique réel.
 
 ## Limites du produit
 
