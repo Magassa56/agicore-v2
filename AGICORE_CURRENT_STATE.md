@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
 Date : 2026-10-09 UTC.
-Statut : BLOCKED_HUMAN_GATE — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE ;
+Statut : PASS — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -65,14 +65,14 @@ EMA_PULLBACK_V2_EXIT_POLICY = PASS ;
 EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
 EMA_PULLBACK_V2_FORMALIZATION = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte ;
-EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = BLOCKED_HUMAN_GATE ;
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION = PASS_PRECOMMITTED, PR #306 fusionnée ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION = PASS ;
 REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED ;
-NEXT = EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE_REQUIRED ;
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-lineage-finalization.
-Base GitHub vérifiée après PR #307 : fbf4ccda9d3b55c4db2098a3a433d22d88cea168.
+Branche de vérification : feature/ema-pullback-v2-lineage-provenance-pass.
+Base GitHub vérifiée après PR #308 : 778dcf3d37b1e10b1726a06f3d22bf1566a4f9c0.
 
 ## Acquis vérifiés
 
@@ -2626,6 +2626,53 @@ PASS en 0.50s ; assertions documentaires, sérialisations canoniques, hashes
 figés et preuves historiques inchangés, inventaire des gaps identique à PR #307
 et diff-check PASS. Périmètre : cinq documents, aucun runtime modifié.
 La CI complète est requise avant fusion. Aucun calcul stratégique réel.
+
+## Filiation DEVELOPMENT V2 finalisée par attestation de provenance — 2026-10-09
+
+L'attestation humaine reçue à 17:29:55Z est explicitement liée au parent complet
+6e20320e...5fcd5 et à l'export du 8 octobre. Elle établit NinjaTrader 8.0.28.0
+64-bit, la source Rithmic / Rithmic for NinjaTrader via Historical Data > Download,
+l'absence d'import tiers et de constitution par enregistrement live historique,
+les réglages effectifs DoNotMerge et CME US Index Futures ETH, et leur continuité
+avec les captures du 9 octobre. Le template en Central (US & Canada), les sessions
+17:00–16:00 CT et ses jours fériés 2026 sont visibles. Romance Standard Time et
+son identifiant inchangé sont attestés ; l'offset +02:00 ne devient pas +01:00.
+Le LastWriteTime reste une approximation filesystem, jamais un export timestamp
+natif NinjaTrader.
+
+Les six blocages de la révision 5 sont réconciliés. L'origine exacte de la ligne
+2026-07-04T14:40:00Z reste non prouvée : UNRESOLVED_OFF_SESSION_STORED_DATA_PRESERVED,
+pas une barre régulière CME, aucun mécanisme fournisseur/cache inventé.
+La ligne reste inchangée et l'instruction humaine n'exige pas d'en inventer
+l'origine. Les 71 gaps et leurs catégories sont conservés, dont cinq absences
+inexpliquées ; le protocole ne requiert pas une couverture minute complète.
+Aucun filtre de session ou correction n'est ajouté.
+
+Parent/dérivé, transformation unique PR #307, contamination, fenêtre canonique
+et intégrité structurelle ne sont pas rouverts ni réaudités sur les RAW.
+Les comptes 101962 / 12120 / 89841 / 1 / 0 restent inchangés.
+Manifest stratégie, protocole DEVELOPMENT et source/protocole de transformation
+conservent leurs hashes figés.
+
+EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = PASS.
+CANONICAL_DEVELOPMENT_CONTRACT = MNQ 09-26.
+CANONICAL_DATASET_ID = mnq-09-26-minute-last-development-ee6eeed4-v1.
+SOURCE_RAW_SHA256 = ee6eeed4871947b1fabe3c85bf4b5b319dc0d68e86edec7d2000815e22b2a126.
+DATASET_ROLE = EXPOSED_DEVELOPMENT.
+DATASET_LINEAGE_MANIFEST_SHA256 = d9a5d15a8746491391ba13417a099801ba6add44be1f275d2ca9e699adf56b89.
+PROVENANCE_ATTESTATION_SHA256 = 0ee487a4217c6aeabdf64f8108aca1e0cc1a3a0d209afec9140fefd52bbd4f50.
+EXPORT_RECEIPT_SHA256 = 24dcb1f1d068b1dea0432e14c351d6bcc4d0d3b2fd21b64de73fb1d5753b41c5.
+GAP_AUDIT_SHA256 = 490aef8b06499dc6ac3ed8b5b85026fd72b899bfff38dc2d146190d8039305cf.
+REAL_STRATEGY_REPLAY = NOT_EXECUTED.
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION_REQUIRED.
+
+La prochaine gate construit et teste uniquement un runner synthétique lié aux
+hashes. Aucun replay réel, signal V2 réel, trade, PnL, screening, optimisation,
+OOS, paper trading ou broker. Les révisions bloquées antérieures restent
+historiques et ne sont pas effacées. Cette mise à jour porte seulement sur
+six documents de preuve/état ; 139 tests ciblés synthétiques/metadata PASS,
+deux lectures documentaires neuves identiques, 22 exigences de filiation et liens
+de hashes conformes. La CI complète doit passer avant fusion.
 
 ## Limites du produit
 
