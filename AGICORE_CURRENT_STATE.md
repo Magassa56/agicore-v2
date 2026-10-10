@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-09 UTC.
-Statut : PASS — EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE ;
+Date : 2026-10-10 UTC.
+Statut : PASS — EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -66,13 +66,16 @@ EMA_PULLBACK_V2_PENDING_OPPORTUNITY_POLICY = PASS ;
 EMA_PULLBACK_V2_FORMALIZATION = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_PROTOCOL = PASS, PR #301 fusionnée après CI verte ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = PASS ;
+EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION = PASS_PRECOMMITTED, PR #306 fusionnée ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION = PASS ;
 REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED ;
-NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION_REQUIRED ;
+REAL_DEVELOPMENT_DATA_ACCESSED = FALSE ; REAL_TRADE_COUNT = NOT_COMPUTED ;
+REAL_PNL = NOT_COMPUTED ; OOS_ACCESSED = FALSE ;
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_EXECUTION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-lineage-provenance-pass.
-Base GitHub vérifiée après PR #308 : 778dcf3d37b1e10b1726a06f3d22bf1566a4f9c0.
+Branche de vérification : feature/ema-pullback-v2-development-replay.
+Base GitHub vérifiée après PR #309 : b07985eebe244d06d3c3add3e848043814eae406.
 
 ## Acquis vérifiés
 
@@ -2709,3 +2712,35 @@ Ruff check/format PASS, vérification CLI des documents sans RAW PASS,
 sérialisation et hashes conformes, périmètre de cinq fichiers et diff-check
 PASS. Aucune transformation réelle exécutée. La CI complète est requise
 avant fusion du préengagement.
+
+
+## 2026-10-10 — V2 DEVELOPMENT replay implementation, synthetic only
+
+PHASE = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION.
+STATUS = PASS. Base main après PR #309 : b07985eebe244d06d3c3add3e848043814eae406.
+
+- Adaptateur séparé : src/agicore/trading/ema_pullback_v2_development_replay.py.
+- Délégation aux quatre fonctions de l'assembly V2 existante ; ses 13 composants
+  gelés et sa déclaration SYNTHETIC_ONLY restent inchangés.
+- Parser Decimal / Fraction exact ; loader DEVELOPMENT refusé par défaut ;
+  contrôle de l'identité RAW et enregistrement exclusif de l'original avant accès.
+- Provenance native, métriques nettes, une equity mark par clôture réelle,
+  segments exacts par temps écoulé et attribution par fill de sortie.
+- Les gaps et données stockées hors session sont conservés. Aucune barre synthétique,
+  aucun reset EMA/MACD, aucun filtre de session ni liquidation finale.
+- RUNNER_SOURCE_SHA256 = c25000d5c180cceb0ed54fa12b5654c608936ae0c817b15e78fd9533e0467f92.
+- ORIGINAL_DEVELOPMENT_RUN_ID = d2eb78fb5a1b97e71fcc323b71da216449b35e4298729a26d6d052f4f26f00f4.
+- La preuve canonique en docs/evidence lie le manifest stratégie, le protocole,
+  la filiation et l'identité unique préenregistrée du futur run.
+- Scénarios exclusivement inventés, LONG/SHORT, deux états neufs par scénario :
+  sorties byte-identical ; tests du runner et régressions de l'assembly/protocole.
+- REAL_DEVELOPMENT_DATA_ACCESSED = FALSE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED.
+- REAL_TRADE_COUNT = NOT_COMPUTED ; REAL_PNL = NOT_COMPUTED ; verdict réel absent.
+- OOS, broker, paper trading et changements de paramètres interdits/inactifs.
+- NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_EXECUTION_REQUIRED,
+  avec autorisation explicite distincte. Aucun replay réel lancé ou planifié.
+
+Validation de cette gate : 328 tests ciblés PASS (dont 146 tests adaptateur),
+8442 tests du dépôt PASS, six avertissements SQLite existants, 97.68s.
+Ruff check/format, diff-check et re-vérification des bindings gelés PASS.
+La CI GitHub du head exact reste obligatoire avant fusion.
