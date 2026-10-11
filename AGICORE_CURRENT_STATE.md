@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-10 UTC.
-Statut : PASS — EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION ;
+Date : 2026-10-10 UTC (2026-10-11 Europe/Paris).
+Statut : PASS_PRECOMMITTED — EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_PROTOCOL ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -69,13 +69,24 @@ EMA_PULLBACK_V2_DEVELOPMENT_DATASET_LINEAGE = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION = PASS ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION = PASS_PRECOMMITTED, PR #306 fusionnée ;
 EMA_PULLBACK_V2_DEVELOPMENT_DATASET_TRANSFORMATION_EXECUTION = PASS ;
-REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ; REAL_STRATEGY_REPLAY = NOT_EXECUTED ;
-REAL_DEVELOPMENT_DATA_ACCESSED = FALSE ; REAL_TRADE_COUNT = NOT_COMPUTED ;
-REAL_PNL = NOT_COMPUTED ; OOS_ACCESSED = FALSE ;
-NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_EXECUTION_REQUIRED ;
+REAL_PARENT_TRANSFORMATION = EXECUTED_ONCE ;
+EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_ORIGINAL_EXECUTION = FAILED_NO_RESULT ;
+ORIGINAL_DEVELOPMENT_RUN_ID_SHA256 = d2eb78fb5a1b97e71fcc323b71da216449b35e4298729a26d6d052f4f26f00f4 ;
+ORIGINAL_EXECUTION_CLAIM = PRESERVED ; ORIGINAL_STRATEGY_INVOCATION_COUNT = 1 ;
+REAL_DEVELOPMENT_DATA_ACCESSED = TRUE_DURING_FAILED_ORIGINAL_INVOCATION_PROGRESS_UNKNOWN ;
+REAL_STRATEGY_REPLAY = ORIGINAL_INVOKED_ONCE_NO_RESULT ;
+REAL_DEVELOPMENT_EXECUTION_PROGRESS = UNKNOWN_AFTER_CLAIM ;
+REAL_PERFORMANCE_EXPOSURE = NONE_FOUND_NOT_PROVEN_IMPOSSIBLE ;
+REAL_TRADE_COUNT = NOT_AVAILABLE ; REAL_PNL = NOT_AVAILABLE ;
+DEVELOPMENT_VERDICT = NOT_AVAILABLE ; OOS_ACCESSED = FALSE ;
+RECOVERY_PROTOCOL = PASS_PRECOMMITTED ; REAL_RECOVERY_EXECUTION = NOT_EXECUTED ;
+RECOVERY_RUN_ID_SHA256 = NOT_REGISTERED_YET ; SECOND_EXECUTION_AUTHORIZED = FALSE ;
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_IMPLEMENTATION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche de vérification : feature/ema-pullback-v2-development-replay.
-Base GitHub vérifiée après PR #309 : b07985eebe244d06d3c3add3e848043814eae406.
+Branche : feature/ema-pullback-v2-development-replay-recovery-protocol.
+Base après PR #311 : 3fab4c59bcc352e227f343b9c05f8b91011e0524.
+Les sections datées ci-dessous sont historiques ; cet en-tête et la dernière section
+décrivent l’état courant. Les anciens constats NOT_EXECUTED ne décrivent plus V2 aujourd’hui.
 
 ## Acquis vérifiés
 
@@ -2714,7 +2725,7 @@ PASS. Aucune transformation réelle exécutée. La CI complète est requise
 avant fusion du préengagement.
 
 
-## 2026-10-10 — V2 DEVELOPMENT replay implementation, synthetic only
+## Historique avant invocation originale — 2026-10-10 — V2 DEVELOPMENT replay implementation, synthetic only
 
 PHASE = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION.
 STATUS = PASS. Base main après PR #309 : b07985eebe244d06d3c3add3e848043814eae406.
@@ -2744,3 +2755,48 @@ Validation de cette gate : 328 tests ciblés PASS (dont 146 tests adaptateur),
 8442 tests du dépôt PASS, six avertissements SQLite existants, 97.68s.
 Ruff check/format, diff-check et re-vérification des bindings gelés PASS.
 La CI GitHub du head exact reste obligatoire avant fusion.
+
+
+## 2026-10-10 UTC — échec original et protocole de récupération préengagé
+
+EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_IMPLEMENTATION = PASS, PR #311 fusionnée.
+EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_ORIGINAL_EXECUTION = FAILED_NO_RESULT.
+ORIGINAL_DEVELOPMENT_RUN_ID_SHA256 = d2eb78fb5a1b97e71fcc323b71da216449b35e4298729a26d6d052f4f26f00f4.
+ORIGINAL_EXECUTION_CLAIM = PRESERVED ; ORIGINAL_STRATEGY_INVOCATION_COUNT = 1.
+REAL_DEVELOPMENT_DATA_ACCESSED = TRUE_DURING_FAILED_ORIGINAL_INVOCATION_PROGRESS_UNKNOWN.
+REAL_STRATEGY_REPLAY = ORIGINAL_INVOKED_ONCE_NO_RESULT.
+REAL_DEVELOPMENT_EXECUTION_PROGRESS = UNKNOWN_AFTER_CLAIM.
+REAL_PERFORMANCE_EXPOSURE = NONE_FOUND_NOT_PROVEN_IMPOSSIBLE.
+REAL_TRADE_COUNT = NOT_AVAILABLE ; REAL_PNL = NOT_AVAILABLE.
+DEVELOPMENT_VERDICT = NOT_AVAILABLE ; OOS_ACCESSED = FALSE.
+
+L’invocation du 2026-10-10T15:10:21.578136Z a consommé le claim original.
+Dernier suivi historique RUNNING : 15:48:27.150Z, sans jalon par barre.
+WORK_SESSION_LOST est la classification observée ; cause exacte UNKNOWN.
+Aucun résultat complet/partiel, reçu de terminaison, traceback ou exit code retrouvé.
+Le claim de 371 octets reste inchangé, non suivi par Git. Son hash est le run ID.
+Le reçu externe de démarrage est conservé ; sa copie versionnée garde exactement
+le SHA-256 ef0330ff0fa4f3116ab6b39ac736d7211cd39235904262696b1f55fea04e3574.
+Le nombre de barres effectivement traitées et un éventuel calcul en mémoire restent
+inconnus. Aucune métrique ni aucun verdict n’est inventé ou remplacé par zéro.
+
+RECOVERY_PROTOCOL = PASS_PRECOMMITTED.
+RECOVERY_PROTOCOL_SHA256 = a0588f0df41f409456330553de5fb9720bce4297676b0bc85137edd64ebd6db4.
+ORIGINAL_FAILURE_EVIDENCE_SHA256 = 6ac29d1c3703891726d882c3b128925c2232bd3d14e73d69ad24dd8be4d0544e.
+La limite ONCE du protocole original demeure inchangée. L’exception explicite
+préengage au maximum une récupération distincte : deux invocations au total si elle
+est autorisée plus tard, au maximum un résultat DEVELOPMENT faisant autorité.
+Le futur runner devra être nouveau, prouver l’équivalence exacte sur synthétique,
+et mesurer sa scalabilité sur 1000/5000/10000/20000 barres inventées. Les 13 composants,
+l’assembly gelée, l’ancien runner, le dataset, les seuils et le protocole restent inchangés.
+Une nouvelle identité et un claim distinct devront précéder toute exécution future.
+Aucun troisième essai ni retry automatique. L’original échoué reste dans la provenance.
+
+REAL_RECOVERY_EXECUTION = NOT_EXECUTED ; RECOVERY_RUN_ID_SHA256 = NOT_REGISTERED_YET.
+SECOND_EXECUTION_AUTHORIZED = FALSE.
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_IMPLEMENTATION_REQUIRED.
+Cette gate ne met en œuvre aucun runner de récupération et n’exécute aucun replay réel.
+
+Validation : 85 tests ciblés PASS, dont 14 contrôles nouveaux des preuves et hashes ;
+8456 tests du dépôt PASS, six avertissements SQLite existants, 92.33s.
+Ruff check/format et diff-check PASS. CI GitHub du head exact requise avant fusion.
