@@ -1,7 +1,7 @@
 # AGIcore current state — checkpoint
 
-Date : 2026-10-10 UTC (2026-10-11 Europe/Paris).
-Statut : PASS_PRECOMMITTED — EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_PROTOCOL ;
+Date : 2026-10-11 UTC.
+Statut : PASS_PRECOMMITTED — EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_ARCHITECTURE_ADDENDUM ;
 CLEAN_LINEAGE_SOURCE_EVIDENCE = PASS ; D003_PROVISIONAL_DEVELOPMENT = PASS_WITH_ASSUMPTIONS ;
 EMA_PULLBACK_V1_MNQ_PULLBACK_PREDICATE = PASS ;
 EMA_PULLBACK_V1_MNQ_EMA20_SLOPE = PASS ;
@@ -81,10 +81,14 @@ REAL_TRADE_COUNT = NOT_AVAILABLE ; REAL_PNL = NOT_AVAILABLE ;
 DEVELOPMENT_VERDICT = NOT_AVAILABLE ; OOS_ACCESSED = FALSE ;
 RECOVERY_PROTOCOL = PASS_PRECOMMITTED ; REAL_RECOVERY_EXECUTION = NOT_EXECUTED ;
 RECOVERY_RUN_ID_SHA256 = NOT_REGISTERED_YET ; SECOND_EXECUTION_AUTHORIZED = FALSE ;
-NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_IMPLEMENTATION_REQUIRED ;
+RECOVERY_ARCHITECTURE_ADDENDUM = PASS_PRECOMMITTED ;
+RECOVERY_IMPLEMENTATION = BLOCKED_PENDING_NEW_IMPLEMENTATION ; RECOVERY_ATTEMPTS_USED = 0 ;
+ARCHITECTURE_ROOT_CONFLICT = FROZEN_INDICATOR_CONSUMERS_HAVE_NO_INCREMENTAL_INJECTION_INTERFACE ;
+RECOVERY_EXECUTION = NOT_EXECUTED ; RECOVERY_RUN_ID = NOT_REGISTERED ;
+NEXT = EMA_PULLBACK_V2_RECOVERY_OPTIMIZED_ENGINE_IMPLEMENTATION_REQUIRED ;
 le RAW legacy reste PROVISIONAL et D003 legacy reste BLOCKED_PROVENANCE.
-Branche : feature/ema-pullback-v2-development-replay-recovery-protocol.
-Base après PR #311 : 3fab4c59bcc352e227f343b9c05f8b91011e0524.
+Branche : feature/ema-pullback-v2-recovery-architecture-addendum-v1.
+Base après PR #312 : f48990d5ec579e5bf7e516ad5587103d094a68ce.
 Les sections datées ci-dessous sont historiques ; cet en-tête et la dernière section
 décrivent l’état courant. Les anciens constats NOT_EXECUTED ne décrivent plus V2 aujourd’hui.
 
@@ -2800,3 +2804,87 @@ Cette gate ne met en œuvre aucun runner de récupération et n’exécute aucun
 Validation : 85 tests ciblés PASS, dont 14 contrôles nouveaux des preuves et hashes ;
 8456 tests du dépôt PASS, six avertissements SQLite existants, 92.33s.
 Ruff check/format et diff-check PASS. CI GitHub du head exact requise avant fusion.
+
+## 2026-10-11 — analyse de récupération, conflit d’interface gelée
+
+EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_IMPLEMENTATION = BLOCKED_ARCHITECTURE_CONFLICT.
+Les hashes de stratégie, protocole DEVELOPMENT, filiation, protocole de récupération,
+preuve d’échec et runner original sont conformes. Le claim original reste inchangé,
+non suivi par Git. ORIGINAL_INVOCATION_COUNT = 1 ; RECOVERY_INVOCATION_COUNT = 0.
+
+Les gates pullback, confirmation et sortie appellent directement les calculateurs
+EMA/MACD depuis l’indice zéro. Aucun paramètre n’accepte un état incrémental ou une
+évaluation exacte précalculée. Huit sondes synthétiques d’interface confirment la
+relecture complète pour les indices 63/127/255/256, y compris après un préfixe adjacent.
+Une décision explicite sur ce point d’injection est nécessaire avant remplacement
+des appels internes. Aucun monkeypatch, clonage de prédicat, changement de composant
+gelé, d’assembly ou de runner original n’a été réalisé.
+
+RECOVERY_IMPLEMENTATION_EVIDENCE_SHA256 = 4b86ad9ce46a6f033447a79e393c4dfbc92bd7af78df725786d415cc969a954d.
+RECOVERY_RUNNER = NOT_CREATED_ARCHITECTURE_CONFLICT.
+SYNTHETIC_EQUIVALENCE = NOT_RUN_ARCHITECTURE_CONFLICT ; EXACT_OUTPUT_EQUIVALENCE = NOT_PROVEN.
+SCALABILITY_1000/5000/10000/20000 = NOT_RUN_ARCHITECTURE_CONFLICT.
+PROJECTED_89841_BAR_RESOURCES = NOT_ESTIMATED.
+RECOVERY_RUN_ID_SHA256 = NOT_REGISTERED_YET ; RECOVERY_CLAIM_CREATED = FALSE.
+REAL_RECOVERY_EXECUTION = NOT_EXECUTED ; REAL_DEVELOPMENT_RAW_ACCESSED_IN_THIS_GATE = FALSE.
+REAL_TRADE_COUNT = NOT_AVAILABLE ; REAL_PNL = NOT_AVAILABLE ; DEVELOPMENT_VERDICT = NOT_AVAILABLE.
+OOS_ACCESSED = FALSE. L’échec original reste FAILED_NO_RESULT, son progrès UNKNOWN_AFTER_CLAIM
+et sa cause exacte UNKNOWN. Cette analyse n’attribue pas la perte de session à un coût mesuré.
+
+NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_IMPLEMENTATION_REQUIRED,
+bloquée jusqu’à une décision AGIcoreManager sur l’interface des indicateurs.
+La gate de readiness reste fermée. Aucune PR d’implémentation prête n’est annoncée.
+
+Validation du travail conservé : 2168 régressions V2/protocole PASS (14.37s),
+8456 tests existants du dépôt PASS (91.25s, six avertissements SQLite).
+JSON canonique, hashes inspectés et diff-check PASS ; aucun source Python modifié.
+Aucune validation d’équivalence/scalabilité de runner nouveau, aucun commit, PR ou fusion.
+
+## 2026-10-11 — addendum d’architecture de récupération V1 préengagé
+
+RECOVERY_ARCHITECTURE_ADDENDUM = PASS_PRECOMMITTED.
+ADDENDUM_SHA256 = b36c1631308ea746a66d0c2312ad50796725957eef0e9e60d52a26c771bd3cc8.
+Le protocole de récupération PR #312 et son SHA a0588f0df41f409456330553de5fb9720bce4297676b0bc85137edd64ebd6db4
+restent inchangés. Une exception formelle et versionnée autorise en principe un
+futur moteur distinct calculant des équivalents exacts des indicateurs et transitions.
+Elle n’autorise ni son implémentation dans cette gate ni une exécution réelle.
+La composition orchestration-only antérieure ne suffit pas : cette incompatibilité
+est explicitement enregistrée, pas masquée sous une déclaration de compatibilité.
+
+Les trois consommateurs gelés n’acceptent pas d’état indicateur incrémental.
+L’assembly reconstruit des préfixes et les livres rescannent les historiques.
+La croissance des entiers rationnels, les copies de tuples, les provenances imbriquées
+et la sérialisation native complète sont auditées. Un exemple inventé à une seule
+variation démontre un dénominateur EMA20 croissant même après retour à prix constant.
+Les enveloppes de bits sont algébriques ; aucun benchmark de runtime nouveau, aucune
+estimation de délai réel ni diagnostic de la perte de session n’est annoncé.
+
+Le plan exige cinq preuves distinctes : formule, décision, résultat immuable,
+faisabilité du calcul et faisabilité de l’évidence native complète. Les tests futurs
+différentiels sont exacts, inventés, sans tolérance, avec les deux hashes vérifiés
+avant normalisation limitée à l’identité d’exécution. Mesures futures bornées à
+1000/5000/10000/20000 observations, familles non constantes et lifecycle dense,
+logs durables ; aucune réduction de schéma pour contourner un coût.
+
+Les deux preuves d’implémentation bloquée sont conservées byte-identical et
+publiées comme snapshots historiques, JSON 4b86ad9ce46a6f033447a79e393c4dfbc92bd7af78df725786d415cc969a954d.
+Tous les composants historiques, l’assembly, le runner original, le manifest,
+les seuils, le protocole DEVELOPMENT et le dataset demeurent inchangés.
+Le claim original de 371 octets est préservé non suivi, même hash/mtime.
+ORIGINAL_STRATEGY_INVOCATION_COUNT = 1 ; ORIGINAL_RESULT = FAILED_NO_RESULT.
+Progrès original UNKNOWN_AFTER_CLAIM ; cause exacte UNKNOWN ; verdict NOT_AVAILABLE.
+RECOVERY_IMPLEMENTATION = BLOCKED_PENDING_NEW_IMPLEMENTATION.
+RECOVERY_INVOCATION_COUNT = 0 ; MAX_RECOVERY_ATTEMPTS = 1.
+RECOVERY_EXECUTION = NOT_EXECUTED ; RECOVERY_RUN_ID = NOT_REGISTERED.
+RECOVERY_CLAIM = NOT_CREATED ; SECOND_EXECUTION_AUTHORIZED = FALSE.
+REAL_DEVELOPMENT_DATA_ACCESSED_IN_THIS_GATE = FALSE ; OOS_ACCESSED = FALSE.
+DEVELOPMENT_VERDICT = NOT_AVAILABLE.
+NEXT = EMA_PULLBACK_V2_RECOVERY_OPTIMIZED_ENGINE_IMPLEMENTATION_REQUIRED,
+sous nouvelle autorisation explicite AGIcoreManager ; aucune continuation automatique.
+
+Validation locale de l’addendum : 393 tests ciblés PASS (78 contrôles documentaires,
+dont 64 nouveaux), 8520 tests complets PASS en 93.58s, six avertissements de dépendances.
+Ruff, JSON canonique, liens de hashes, preuves AST et diff-check PASS.
+Log CI locale SHA-256 : ec18daa72cae3f91fa815249c9cdcfeedd6c9e63515d53efae182717224de059.
+Équivalence/scalabilité du futur moteur non exécutées ; aucun accès RAW/OOS réel.
+CI GitHub du head exact obligatoire avant fusion.

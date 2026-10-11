@@ -1,7 +1,10 @@
 """Canonical recovery evidence only; no strategy imports or market-file access."""
 
+import ast
 import hashlib
 import json
+from copy import deepcopy
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -262,4 +265,279 @@ def test_current_state_supersedes_historical_not_executed_snapshot():
     assert "DEVELOPMENT_VERDICT = NOT_AVAILABLE" in current
     assert "ORIGINAL_EXECUTION_CLAIM = PRESERVED" in current
     assert "RECOVERY_PROTOCOL = PASS_PRECOMMITTED" in current
-    assert "NEXT = EMA_PULLBACK_V2_DEVELOPMENT_REPLAY_RECOVERY_IMPLEMENTATION_REQUIRED" in current
+    addendum = json.loads((EVIDENCE / (ADDENDUM + ".json")).read_bytes())
+    assert "NEXT = " + addendum["outcome"]["next"] in current
+    assert "RECOVERY_IMPLEMENTATION = BLOCKED_PENDING_NEW_IMPLEMENTATION" in current
+
+
+ADDENDUM = "EMA_PULLBACK_V2_RECOVERY_ARCHITECTURE_ADDENDUM_V1"
+ADDENDUM_SHA = "b36c1631308ea746a66d0c2312ad50796725957eef0e9e60d52a26c771bd3cc8"
+BLOCKED_IMPLEMENTATION_SHA = "4b86ad9ce46a6f033447a79e393c4dfbc92bd7af78df725786d415cc969a954d"
+NEXT_ENGINE = "EMA_PULLBACK_V2_RECOVERY_OPTIMIZED_ENGINE_IMPLEMENTATION_REQUIRED"
+
+
+def architecture_addendum():
+    """Read only documentary evidence, without importing any trading runtime."""
+    return json.loads((EVIDENCE / (ADDENDUM + ".json")).read_bytes())
+
+
+def assert_addendum_contract(document):
+    """Audit precommitment boundaries; this test helper grants no execution authority."""
+    assert document["schema"] == document["addendum_id"] == ADDENDUM
+    assert type(document["version"]) is int and document["version"] == 1
+    assert document["status"] == "PASS_PRECOMMITTED"
+    parent = document["parent_protocol"]
+    assert parent["sha256"] == PROTOCOL_SHA and parent["bytes_changed"] is False
+    assert (
+        parent["compatibility"]
+        == "EXPLICIT_FORMALLY_RECORDED_EXCEPTION_REQUIRED_AND_PRECOMMITTED_HERE"
+    )
+    assert parent["exception_targets"] == [
+        "recovery_runner_policy.allowed_replacement_scope",
+        "scalability.scope",
+    ]
+    assert document["frozen_bindings"] == load("RECOVERY_PROTOCOL.json")["frozen_bindings"]
+    authority = document["authorization"]
+    assert authority["new_runtime_implementation_authorized"] is False
+    assert authority["real_execution_authorized"] is False
+    security = document["security"]
+    for field, expected in {
+        "original_strategy_invocation_count": 1,
+        "max_recovery_attempts": 1,
+        "recovery_invocation_count": 0,
+    }.items():
+        assert type(security[field]) is int and security[field] == expected
+    for field in (
+        "recovery_claim_created",
+        "second_execution_authorized",
+        "execution_authorization_created",
+        "real_development_data_accessed_in_this_gate",
+        "oos_accessed",
+        "broker_accessed",
+    ):
+        assert security[field] is False
+    assert security["original_claim"] == "IMMUTABLE_UNTRACKED_UNCHANGED"
+    assert security["original_run_result_status"] == "FAILED_NO_RESULT"
+    assert security["original_progress"] == "UNKNOWN_AFTER_CLAIM"
+    assert security["original_failure_cause"] == "UNKNOWN"
+    assert security["recovery_run_id_status"] == "NOT_REGISTERED"
+    assert security["real_recovery_execution"] == "NOT_EXECUTED"
+    assert security["development_verdict"] == "NOT_AVAILABLE"
+    outcome = document["outcome"]
+    assert outcome["new_runtime_created"] is False
+    assert outcome["new_runtime_source_sha256"] is outcome["recovery_run_id_sha256"] is None
+    assert outcome["new_runtime_equivalence"] == "NOT_PROVEN"
+    assert outcome["new_runtime_scalability"] == "NOT_RUN"
+    assert outcome["recovery_implementation"] == "BLOCKED_PENDING_NEW_IMPLEMENTATION"
+    assert outcome["real_execution_still_forbidden"] is True
+    assert outcome["next"] == NEXT_ENGINE
+    equivalents = document["equivalence_plan"]
+    assert equivalents["input_domain"] == "INVENTED_SYNTHETIC_ONLY"
+    assert equivalents["tolerance"] == "NONE"
+    assert equivalents["proof_layers"] == [
+        "A_FORMULA_INDUCTION",
+        "B_EXACT_PREDICATE_AND_INVALID_INPUT_EQUALITY",
+        "C_COMPLETE_IMMUTABLE_RESULT_EQUALITY",
+        "D_LONG_STREAM_COMPUTATION_FEASIBILITY",
+        "E_COMPLETE_NATIVE_EVIDENCE_SERIALIZATION_FEASIBILITY",
+    ]
+    normalization = equivalents["identity_normalization"]
+    assert normalization["permitted_identity_fields"] == [
+        "run_identity.runner_source_sha256",
+        "run_id_sha256",
+    ]
+    assert normalization["strategy_fields_ignored"] == []
+    assert normalization["pre_normalization_hash_verification"] == "REQUIRED_FOR_BOTH_OUTPUTS"
+    assert normalization["derived_hash_field"] == "output_sha256"
+    scale = document["scalability_plan"]
+    assert scale["status"] == "PRECOMMITTED_FUTURE_TESTS_ONLY_NOT_RUN"
+    assert scale["synthetic_observation_counts"] == [1000, 5000, 10000, 20000]
+    assert scale["real_dataset_benchmark"] == "FORBIDDEN"
+    assert scale["fresh_processes_per_family_and_size"] == 2
+    assert set(scale["families"]) == {
+        "CONSTANT_CONTROL",
+        "ONE_TICK_PULSE_THEN_CONSTANT",
+        "NONCONSTANT_TICK_GRID_DRIFT_AND_OSCILLATION",
+        "DENSE_LIFECYCLE_LONG_SHORT_WITH_GAPS_AND_OFF_SESSION_DATA",
+    }
+    assert scale["bounded_execution"]["wall_clock_deadline_seconds"] == {
+        "1000": 120,
+        "5000": 600,
+        "10000": 1800,
+        "20000": 3600,
+    }
+    assert scale["bounded_execution"]["peak_memory_cap_bytes"] == 4 * 1024**3
+    assert scale["bounded_execution"]["output_size_cap_bytes"] == 8 * 1024**3
+    assert document["cost_analysis"]["not_an_original_crash_diagnosis"] is True
+
+
+def test_addendum_canonical_hash_and_independent_gate_contract():
+    """Require the versioned document's exact published bytes and deny boundaries."""
+    raw = (EVIDENCE / (ADDENDUM + ".json")).read_bytes()
+    assert raw == canonical(architecture_addendum())
+    assert sha(raw) == ADDENDUM_SHA
+    assert ADDENDUM_SHA in (EVIDENCE / (ADDENDUM + ".md")).read_text()
+    assert ADDENDUM_SHA in (ROOT / "AGICORE_CURRENT_STATE.md").read_text()
+    assert_addendum_contract(architecture_addendum())
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ("version", True),
+        ("parent_protocol.sha256", "0" * 64),
+        ("parent_protocol.bytes_changed", True),
+        ("parent_protocol.compatibility", "AUTOMATICALLY_COMPATIBLE"),
+        ("authorization.new_runtime_implementation_authorized", True),
+        ("authorization.real_execution_authorized", True),
+        ("security.original_strategy_invocation_count", 0),
+        ("security.max_recovery_attempts", 2),
+        ("security.recovery_invocation_count", 1),
+        ("security.second_execution_authorized", True),
+        ("security.recovery_claim_created", True),
+        ("security.execution_authorization_created", True),
+        ("security.real_development_data_accessed_in_this_gate", True),
+        ("security.oos_accessed", True),
+        ("security.original_progress", "REPLAY_COMPLETED"),
+        ("security.original_failure_cause", "FRACTION_SLOWDOWN_PROVEN"),
+        ("outcome.new_runtime_created", True),
+        ("outcome.new_runtime_equivalence", "PASS"),
+        ("outcome.recovery_run_id_sha256", "1" * 64),
+        ("outcome.next", "REAL_RECOVERY_EXECUTION"),
+        ("equivalence_plan.tolerance", "0.0001"),
+        ("equivalence_plan.input_domain", "REAL_DEVELOPMENT"),
+        ("equivalence_plan.identity_normalization.strategy_fields_ignored", ["metrics"]),
+        ("equivalence_plan.identity_normalization.permitted_identity_fields", ["verdict"]),
+        ("equivalence_plan.identity_normalization.pre_normalization_hash_verification", "SKIP"),
+        ("scalability_plan.status", "PASS_MEASURED"),
+        ("scalability_plan.real_dataset_benchmark", "ALLOWED"),
+        ("scalability_plan.bounded_execution.peak_memory_cap_bytes", 0),
+    ],
+)
+def test_addendum_rejects_governance_or_equivalence_drift(path, value):
+    """Independently reject widened authority, lost failure provenance and approximate checks."""
+    altered = deepcopy(architecture_addendum())
+    parts = path.split(".")
+    target = altered
+    for key in parts[:-1]:
+        target = target[key]
+    target[parts[-1]] = value
+    with pytest.raises(AssertionError):
+        assert_addendum_contract(altered)
+
+
+def test_addendum_preserves_blocked_snapshots_and_reference_source_closure():
+    """Keep historical documents and every reference source immutable without needing RAW."""
+    document = architecture_addendum()
+    preserved = document["preserved_work"]
+    for evidence in preserved["prior_evidence"]:
+        assert sha((ROOT / evidence["path"]).read_bytes()) == evidence["sha256"]
+    blocked = load("RECOVERY_IMPLEMENTATION.json")
+    assert sha((EVIDENCE / (PREFIX + "RECOVERY_IMPLEMENTATION.json")).read_bytes()) == (
+        BLOCKED_IMPLEMENTATION_SHA
+    )
+    assert blocked["status"] == "BLOCKED_ARCHITECTURE_CONFLICT"
+    assert blocked["recovery_runner_source_sha256"] is None
+    assert preserved["original_claim"] == blocked["original_claim"]
+    assert preserved["original_claim_git_tracking"] == "FORBIDDEN"
+    manifest = json.loads(
+        (EVIDENCE / "EMA_PULLBACK_V2_REGIME_GATED_BASELINE_MANIFEST.json").read_bytes()
+    )
+    components = {
+        "src/agicore/trading/" + c["name"]: c["source_sha256"] for c in manifest["components"]
+    }
+    sources = {s["path"]: s for s in document["reference_sources"]}
+    assert len(sources) == len(document["reference_sources"]) == 16
+    assert {
+        p: s["sha256"] for p, s in sources.items() if s["role"] == "FROZEN_TRADING_COMPONENT"
+    } == components
+    for source in sources.values():
+        assert sha((ROOT / source["path"]).read_bytes()) == source["sha256"]
+    state = (ROOT / "AGICORE_CURRENT_STATE.md").read_text()
+    assert "## 2026-10-11 — analyse de récupération, conflit d’interface gelée" in state
+    assert "RECOVERY_RUNNER = NOT_CREATED_ARCHITECTURE_CONFLICT" in state
+
+
+@pytest.mark.parametrize("evidence", architecture_addendum()["root_conflict"]["source_evidence"])
+def test_architecture_source_proof_matches_actual_ast_and_hash(evidence):
+    """Verify source-backed claims statically, without importing or invoking trading code."""
+    raw = (ROOT / evidence["path"]).read_bytes()
+    assert sha(raw) == evidence["source_sha256"]
+    nodes = [
+        n
+        for n in ast.walk(ast.parse(raw))
+        if isinstance(n, (ast.FunctionDef, ast.ClassDef)) and n.name == evidence["symbol"]
+    ]
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert (node.lineno, node.end_lineno) == (evidence["first_line"], evidence["last_line"])
+    if evidence["parameters"] is not None:
+        assert [
+            a.arg for a in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+        ] == evidence["parameters"]
+
+
+def test_exact_one_pulse_growth_is_an_algebraic_witness_not_a_benchmark():
+    """Check the noncancelling rational identity independently on invented arithmetic only."""
+    price = Fraction(20000)
+    value = price + Fraction(1, 42)
+    for step in range(129):
+        expected = price + Fraction(19**step, 42 * 21**step)
+        assert value == expected
+        assert expected.denominator == 42 * 21**step
+        value = (2 * price + 19 * value) / 21
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    architecture_addendum()["cost_analysis"]["tick_grid_denominator_envelopes"][
+        "bit_length_envelopes"
+    ],
+)
+def test_exact_symbolic_operand_envelopes_need_no_float_or_observations(envelope):
+    """Confirm exact integer bounds, not a runtime or real-data performance claim."""
+    index = envelope["observations"] - 1
+    expected = {
+        "ema20_divisor_envelope_bits": (80 * 21 ** (index - 19)).bit_length(),
+        "ema12_divisor_envelope_bits": (4 * 13**index).bit_length(),
+        "ema26_divisor_envelope_bits": (4 * 27**index).bit_length(),
+        "macd_divisor_envelope_bits": (4 * 351**index).bit_length(),
+        "signal_hist_divisor_envelope_bits": (4 * 1755**index).bit_length(),
+        "one_pulse_ema20_exact_denominator_bits": (42 * 21 ** (index - 20)).bit_length(),
+    }
+    assert {k: v for k, v in envelope.items() if k != "observations"} == expected
+
+
+def normalize_test_document(document):
+    """Exercise only identity-normalization infrastructure on an invented metadata object."""
+    result = deepcopy(document)
+    digest = result.pop("output_sha256")
+    assert sha(canonical(result)) == digest
+    result["run_identity"]["runner_source_sha256"] = RUNNER_SHA
+    result["run_id_sha256"] = sha(canonical(result["run_identity"]))
+    result["output_sha256"] = sha(canonical(result))
+    return canonical(result)
+
+
+def test_normalization_verifies_both_hashes_and_cannot_hide_a_payload_difference():
+    """Reject tampering before normalization and preserve any nonidentity difference."""
+    registration = load("IMPLEMENTATION.json")
+    first = {
+        "run_identity": registration["run_identity"],
+        "run_id_sha256": RUN_ID,
+        "payload": ["INVENTED_METADATA_ONLY", 1],
+    }
+    second = deepcopy(first)
+    second["run_identity"]["runner_source_sha256"] = "2" * 64
+    second["run_id_sha256"] = sha(canonical(second["run_identity"]))
+    for document in (first, second):
+        document["output_sha256"] = sha(canonical(document))
+    assert first["output_sha256"] != second["output_sha256"]
+    assert normalize_test_document(first) == normalize_test_document(second)
+    tampered = deepcopy(second)
+    tampered["payload"][1] = 2
+    with pytest.raises(AssertionError):
+        normalize_test_document(tampered)
+    tampered.pop("output_sha256")
+    tampered["output_sha256"] = sha(canonical(tampered))
+    assert normalize_test_document(tampered) != normalize_test_document(first)
