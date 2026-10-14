@@ -1,3 +1,93 @@
+# AGIcore current state — semantic repair complete, resource feasibility blocked
+
+Date : 2026-10-12 UTC.
+PHASE = EMA_PULLBACK_V2_RECOVERY_SEMANTIC_REPAIR_AND_FEASIBILITY_TRIAGE.
+STATUS = BLOCKED_TECHNICAL_FEASIBILITY.
+
+INVALID_CLOSE_ERROR_CONTRACT = PASS.
+Reference/candidate: BaselineAssemblyV2Error;
+message: the completed bar must retain its own earlier Open.
+Frozen duplicate/end-of-data/validation order and rejection atomicity preserved.
+Focused tests: 22 PASS. Revised native cases: 63 twice, 126 exact receipts.
+Bulk test terminal summary unavailable; not certified full-suite PASS.
+Missing native case checked separately once; bulk command not restarted.
+
+OLD_CANDIDATE_SHA256 = a7d358bfd3069e9ca58943aae7aa52faf714f859e6b9eaed9c8f64615fbfde04
+NEW_CANDIDATE_SHA256 = 854a6cbe7b89f3c6f0e9f49a8a5095745baf20693c2e89b115dfcadbfacbdf56
+NEW_REDUCER_SHA256 = ec154f8d33c1092575cb96f2e4d2ddaea7aab5156e67eedb953b3db768a8b422
+UNAPPROVED_SOURCE_CLOSURE_SHA256 = a9954c13d1fd39b52ce4283f47f745c09c4bbcb145707a62ecd09bc2d264f3cf
+TRIAGE_EVIDENCE_SHA256 = e728ed5cd3fbde38f1284fd8e2af7cc2ffafbfcf99fe977599cb264263aa45ef
+CURRENT_IMPLEMENTATION_EVIDENCE_SHA256 = e91ca2d4de3d2182f1bba667cb9e34b95c00b25e5731dea20445c41fca16ce65
+
+RESOURCE_FEASIBILITY = NOT_PROVEN.
+Frozen memory cap = 4294967296 bytes; native output cap = 8589934592 bytes.
+Prior dense synthetic 89841 estimate: 60.27 GB native output;
+10.1–182.3 hours / 9.87–177.30 GB are conditional, not real measurements.
+Native digits dominate output; streaming may reduce RAM but not fixed canonical bytes.
+No unfinished dense 10000 or any 20000 benchmark run in this gate.
+Options A/B/C/D require AGIcoreManager decision; none selected automatically.
+
+ORIGINAL_FAILED_RUN_ID_SHA256 = d2eb78fb5a1b97e71fcc323b71da216449b35e4298729a26d6d052f4f26f00f4
+ORIGINAL_EXECUTION_CLAIM = PRESERVED_UNCHANGED_UNTRACKED.
+ORIGINAL_INVOCATIONS = 1. RECOVERY_INVOCATIONS = 0.
+RECOVERY_RUN_ID = NOT_REGISTERED. REAL_RECOVERY_EXECUTION = NOT_EXECUTED.
+REAL_DEVELOPMENT_DATA_ACCESSED_THIS_GATE = FALSE. OOS_ACCESSED = FALSE.
+REAL_PNL = NOT_AVAILABLE. DEVELOPMENT_VERDICT = NOT_AVAILABLE.
+Frozen strategy/protocol/lineage/thresholds and original failure evidence unchanged.
+Branch = feature/ema-pullback-v2-recovery-optimized-engine-v1.
+HEAD = 8eafe91c434468ead9c57731775ad186c9733751.
+No commit, push, PR or merge. No authorization/claim created.
+
+NEXT = AGICOREMANAGER_DECISION_REQUIRED_ON_EXACT_NATIVE_EVIDENCE_RESOURCE_FEASIBILITY_OPTIONS_A_B_C_D.
+
+Prior checkpoint preserved verbatim; prior SHA256 726ba680d72eefad4ed656982451e2e5c709502f16787f2296cfac1da332297d.
+
+---
+
+# AGIcore current state — optimized recovery implementation blocked
+
+Date : 2026-10-11 UTC.
+PHASE = EMA_PULLBACK_V2_RECOVERY_OPTIMIZED_ENGINE_IMPLEMENTATION.
+STATUS = BLOCKED_SEMANTIC_EQUIVALENCE.
+
+Candidate runtime : EMA_PULLBACK_V2_RECOVERY_OPTIMIZED_ENGINE_V1.
+Branch : feature/ema-pullback-v2-recovery-optimized-engine-v1.
+Base/HEAD : 8eafe91c434468ead9c57731775ad186c9733751.
+No commit, PR or merge created.
+
+BLOCKER = after one valid synthetic observation, process_close(None) raises
+AttributeError in the candidate but BaselineAssemblyV2Error in the frozen reference.
+Counterexample and exact outputs/hashes/log are preserved; no fix applied.
+Targeted tests: 146 earlier PASS, 1 additional contract FAIL.
+Frozen V2 regressions: 2232 PASS. Full CI/publication stopped.
+Synthetic scalability: 1000/5000 all families twice PASS;
+10000 partial; 20000 NOT_EXECUTED after semantic STOP.
+No benchmark process remains. No omitted workload is PASS.
+
+IMPLEMENTATION_EVIDENCE_SHA256 = 9427fdd8b0d8cd182013606cf8d9acd67490f45762cb91b043601c59d1451577
+OPTIMIZED_ENGINE_SOURCE_SHA256 = a7d358bfd3069e9ca58943aae7aa52faf714f859e6b9eaed9c8f64615fbfde04
+UNAPPROVED_SOURCE_CLOSURE_SHA256 = c16d8ac79fe2b0d2c95e4d08563c6587e0789bf4faaa3fc31a9edb71add228b5
+REGISTERED_RECOVERY_RUN_ID_SHA256 = NOT_REGISTERED.
+
+ORIGINAL_FAILED_RUN_ID_SHA256 = d2eb78fb5a1b97e71fcc323b71da216449b35e4298729a26d6d052f4f26f00f4
+ORIGINAL_EXECUTION_CLAIM = PRESERVED_UNCHANGED_UNTRACKED.
+ORIGINAL_INVOCATIONS = 1. RECOVERY_INVOCATIONS = 0.
+ORIGINAL_RUN_RESULT_STATUS = FAILED_NO_RESULT.
+ORIGINAL_RUN_VERDICT_STATUS = NOT_AVAILABLE.
+REAL_DEVELOPMENT_DATA_ACCESSED_THIS_GATE = FALSE.
+REAL_RECOVERY_EXECUTION = NOT_EXECUTED.
+RECOVERY_CLAIM_CREATION = FALSE. RECOVERY_AUTHORIZATION_CREATION = FALSE.
+REAL_TRADE_COUNT = NOT_AVAILABLE. REAL_PNL = NOT_AVAILABLE.
+DEVELOPMENT_VERDICT = NOT_AVAILABLE. OOS_ACCESSED = FALSE.
+Frozen strategy/protocol/lineage/dataset/thresholds remain unchanged.
+
+NEXT = BLOCKED_SEMANTIC_EQUIVALENCE_INVALID_CLOSE_ERROR_CONTRACT;
+wait for a separate AGIcoreManager decision. No automatic readiness or execution.
+
+Historical checkpoint below is preserved verbatim (prior SHA256 3340e5aa365c212d7c37195f75880df9157bf07293c788082e098ff1e546b33b).
+
+---
+
 # AGIcore current state — checkpoint
 
 Date : 2026-10-11 UTC.
