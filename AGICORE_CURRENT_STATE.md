@@ -1,3 +1,59 @@
+# AGIcore current state — recovery storage design precommitted
+
+Date : 2026-10-14 UTC.
+Preservation rechecked : 2026-10-15 UTC.
+PHASE = EMA_PULLBACK_V2_RECOVERY_EVIDENCE_STORAGE_REDESIGN_PRECOMMIT.
+STATUS = PASS_PRECOMMITTED (documentary only; publication requires exact-head green CI).
+
+SELECTED_GOVERNANCE_OPTION = B_VERSIONED_EVIDENCE_AND_STORAGE_CONTRACT.
+RECOVERY_EVIDENCE_STORAGE_ADDENDUM = PASS_PRECOMMITTED.
+STORAGE_ADDENDUM_SHA256 = 9f0752d90f8cec746addcb97ded86664f9739e727951d47d9a04eeb29243b019.
+RECOVERY_SEMANTIC_REPAIR = PASS_FOR_COMPLETED_SYNTHETIC_CASES.
+INVALID_CLOSE_ERROR_CONTRACT = PASS. Completed native comparisons = 126 (63 cases twice).
+COMPLETE_FULL_SUITE_FOR_WIP_IMPLEMENTATION = NOT_CERTIFIED.
+COMPLETE_RECOVERY_IMPLEMENTATION = BLOCKED_TECHNICAL_FEASIBILITY.
+RESOURCE_FEASIBILITY = NOT_PROVEN. SYNTHETIC_STORAGE_PROOF = NOT_RUN.
+
+WIP_BRANCH = feature/ema-pullback-v2-recovery-optimized-engine-v1.
+WIP_LOCAL_COMMIT = 273579e3643de5bce6d66f75524b3179972d3acc.
+WIP_PUBLISHED_COMMIT = f40445911d3b8c8599c0228d1342fdba0a4aecff.
+WIP_IDENTICAL_TREE_SHA = 9283af6eeb9458913681cd1b615f82baf87ff5f4.
+WIP_REMOTE_PUBLISHED = TRUE via GitHub connector; direct terminal push lacked credentials.
+No implementation PR. No WIP source or old evidence overwritten.
+The local blocked-proof ZIP was incomplete on recheck; it remains untouched.
+The complete durable original was retrieved separately and matches its original
+SHA/size exactly. Both identities are recorded in the new storage addendum.
+All 21 WIP inventory files and the original claim remain byte-identical.
+CORRECTED_CANDIDATE_SHA256 = 854a6cbe7b89f3c6f0e9f49a8a5095745baf20693c2e89b115dfcadbfacbdf56.
+
+The proposed bundle preserves every logical native byte and exact rational value.
+A summary alone is never authoritative. Independent reconstruction and accounting
+verification remain future work. Source Close witnesses are separate additive audit
+records, not new fields in the frozen result schema. No codec ratio is assumed.
+The 4 GiB memory and 8 GiB output numbers are unchanged. Applying the latter to
+physical evidence plus temporary storage is an explicit conditional governance
+exception; it is not active for execution and requires separate acceptance/proof.
+The previous native-byte limit still applies until that exception is activated.
+
+ORIGINAL_EXECUTION_CLAIM = PRESERVED_UNCHANGED_UNTRACKED at the original worktree path.
+ORIGINAL_INVOCATIONS = 1. RECOVERY_INVOCATIONS = 0.
+ORIGINAL_RUN_RESULT_STATUS = FAILED_NO_RESULT. ORIGINAL_RUN_VERDICT_STATUS = NOT_AVAILABLE.
+REAL_STRATEGY_REPLAY = ORIGINAL_INVOKED_ONCE_NO_RESULT.
+REAL_DEVELOPMENT_DATA_ACCESSED = TRUE_DURING_FAILED_ORIGINAL_INVOCATION_PROGRESS_UNKNOWN.
+REAL_DEVELOPMENT_DATA_ACCESSED_THIS_GATE = FALSE.
+RECOVERY_RUN_ID = NOT_REGISTERED. REAL_RECOVERY_EXECUTION = NOT_EXECUTED.
+RECOVERY_CLAIM_CREATED = FALSE. REAL_RECOVERY_ATTEMPTS_AUTHORIZED = 0.
+REAL_TRADE_COUNT = NOT_AVAILABLE. REAL_PNL = NOT_AVAILABLE.
+DEVELOPMENT_VERDICT = NOT_AVAILABLE. OOS_ACCESSED = FALSE.
+Frozen strategy, DEVELOPMENT protocol/result schema, lineage and thresholds unchanged.
+
+NEXT = EMA_PULLBACK_V2_RECOVERY_STORAGE_SYNTHETIC_PROOF_REQUIRED.
+Stop after documentary publication; no automatic proof, benchmark or replay.
+Historical main checkpoint below is retained verbatim. Its older NEXT/status
+statements describe their original gates, not an approval of the current WIP.
+
+---
+
 # AGIcore current state — checkpoint
 
 Date : 2026-10-11 UTC.
