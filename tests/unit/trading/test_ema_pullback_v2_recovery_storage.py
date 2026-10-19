@@ -29,7 +29,8 @@ from tools.ema_pullback_v2_storage_synthetic_proof import (
 )
 
 SOURCE_REGISTRATION = (
-    ROOT / "docs/evidence/EMA_PULLBACK_V2_RECOVERY_STORAGE_SOURCE_REGISTRATION_V1.json"
+    ROOT
+    / "docs/evidence/EMA_PULLBACK_V2_RECOVERY_STORAGE_HARNESS_BINDING_SOURCE_REGISTRATION_V1.json"
 )
 
 
