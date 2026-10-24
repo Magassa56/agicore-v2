@@ -815,6 +815,79 @@ def test_cli_explicit_trust_and_unique_receipts(tmp_path, capsys):
     assert capsys.readouterr().out.count('EXPLICIT_ARCHIVE_AND_TRUST') == 2
 
 
+def test_cli_trust_t01_exact_limit(tmp_path, capsys):
+    """T01: admit a complete MAX_ENTRY-byte trust file with JSON whitespace."""
+    original, trust = repository_fixture()
+    encoded = oracle(trust)
+    padding = v.MAX_ENTRY-len(encoded)
+    assert padding > 0
+    payload = encoded+b' \t\r\n'*(padding//4)+b' '*(padding%4)
+    assert len(payload) == v.MAX_ENTRY and json.loads(payload) == trust
+    path = tmp_path/'T01-trust.json'
+    with path.open('xb') as f:
+        f.write(payload)
+    result = v.main(['--archive',str(SYNTHETIC_PATH),'--trust',str(path)])
+    assert result['status'] == 'PASS_PORTABLE_INTEGRITY_WITH_EXPLICIT_TRUST'
+    assert result['archive_sha256'] == FIXTURE_SHA256
+    assert json.loads(capsys.readouterr().out) == result
+    assert path.read_bytes() == payload and SYNTHETIC_PATH.read_bytes() == original
+    (tmp_path/'T01-result.json').write_bytes(oracle(dict(case_id='T01',status='PASS',
+        expected_layer='PASS',observed_layer='PASS',input_file=path.name,
+        input_size_bytes=len(payload),input_sha256=digest(payload),
+        trailing_whitespace_bytes=padding,fixture_sha256=FIXTURE_SHA256,receipt=result)))
+
+
+def test_cli_trust_t02_oversized_prefix(tmp_path, monkeypatch):
+    """T02: reject the sentinel byte before parsing any oversized trust prefix."""
+    original, trust = repository_fixture()
+    encoded = oracle(trust)
+    payload = encoded+b' '*(v.MAX_ENTRY+1-len(encoded))+b'INVALID_TRAILING_CONTENT_V17\n'
+    assert len(payload) > v.MAX_ENTRY+1
+    assert json.loads(payload[:v.MAX_ENTRY+1]) == trust
+    path = tmp_path/'T02-trust.json'
+    with path.open('xb') as f:
+        f.write(payload)
+    parser_calls, original_parser = [], v.parse_json
+    def observe_parser(*args, **kwargs):
+        parser_calls.append(args[1])
+        return original_parser(*args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(v, 'parse_json', observe_parser)
+        with pytest.raises(v.Rejected) as caught:
+            v.main(['--archive',str(SYNTHETIC_PATH),'--trust',str(path)])
+    assert caught.value.layer == 'trust.byte_limit' and parser_calls == []
+    assert path.read_bytes() == payload and SYNTHETIC_PATH.read_bytes() == original
+    (tmp_path/'T02-result.json').write_bytes(oracle(dict(case_id='T02',status='PASS',
+        expected_layer='trust.byte_limit',observed_layer=caught.value.layer,
+        input_file=path.name,input_size_bytes=len(payload),input_sha256=digest(payload),
+        sentinel_prefix_bytes=v.MAX_ENTRY+1,json_parser_calls=len(parser_calls),
+        fixture_sha256=FIXTURE_SHA256,trace=caught.value.trace)))
+
+
+def test_cli_trust_t03_invalid_trailing_json(tmp_path):
+    """T03: reject trailing non-JSON bytes, empty input and malformed JSON."""
+    original, trust = repository_fixture()
+    checks = []
+    for name,payload,layer in [
+        ('trailing',oracle(trust)+b'INVALID_TRAILING_CONTENT_V17\n','trust.json_syntax'),
+        ('empty',b'','trust.byte_limit'),
+        ('malformed',b'{','trust.json_syntax')]:
+        assert len(payload) <= v.MAX_ENTRY
+        path = tmp_path/('T03-'+name+'-trust.json')
+        with path.open('xb') as f:
+            f.write(payload)
+        with pytest.raises(v.Rejected) as caught:
+            v.main(['--archive',str(SYNTHETIC_PATH),'--trust',str(path)])
+        assert caught.value.layer == layer and path.read_bytes() == payload
+        checks.append(dict(subcase=name,expected_layer=layer,observed_layer=caught.value.layer,
+            input_file=path.name,input_size_bytes=len(payload),input_sha256=digest(payload),
+            trace=caught.value.trace))
+    assert SYNTHETIC_PATH.read_bytes() == original
+    (tmp_path/'T03-result.json').write_bytes(oracle(dict(case_id='T03',status='PASS',
+        expected_layer='trust.json_syntax',observed_layer=checks[0]['observed_layer'],
+        fixture_sha256=FIXTURE_SHA256,checks=checks)))
+
+
 def test_cli_requires_explicit_mode():
     """No argument can silently select historical or synthetic evidence."""
     with pytest.raises(SystemExit) as caught:

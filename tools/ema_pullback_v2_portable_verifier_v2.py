@@ -586,7 +586,9 @@ def main(argv=None):
         trust = load_contract()['trust']
     else:
         with args.trust.open('rb') as f:
-            trust = parse_json(f.read(MAX_ENTRY+1), 'trust', exact=False)
+            trust_raw = f.read(MAX_ENTRY+1)
+            check(len(trust_raw) <= MAX_ENTRY, 'trust.byte_limit')
+            trust = parse_json(trust_raw, 'trust', exact=False)
     path = args.historical_archive if historical else args.archive
     with path.open('rb') as f:
         raw = f.read(MAX_ARCHIVE+1)
