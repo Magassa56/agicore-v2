@@ -6,26 +6,164 @@ on:
     branches:
       - main
 
+permissions: {}
+
 jobs:
   unit-tests:
+    name: Restricted portable nonworker tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONNOUSERSITE: "1"
+      PYTEST_ADDOPTS: ""
+      PYTEST_PLUGINS: ""
+      PYTHONPATH: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install test dependencies
+      - name: Install reviewed portable test dependencies
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
-          python -m pip install -e .
+          python -m pip install --disable-pip-version-check --no-cache-dir \
+            "iniconfig==2.3.0" "packaging==26.2" "pluggy==1.6.0" "pygments==2.20.0" "pytest==9.0.3"
 
-      - name: Run test suite
-        run: python -m pytest -q
+      - name: Report restricted coverage and exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            '## Restricted portable nonworker coverage' \
+            'Only 17 reviewed portable entrypoints (79 parametrized cases) are selected.' \
+            'All other tests, including storage and strategy replay groups, are excluded.' \
+            'An excluded file inventory is saved with the runner temporary test outputs.' \
+            'Historical V7/P03 evidence is not reexecuted or replaced.' \
+            'Broader coverage requires a separately authorized future workflow.' \
+            'This job is not the complete suite and performs no deployment.' \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run only reviewed portable nonworker nodes
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o noclobber
+          output="$(mktemp -d "${RUNNER_TEMP:?}/agicore-portable.XXXXXXXX")"
+          mkdir "$output/logs" "$output/cases" "$output/tmp"
+          export AGICORE_PORTABLE_EVIDENCE="$output/cases"
+          export TMPDIR="$output/tmp" TEMP="$output/tmp" TMP="$output/tmp"
+          printf 'Restricted test outputs: %s\n' "$output"
+          nodes=(
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_synthetic_fixture_commitments'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_registered_source_closures'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_inventory_regression'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_focused_raw_zip_paths'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_builtin_binary_identity'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_file_backed_binary_identity'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_inconsistent_module_origin'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_runtime_without_hostname'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_resource_reporting'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_unavailable_resource_reporting'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_output_directories'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_cli_explicit_trust_and_unique_receipts'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_cli_requires_explicit_mode'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_historical_mode_rejects_synthetic_input'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_historical_mode_has_no_missing_input_fallback'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_collection_import_boundary'
+            'tests/integration/test_ema_pullback_v2_portable_verifier_v2.py::test_synthetic_matrix'
+          )
+          python - "$output" <<'PY'
+          from pathlib import Path
+          import hashlib
+          import subprocess
+          import sys
+
+          expected = {
+              'tools/ema_pullback_v2_portable_verifier_v2.py': '7b3ac923e731603e17171c0ec00e93759994dfeee1cfd31b574e239078fd083c',
+              'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py': '044cd60f7710a5fde2ea253afa60a11ac55e641b0b3c099c4511c07356af7ba9',
+              'tests/integration/test_ema_pullback_v2_portable_verifier_v2.py': 'c73795f32cd9d3deadce4bfb09a5803c65b0b6608cfc69a7ca8ed044d4c78aef',
+              'tests/fixtures/ema_pullback_v2_portable_synthetic_v1.zip': 'a6f1a6c6c68cf7ed5be3c686e438d85cbd8753762fd9c7e2bb1a01d46c583dec',
+              'docs/evidence/EMA_PULLBACK_V2_PORTABLE_VERIFIER_P01_CORRECTION_PLAN_V2.json': '4b524c51f36de3daffcb503b93ae8e5b8b7887e6c3bb81c6e586181923509bea',
+              'tests/__init__.py': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+              'tests/unit/__init__.py': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+              'pyproject.toml': 'a0b0b6700f6462cf6cff7de04f19d71253ba0311c64c23659f70fcf2a28446d0',
+          }
+          for relative, digest in expected.items():
+              if hashlib.sha256(Path(relative).read_bytes()).hexdigest() != digest:
+                  raise SystemExit('Unreviewed input bytes: '+relative)
+          if Path('tools/__init__.py').exists():
+              raise SystemExit('Unreviewed tools package initializer')
+          selected = {
+              'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py',
+              'tests/integration/test_ema_pullback_v2_portable_verifier_v2.py',
+          }
+          tracked = subprocess.check_output(['git', 'ls-files', '--', 'tests'], text=True).splitlines()
+          excluded = sorted(p for p in tracked if Path(p).name.startswith('test_')
+                            and p.endswith('.py') and p not in selected)
+          with (Path(sys.argv[1])/'excluded-test-files.txt').open('x', encoding='utf-8') as stream:
+              stream.write('\n'.join(excluded)+'\n')
+          print('Excluded test files (not collected):', len(excluded))
+          PY
+          common=(
+            -c pyproject.toml --noconftest -o addopts=
+            -p no:cacheprovider -p no:junitxml --color=no -q
+            --basetemp "$output/pytest-temp"
+          )
+          run_pytest() {
+            local phase="$1"
+            shift
+            local log="$output/logs/pytest-$phase.log"
+            local transcript="$output/$phase.txt"
+            if [[ -e "$log" || -e "$transcript" ]]; then
+              printf 'Refusing existing output: %s or %s\n' "$log" "$transcript" >&2
+              return 1
+            fi
+            if env -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN \
+                -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+                python -B -m pytest "${common[@]}" \
+                -o "log_file=$log" -o log_file_mode=w "$@" "${nodes[@]}" \
+                > "$transcript" 2>&1; then
+              cat "$transcript"
+            else
+              local status=$?
+              cat "$transcript"
+              return "$status"
+            fi
+          }
+          run_pytest collect --collect-only
+          python - "$output/collect.txt" <<'PY'
+          from pathlib import Path
+          import sys
+
+          nodes = [line.strip() for line in Path(sys.argv[1]).read_text().splitlines()
+                   if line.startswith('tests/') and '::' in line]
+          if len(nodes) != 79 or len(set(nodes)) != 79:
+              raise SystemExit('Expected exactly 79 unique reviewed portable nodes')
+          print('Restricted collection:', len(nodes), 'unique nodes')
+          PY
+          run_pytest run -rA -x
+          python - "$output/collect.txt" "$output/run.txt" <<'PY'
+          from pathlib import Path
+          import sys
+
+          collected = [line.strip() for line in Path(sys.argv[1]).read_text().splitlines()
+                       if line.startswith('tests/') and '::' in line]
+          passed = [line[len('PASSED '):].strip() for line in Path(sys.argv[2]).read_text().splitlines()
+                    if line.startswith('PASSED tests/')]
+          if passed != collected or len(passed) != 79:
+              raise SystemExit('A mandatory reviewed node did not pass; skips do not count as PASS')
+          print('Restricted portable result:', len(passed), 'passed')
+          PY
 
       - name: Check diff whitespace
         run: git diff --check
