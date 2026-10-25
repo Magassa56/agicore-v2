@@ -1,0 +1,216 @@
+name: AGIcore successor OCI capability preflight v1
+'on':
+  push:
+    branches: [feature/agicore-successor-oci-preflight-v1]
+    paths: [.github/workflows/agicore-successor-oci-preflight-v1.yml]
+permissions:
+  contents: read
+concurrency:
+  group: agicore-successor-oci-preflight-v1
+  cancel-in-progress: false
+jobs:
+  capability-preflight:
+    name: Worker-free OCI capability preflight
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Inspect and challenge host controls; no OCI build
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          started=$SECONDS
+          test "$GITHUB_REPOSITORY" = Magassa56/agicore-v2
+          test "$GITHUB_REF" = refs/heads/feature/agicore-successor-oci-preflight-v1
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          python3 - "$GITHUB_EVENT_PATH" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              event = json.load(f)
+          assert event["repository"]["private"] is False
+          assert event["deleted"] is False
+          PY
+          root="$(mktemp -d "$RUNNER_TEMP/agicore-oci.XXXXXXXX")"
+          unit="agicore-oci-$GITHUB_RUN_ID"
+          printf 'reference=%s\nrun_head=%s\nimage=%s\n' \
+            5fbcb651cca35878f4afb7bbe7389b00a7a12c9d "$GITHUB_SHA" "$ImageVersion"
+          trap 'sudo -n systemctl stop "$unit.service" >/dev/null 2>&1 || true' EXIT
+          cat > "$root/probe.sh" <<'SH'
+          set -euo pipefail
+          root="$1"
+          export HOME="$root/home" DOCKER_CONFIG="$root/home/.docker"
+          export DOCKER_HOST=unix:///var/run/docker.sock
+          mkdir -p "$DOCKER_CONFIG"
+          stage=host
+          finish() {
+            status=$?
+            trap - EXIT
+            printf 'final_stage=%s exit=%s\n' "$stage" "$status"
+            for path in "$root/space/ro" "$root/space/full" "$root/space"; do
+              if mountpoint -q "$path"; then umount "$path" || status=1; fi
+            done
+            du -sx -B1 "$root"
+            exit "$status"
+          }
+          trap finish EXIT
+          for tool in docker dockerd buildah python3 ip mount umount mountpoint \
+                      mkfs.ext4 fallocate truncate timeout stat findmnt; do
+            command -v "$tool"
+          done
+          . /etc/os-release
+          test "$ID:$VERSION_ID:$(uname -m)" = ubuntu:26.04:x86_64
+          uname -srmo
+          nproc
+          cat /proc/meminfo
+          df -B1 "$root"
+          python3 - "$root" <<'PY'
+          import os, shutil, sys
+          mem = dict(line.split(":", 1) for line in open("/proc/meminfo"))
+          assert int(mem["MemAvailable"].split()[0])*1024 >= 5*1024**3
+          assert shutil.disk_usage(sys.argv[1]).free >= 9*1024**3
+          assert os.cpu_count() >= 2
+          PY
+          test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
+          docker version --format '{{json .}}'
+          docker info --format \
+            'driver={{.Driver}} cgroup={{.CgroupVersion}} memory={{.MemoryLimit}} swap={{.SwapLimit}} pids={{.PidsLimit}}'
+          test "$(docker info --format '{{.CgroupVersion}}')" = 2
+          test "$(docker info --format '{{.MemoryLimit}}:{{.SwapLimit}}:{{.PidsLimit}}')" = true:true:true
+          docker buildx version
+          buildah --version
+          docker image ls --no-trunc --format '{{.ID}} {{.Size}}'
+          sha256sum "$(command -v docker)" "$(command -v dockerd)" "$(command -v buildah)"
+          stage=cgroup
+          cg="/sys/fs/cgroup$(awk -F: '$1=="0" {print $3}' /proc/self/cgroup)"
+          test "$(cat "$cg/memory.max")" = 4294967296
+          test "$(cat "$cg/memory.swap.max")" = 0
+          mkdir "$cg/supervisor"
+          echo $$ > "$cg/supervisor/cgroup.procs"
+          echo '+memory +pids' > "$cg/cgroup.subtree_control"
+          mkdir "$cg/memory-probe" "$cg/timeout-probe"
+          echo 67108864 > "$cg/memory-probe/memory.max"
+          echo 0 > "$cg/memory-probe/memory.swap.max"
+          echo 1 > "$cg/memory-probe/memory.oom.group"
+          set +e
+          python3 - "$cg/memory-probe/cgroup.procs" <<'PY'
+          import os, sys, time
+          with open(sys.argv[1], "w") as f:
+              f.write(str(os.getpid()))
+          for _ in range(2):
+              if os.fork() == 0:
+                  allocation = bytearray(40*1024**2)
+                  time.sleep(20)
+                  os._exit(0)
+          for _ in range(2):
+              os.wait()
+          PY
+          memory_status=$?
+          set -e
+          test "$memory_status" = 137
+          awk '$1=="oom_kill" && $2>0 {ok=1} END {exit !ok}' "$cg/memory-probe/memory.events"
+          test -z "$(cat "$cg/memory-probe/cgroup.procs")"
+          cat "$cg/memory-probe/memory.events"
+          stage=timeout
+          timer_start=$SECONDS
+          set +e
+          timeout --signal=TERM --kill-after=1s 2s \
+            bash -c 'echo $$ > "$1/cgroup.procs"; sleep 60 & wait' _ "$cg/timeout-probe"
+          timer_status=$?
+          set -e
+          test "$timer_status" = 124
+          test "$((SECONDS - timer_start))" -le 5
+          test -z "$(cat "$cg/timeout-probe/cgroup.procs")"
+          stage=network
+          python3 - <<'PY'
+          import errno, json, socket, subprocess
+          links = json.loads(subprocess.check_output(["ip", "-j", "link"]))
+          assert {x["ifname"] for x in links} == {"lo"}
+          for family in ("-4", "-6"):
+              assert json.loads(subprocess.check_output(["ip", family, "-j", "route"])) == []
+          with socket.socket() as s:
+              s.settimeout(1)
+              try:
+                  s.connect(("192.0.2.1", 9))
+              except OSError as e:
+                  assert e.errno == errno.ENETUNREACH, repr(e)
+              else:
+                  raise AssertionError("network isolation failed")
+          print("network_namespace=isolated; egress=ENETUNREACH")
+          PY
+          stage=workspace
+          fallocate -l 7516192768 "$root/workspace.img"
+          mkfs.ext4 -q -F -E nodiscard "$root/workspace.img"
+          mkdir "$root/space"
+          mount -o loop,nodev,nosuid "$root/workspace.img" "$root/space"
+          test "$(stat -c %s "$root/workspace.img")" = 7516192768
+          findmnt -T "$root/space" -o TARGET,FSTYPE,OPTIONS,SIZE
+          mkdir "$root/space/full" "$root/space/input" "$root/space/ro" "$root/space/output"
+          truncate -s 16777216 "$root/space/capacity.img"
+          mkfs.ext4 -q -F "$root/space/capacity.img"
+          mount -o loop,nodev,nosuid "$root/space/capacity.img" "$root/space/full"
+          python3 - "$root/space/full/fill" <<'PY'
+          import errno, os, sys
+          observed = False
+          with open(sys.argv[1], "xb", buffering=0) as f:
+              try:
+                  for _ in range(32):
+                      f.write(b"x"*1024**2)
+                      os.fsync(f.fileno())
+              except OSError as e:
+                  assert e.errno == errno.ENOSPC, repr(e)
+                  observed = True
+          assert observed
+          print("fixed_filesystem_capacity=ENOSPC")
+          PY
+          stage=mounts
+          printf 'synthetic mount probe\n' > "$root/space/input/probe"
+          mount --bind "$root/space/input" "$root/space/ro"
+          mount -o remount,bind,ro "$root/space/ro"
+          python3 - "$root/space" <<'PY'
+          import errno, hashlib, os, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          original = (root/"input/probe").read_bytes()
+          try:
+              with (root/"ro/probe").open("ab") as f:
+                  f.write(b"forbidden")
+          except OSError as e:
+              assert e.errno == errno.EROFS, repr(e)
+          else:
+              raise AssertionError("read-only mount accepted write")
+          assert (root/"input/probe").read_bytes() == original
+          with (root/"output/probe").open("xb") as f:
+              f.write(b"output probe\n"); f.flush(); os.fsync(f.fileno())
+          fd = os.open(root/"output", os.O_RDONLY | os.O_DIRECTORY)
+          try: os.fsync(fd)
+          finally: os.close(fd)
+          print("input=EROFS; output=file_and_directory_fsync_PASS",
+                hashlib.sha256(original).hexdigest())
+          PY
+          stage=complete
+          printf 'memory_peak_bytes='
+          cat "$cg/memory.peak"
+          cat "$cg/memory.events.local"
+          awk '$1=="oom_kill" && $2!=0 {bad=1} END {exit bad}' "$cg/memory.events.local"
+          printf 'CAPABILITY_PREFLIGHT_PASS; OCI_BUILD=NOT_EXECUTED\n'
+          SH
+          set +e
+          timeout --signal=TERM --kill-after=5s 570s \
+            sudo -n systemd-run --unit="$unit" --wait --pipe \
+            -p MemoryMax=4294967296 -p MemorySwapMax=0 -p TasksMax=128 \
+            -p Delegate=yes -p RuntimeMaxSec=540s -p TimeoutStopSec=5s \
+            -p KillMode=control-group -p OOMPolicy=continue -p LimitCORE=0 \
+            -p PrivateNetwork=yes -p PrivateMounts=yes \
+            -p ProtectSystem=strict -p "ReadWritePaths=$root" \
+            /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /bin/bash "$root/probe.sh" "$root" 2>&1 |
+            head -c 1048576 > "$root/receipt.log"
+          result=("${PIPESTATUS[@]}")
+          set -e
+          printf 'elapsed_seconds=%s\n' "$((SECONDS - started))"
+          cat "$root/receipt.log"
+          sha256sum "$root/probe.sh" "$root/receipt.log"
+          test "$(stat -c %s "$root/receipt.log")" -lt 1048576
+          test "$(du -sx -B1 "$root" | cut -f1)" -le 8589934592
+          test "${result[0]}" = 0
+          test "${result[1]}" = 0
