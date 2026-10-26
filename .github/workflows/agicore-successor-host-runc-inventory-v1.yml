@@ -1,0 +1,128 @@
+# PROPOSAL ONLY — DO NOT PUSH WITHOUT SEPARATE HUMAN AUTHORIZATION.
+# Exactly one read-only host inventory run; no Buildah OCI build, workers or uploads.
+name: AGIcore successor Linux host and runc identity inventory — read-only
+on:
+  push:
+    branches:
+      - feature/agicore-successor-host-runc-inventory-v1
+    paths:
+      - .github/workflows/agicore-successor-host-runc-inventory-v1.yml
+permissions:
+  contents: read
+concurrency:
+  group: agicore-successor-host-inventory-v1
+  cancel-in-progress: false
+jobs:
+  inventory:
+    name: One host identity inventory without build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/agicore-successor-host-runc-inventory-v1' && github.run_attempt == 1
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Observe local runner bytes and read-only package provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Magassa56/agicore-v2'
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$RUNNER_OS:$RUNNER_ARCH" = Linux:X64
+          python3 - <<'PYHOST'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import platform
+          import re
+          import stat
+          import subprocess
+          import sys
+          from datetime import datetime, timezone
+
+          assert os.environ['GITHUB_REPOSITORY'] == 'Magassa56/agicore-v2'
+          assert os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+          assert os.environ['RUNNER_OS'] == 'Linux'
+          assert os.environ['RUNNER_ARCH'] == 'X64'
+          assert platform.machine() == 'x86_64'
+          def digest(data):
+              return hashlib.sha256(data).hexdigest()
+          def file_digest(path):
+              h = hashlib.sha256()
+              with path.open('rb') as f:
+                  for part in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(part)
+              return h.hexdigest()
+          def checked_output(args, limit=32768):
+              output = subprocess.check_output(args, stderr=subprocess.STDOUT, timeout=6)
+              assert len(output) <= limit, f'output too large: {args[0]}'
+              return output
+          def file_observation(requested):
+              link = pathlib.Path(requested)
+              resolved = link.resolve(strict=True)
+              st = resolved.stat()
+              assert stat.S_ISREG(st.st_mode) and 0 < st.st_size <= 134217728
+              return {
+                  'requested_path': requested,
+                  'resolved_path': str(resolved),
+                  'file_size_bytes': st.st_size,
+                  'sha256': file_digest(resolved),
+                  'symlink': link.is_symlink(),
+              }
+          tools = ('/usr/bin/runc', '/usr/bin/buildah', '/usr/bin/python3',
+                   '/usr/bin/gpg', '/usr/bin/gpgv', '/usr/bin/unshare',
+                   '/usr/bin/systemd-run')
+          observations = {name: file_observation(name) for name in tools}
+          runc_path = pathlib.Path(observations['/usr/bin/runc']['resolved_path'])
+          raw = runc_path.open('rb').read(64)
+          assert raw[:6] == b'\x7fELF\x02\x01'
+          assert int.from_bytes(raw[18:20], 'little') == 62
+          version_stdout = checked_output([str(runc_path), '--version'])
+          def provenance(path):
+              try:
+                  raw = checked_output(['/usr/bin/dpkg-query', '-S', path], 65536)
+                  return {'dpkg_query_S': raw.decode('utf-8', 'replace').strip(),
+                          'raw_output_sha256': digest(raw)}
+              except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+                  return {'dpkg_query_S': 'NOT_ESTABLISHED', 'error_type': type(e).__name__}
+          runinfo = {
+              'schema': 'AGICORE_LINUX_HOST_RUNC_INVENTORY_READ_ONLY_V1',
+              'status': 'OBSERVATION_ONLY_NOT_PREAUTHORIZED_FOR_BUILD',
+              'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'head_sha': os.environ['GITHUB_SHA'],
+              'runner': {
+                  'ImageOS': os.environ.get('ImageOS', 'UNASSIGNED'),
+                  'ImageVersion': os.environ.get('ImageVersion', 'UNASSIGNED'),
+                  'RUNNER_OS': os.environ['RUNNER_OS'],
+                  'RUNNER_ARCH': os.environ['RUNNER_ARCH'],
+                  'kernel_release': platform.release(),
+                  'kernel_version': platform.version(),
+                  'machine': platform.machine(),
+                  'os_release_sha256': file_digest(pathlib.Path('/etc/os-release')),
+                  'runner_release': pathlib.Path('/etc/runner-release').read_text(errors='replace').strip()
+                        if pathlib.Path('/etc/runner-release').is_file() else 'UNAVAILABLE',
+              },
+              'files': observations,
+              'runc': {
+                  'realpath': str(runc_path),
+                  'ELF64_little_endian_AMD64': True,
+                  'version_stdout_sha256': digest(version_stdout),
+                  'version_stdout': version_stdout.decode('utf-8', 'replace').strip(),
+                  'dpkg_provenance_requested': provenance('/usr/bin/runc'),
+                  'dpkg_provenance_resolved': provenance(str(runc_path)),
+              },
+              'restriction': {
+                  'image_build': 'NOT_EXECUTED',
+                  'worker': 'NOT_EXECUTED',
+                  'replay': 'NOT_EXECUTED',
+                  'artifact_upload': 'NOT_EXECUTED',
+                  'registry_push': 'NOT_EXECUTED',
+                  'source_checkout': 'NOT_EXECUTED',
+              },
+          }
+          canonical = json.dumps(runinfo, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+          print('AGICORE_HOST_RUNC_INVENTORY_SHA256=' + digest(canonical))
+          print('AGICORE_HOST_RUNC_INVENTORY_JSON=' + canonical.decode())
+          print('INVENTORY_READ_ONLY_COMPLETE; OCI_BUILD=NOT_EXECUTED; WORKERS=0')
+          PYHOST
