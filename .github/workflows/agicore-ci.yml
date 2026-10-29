@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -45,9 +46,11 @@ jobs:
           set -euo pipefail
           printf '%s\n' \
             '## Restricted portable nonworker coverage' \
-            'Only 20 reviewed portable entrypoints (82 parametrized cases) are selected.' \
+            'Only 23 reviewed portable entrypoints (85 parametrized cases) are selected.' \
             'All other tests, including storage and strategy replay groups, are excluded.' \
             'An excluded file inventory is saved with the runner temporary test outputs.' \
+            'Historical source bytes and successor source bytes are checked separately.' \
+            'Historical source retrieval is local and does not establish runtime equivalence.' \
             'Historical V7/P03 evidence is not reexecuted or replaced.' \
             'Broader coverage requires a separately authorized future workflow.' \
             'This job is not the complete suite and performs no deployment.' \
@@ -66,6 +69,9 @@ jobs:
           nodes=(
             'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_synthetic_fixture_commitments'
             'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_registered_source_closures'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_registered_source_closures_reject_historical_drift'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_registered_source_closures_reject_missing_historical_commit'
+            'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_registered_source_closures_reject_successor_drift'
             'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_inventory_regression'
             'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_focused_raw_zip_paths'
             'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py::test_builtin_binary_identity'
@@ -93,7 +99,7 @@ jobs:
 
           expected = {
               'tools/ema_pullback_v2_portable_verifier_v2.py': '959e5ce1059c4673e5f73e2ad06fd32c0ef579be1458f520a11bce7ffaed2aea',
-              'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py': '89e59743dba06379a316b9709e574823d0dd56e36cea4d847449b23f998a7d6c',
+              'tests/unit/test_ema_pullback_v2_portable_verifier_v2.py': 'dd2ae5ebe6523f5ad2fb1fe2bf467cdae5147b6f2c8c070f67460f7f0f9085d1',
               'tests/integration/test_ema_pullback_v2_portable_verifier_v2.py': 'c73795f32cd9d3deadce4bfb09a5803c65b0b6608cfc69a7ca8ed044d4c78aef',
               'tests/fixtures/ema_pullback_v2_portable_synthetic_v1.zip': 'a6f1a6c6c68cf7ed5be3c686e438d85cbd8753762fd9c7e2bb1a01d46c583dec',
               'docs/evidence/EMA_PULLBACK_V2_PORTABLE_VERIFIER_P01_CORRECTION_PLAN_V2.json': '4b524c51f36de3daffcb503b93ae8e5b8b7887e6c3bb81c6e586181923509bea',
@@ -150,8 +156,8 @@ jobs:
 
           nodes = [line.strip() for line in Path(sys.argv[1]).read_text().splitlines()
                    if line.startswith('tests/') and '::' in line]
-          if len(nodes) != 82 or len(set(nodes)) != 82:
-              raise SystemExit('Expected exactly 82 unique reviewed portable nodes')
+          if len(nodes) != 85 or len(set(nodes)) != 85:
+              raise SystemExit('Expected exactly 85 unique reviewed portable nodes')
           print('Restricted collection:', len(nodes), 'unique nodes')
           PY
           run_pytest run -rA -x
@@ -163,7 +169,7 @@ jobs:
                        if line.startswith('tests/') and '::' in line]
           passed = [line[len('PASSED '):].strip() for line in Path(sys.argv[2]).read_text().splitlines()
                     if line.startswith('PASSED tests/')]
-          if passed != collected or len(passed) != 82:
+          if passed != collected or len(passed) != 85:
               raise SystemExit('A mandatory reviewed node did not pass; skips do not count as PASS')
           print('Restricted portable result:', len(passed), 'passed')
           PY
