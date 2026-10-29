@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import stat
 import struct
+import subprocess
 import sys
 import time
 import traceback
@@ -28,6 +29,11 @@ SYNTHETIC_PATH = BASE/'tests/fixtures/ema_pullback_v2_portable_synthetic_v1.zip'
 FIXTURE_SCHEMA = 'agicore:portable-synthetic-fixture:v1'
 FIXTURE_SHA256 = 'a6f1a6c6c68cf7ed5be3c686e438d85cbd8753762fd9c7e2bb1a01d46c583dec'
 EXPECTED_NATIVE_SHA256 = 'fd03c5fd04124072c155ef5a4fcf6af64037a78f07012129ab122c7f8ff7d983'
+HISTORICAL_SOURCE_COMMIT = '95ef7c92a8e6a4b7a7a13d34f96a480a76619991'
+SUCCESSOR_REGISTRATION = 'docs/evidence/EMA_PULLBACK_V2_RECOVERY_STORAGE_CI_PORTABLE_SOURCE_REGISTRATION_V1.json'
+SUCCESSOR_REGISTRATION_SHA256 = '37045900d919484f2e644a36a96f94efed597ddeb6ddd927779f1ef5525426e4'
+SUCCESSOR_COMPLETE_CLOSURE_SHA256 = '155a6d8349f87a0ac6a48829324f417e915daf9b48b95207884660f284b897f3'
+SUCCESSOR_VERIFIER_CLOSURE_SHA256 = 'c53540c52e8b3b98b1284dd59252ac954582e8b654376b57a4aa89201efd1487'
 NATIVE_DEFLATE_HEX = '95925b6bdc301085dffb33f4bc015dac8bf7ad244bbb10bc25714b432962248d12535f525b5eda86fdef9d2425c96b9f8ced33e7e87c9a0716fb69c1e4cb0c09fd8c719ad3c2b6dfbe6f5882020b16df25b665f7d35c20f478d68d471c0ba6b3a360af9abe1b116ed10f30761997e2973b90dad0a096d62497aa908c8c3655491b9d8d86da045955ba42503281513aa1e12e04413299a350b246eb4c7a13324f3d92e3f54dd37edcb5fb73dfeeae5b7f682e6f4894a77980befb03a59b467fc479a127db8a0d1b60fe410df1e7da95df7e81e1bec7c78a0f8cba7623f46ccb37ec08fd4aeef644cd072c731749f3c0809c1e8b3df35997f4f831e1380d3459a6996dd5868deb40aaa737713a6dd8b496fbf50d03a93306ccc6c69c5d44304671517370820a638d5a4467d0a48a87c05182706842928a3b90753048f5e675a48b78b554b6b642d429a64a1b6259aba88db252cb1039d1cd4a2a8c406942388b9a73a809b8002d6a54cabe58d2651296e756b187f9891f05ec9b2fbba6dd5df84f5787f6707eb87ca6dd1c7c7bf5fe62df7cf0bbafbbf3cfedfed090d712ef70001a83db8e5608b72ffbb2fc1ecb1d962e9ee5ee5759e9d7d3e22cd33a477ced635c965a84902d5a40ab8107084a22cfb5e25839da86642aab73958d83984c7049132b9e4288202323ec2f51fe5f94ffcf639ddefd05'
 
 
@@ -638,16 +644,82 @@ def test_synthetic_fixture_commitments():
         assert not any(n.endswith(('.py', '.pyc', '.log')) for n in z.namelist())
 
 
+def historical_source_bytes(path):
+    """Read one immutable Git blob without replacement refs or lazy fetches."""
+    return subprocess.run(
+        ['git', '--no-lazy-fetch', '--no-replace-objects', 'show', HISTORICAL_SOURCE_COMMIT+':'+path],
+        cwd=BASE, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+    ).stdout
+
+
+def assert_successor_closures(root):
+    """Authenticate the successor registration and every current source byte."""
+    raw = (root/SUCCESSOR_REGISTRATION).read_bytes()
+    assert digest(raw) == SUCCESSOR_REGISTRATION_SHA256
+    registration = json.loads(raw)
+    assert oracle(registration) == raw
+    assert registration['parent_registrations'][-1]['sha256'] == (
+        '52a6c2fc2ecc7825344df6131d77282910ea5beaf3d410523da42861d9874b22'
+    )
+    for key, count, expected in [
+        ('complete_source_closure', 35, SUCCESSOR_COMPLETE_CLOSURE_SHA256),
+        ('verifier_source_closure', 9, SUCCESSOR_VERIFIER_CLOSURE_SHA256),
+    ]:
+        closure = registration[key]
+        assert len(closure['files']) == count
+        assert digest(oracle(closure)) == registration[key+'_sha256'] == expected
+        for entry in closure['files']:
+            data = (root/entry['path']).read_bytes()
+            assert len(data) == entry['size_bytes'] and digest(data) == entry['sha256']
+
+
 def test_registered_source_closures():
-    """Read only repository source bytes; external historical audit is separate."""
+    """Verify the historical commit and current successor as distinct identities."""
     contract = v.load_contract()
     for key, count in [('complete_source_closure',35), ('verifier_source_closure',9)]:
         registration = contract['registered_sources'][key]
         assert len(registration['files']) == count
         assert digest(oracle(registration)) == contract['source_closures'][key]
         for entry in registration['files']:
-            data = (BASE/entry['path']).read_bytes()
+            data = historical_source_bytes(entry['path'])
             assert len(data) == entry['size_bytes'] and digest(data) == entry['sha256']
+    assert_successor_closures(BASE)
+
+
+def test_registered_source_closures_reject_historical_drift(monkeypatch):
+    """Changing one historical blob cannot be relabeled as a valid closure."""
+    original = historical_source_bytes
+    def corrupted(path):
+        data = original(path)
+        return data+b'X' if path == 'src/agicore/__init__.py' else data
+    monkeypatch.setattr(sys.modules[__name__], 'historical_source_bytes', corrupted)
+    with pytest.raises(AssertionError):
+        test_registered_source_closures()
+
+
+def test_registered_source_closures_reject_missing_historical_commit(monkeypatch):
+    """An unavailable historical commit must not fall back to current files."""
+    monkeypatch.setattr(sys.modules[__name__], 'HISTORICAL_SOURCE_COMMIT', '0'*40)
+    with pytest.raises(subprocess.CalledProcessError):
+        historical_source_bytes('src/agicore/__init__.py')
+
+
+def test_registered_source_closures_reject_successor_drift(tmp_path):
+    """Changing one current source cannot pass the successor closure check."""
+    registration_path = tmp_path/SUCCESSOR_REGISTRATION
+    registration_path.parent.mkdir(parents=True)
+    registration_path.write_bytes((BASE/SUCCESSOR_REGISTRATION).read_bytes())
+    registration = json.loads(registration_path.read_bytes())
+    for closure in ('complete_source_closure', 'verifier_source_closure'):
+        for entry in registration[closure]['files']:
+            target = tmp_path/entry['path']
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                target.write_bytes((BASE/entry['path']).read_bytes())
+    target = tmp_path/'tests/unit/trading/test_ema_pullback_v2_recovery_storage.py'
+    target.write_bytes(target.read_bytes()+b'X')
+    with pytest.raises(AssertionError):
+        assert_successor_closures(tmp_path)
 
 
 @pytest.mark.parametrize('case_id', ['R%02d'%n for n in range(1,20)])

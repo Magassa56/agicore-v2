@@ -1,4 +1,4 @@
-"""Non-worker preflight for the versioned repaired storage harness binding."""
+"""Non-worker preflight for the portable-CI storage source registration."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import copy
 from pathlib import Path
 
 import pytest
+import tools.ema_pullback_v2_storage_synthetic_proof as storage_proof
 
 from agicore.trading.ema_pullback_v2_storage_format import (
     ROOT,
@@ -21,7 +22,7 @@ from tools.ema_pullback_v2_storage_synthetic_proof import verify_registration
 
 NEW_RELATIVE = (
     "docs/evidence/"
-    "EMA_PULLBACK_V2_RECOVERY_STORAGE_HARNESS_BINDING_SOURCE_REGISTRATION_V1.json"
+    "EMA_PULLBACK_V2_RECOVERY_STORAGE_CI_PORTABLE_SOURCE_REGISTRATION_V1.json"
 )
 HISTORICAL_RELATIVE = (
     "docs/evidence/EMA_PULLBACK_V2_RECOVERY_STORAGE_SOURCE_REGISTRATION_V1.json"
@@ -31,10 +32,13 @@ PARSER_REPAIR_RELATIVE = (
     "EMA_PULLBACK_V2_RECOVERY_STORAGE_PARSER_TARGETED_REPAIR_"
     "SOURCE_REGISTRATION_V1.json"
 )
+PARENT_BINDING_RELATIVE = (
+    "docs/evidence/"
+    "EMA_PULLBACK_V2_RECOVERY_STORAGE_HARNESS_BINDING_SOURCE_REGISTRATION_V1.json"
+)
 PLAN_RELATIVE = (
     "docs/evidence/"
-    "EMA_PULLBACK_V2_RECOVERY_STORAGE_HARNESS_BINDING_REPAIR_"
-    "PREFLIGHT_PLAN_V1.json"
+    "EMA_PULLBACK_V2_RECOVERY_STORAGE_CI_PORTABLE_PREFLIGHT_PLAN_V1.json"
 )
 HARNESS_RELATIVE = "tests/unit/trading/test_ema_pullback_v2_recovery_storage.py"
 PREFLIGHT_RELATIVE = (
@@ -49,6 +53,7 @@ FIXTURE_RELATIVE = (
 NEW_REGISTRATION = ROOT / NEW_RELATIVE
 HISTORICAL_REGISTRATION = ROOT / HISTORICAL_RELATIVE
 PARSER_REPAIR_REGISTRATION = ROOT / PARSER_REPAIR_RELATIVE
+PARENT_BINDING_REGISTRATION = ROOT / PARENT_BINDING_RELATIVE
 PLAN = ROOT / PLAN_RELATIVE
 HARNESS = ROOT / HARNESS_RELATIVE
 PREFLIGHT = ROOT / PREFLIGHT_RELATIVE
@@ -72,6 +77,9 @@ EXPECTED_HISTORICAL_REGISTRATION_SHA256 = (
 )
 EXPECTED_PARSER_REPAIR_REGISTRATION_SHA256 = (
     "accd0fbe1501ae272cb7959930f9278ed3733b2c0277f9ebe9d3e6aa32db78cf"
+)
+EXPECTED_PARENT_BINDING_REGISTRATION_SHA256 = (
+    "52a6c2fc2ecc7825344df6131d77282910ea5beaf3d410523da42861d9874b22"
 )
 PROHIBITED_CALLS = {
     "byte_case",
@@ -127,15 +135,15 @@ def called_names(path: Path) -> set[str]:
     return result
 
 
-def test_a_registration_exists_and_is_preflight_only():
+def test_a_registration_exists_and_describes_portable_ci():
     document = registration()
     assert document["schema"] == (
-        "agicore:synthetic-storage-harness-binding-source-registration:v1"
+        "agicore:synthetic-storage-ci-portable-source-registration:v1"
     )
-    assert document["harness_binding_repair_only"] is True
+    assert document["portable_ci_preflight"] is True
     assert document["non_worker_preflight_authorized"] is True
     assert document["automatic_worker_execution_authorized"] is False
-    assert document["full_suite_authorized"] is False
+    assert document["full_suite_authorized"] is True
 
 
 def test_b_k_harness_resolves_only_to_new_registration():
@@ -144,6 +152,7 @@ def test_b_k_harness_resolves_only_to_new_registration():
     assert NEW_RELATIVE.encode("utf-8") in harness_bytes
     assert HISTORICAL_RELATIVE.encode("utf-8") not in harness_bytes
     assert PARSER_REPAIR_RELATIVE.encode("utf-8") not in harness_bytes
+    assert PARENT_BINDING_RELATIVE.encode("utf-8") not in harness_bytes
 
 
 def test_c_future_controller_selection_is_explicit():
@@ -188,10 +197,35 @@ def test_h_independent_verifier_closure_matches_every_source():
 
 
 def test_i_formal_codec_profile_is_unchanged():
-    document, fixtures = verify_registration(NEW_REGISTRATION, formal=True)
-    assert codec_profile() == fixtures["codec_profile"]
+    document, fixtures = verify_registration(NEW_REGISTRATION, formal=False)
     assert document["formal_codec_profile_sha256"] == EXPECTED_CODEC_PROFILE_SHA256
-    assert sha(canonical(codec_profile())) == EXPECTED_CODEC_PROFILE_SHA256
+    assert sha(canonical(fixtures["codec_profile"])) == EXPECTED_CODEC_PROFILE_SHA256
+
+
+def test_i_formal_gate_enforces_the_real_host_identity():
+    _, fixtures = verify_registration(NEW_REGISTRATION, formal=False)
+    if codec_profile() == fixtures["codec_profile"]:
+        verify_registration(NEW_REGISTRATION, formal=True)
+    else:
+        with pytest.raises(StorageProofError, match="formal codec host differs"):
+            verify_registration(NEW_REGISTRATION, formal=True)
+
+
+def test_i_formal_gate_rejects_even_one_profile_change(monkeypatch):
+    _, fixtures = verify_registration(NEW_REGISTRATION, formal=False)
+    changed = copy.deepcopy(fixtures["codec_profile"])
+    changed["zlib_runtime_version"] += "-deliberate-drift"
+    monkeypatch.setattr(storage_proof, "codec_profile", lambda: changed)
+    with pytest.raises(StorageProofError, match="formal codec host differs"):
+        verify_registration(NEW_REGISTRATION, formal=True)
+
+
+def test_i_formal_gate_accepts_the_registered_profile_when_simulated(monkeypatch):
+    _, fixtures = verify_registration(NEW_REGISTRATION, formal=False)
+    monkeypatch.setattr(storage_proof, "codec_profile", lambda: fixtures["codec_profile"])
+    document, actual = verify_registration(NEW_REGISTRATION, formal=True)
+    assert actual == fixtures
+    assert document["formal_codec_profile_sha256"] == EXPECTED_CODEC_PROFILE_SHA256
 
 
 def test_j_registration_has_no_source_hash_cycle():
@@ -201,6 +235,7 @@ def test_j_registration_has_no_source_hash_cycle():
     assert NEW_RELATIVE not in paths
     assert HISTORICAL_RELATIVE not in paths
     assert PARSER_REPAIR_RELATIVE not in paths
+    assert PARENT_BINDING_RELATIVE not in paths
     assert not any(path.endswith("SOURCE_REGISTRATION_V1.json") for path in paths)
 
 
@@ -222,6 +257,7 @@ def test_l_deliberate_source_drift_fails_closed(tmp_path):
 def test_m_preflight_source_cannot_call_worker_or_replay_cases():
     assert called_names(PREFLIGHT).isdisjoint(PROHIBITED_CALLS)
     plan = parse_canonical([PLAN.read_bytes()])
+    assert sha(PLAN.read_bytes()) == registration()["preflight_plan_sha256"]
     command = plan["commands"]["non_worker_preflight"]
     assert command[-1] == PREFLIGHT_RELATIVE
     assert HARNESS_RELATIVE not in command
@@ -248,10 +284,21 @@ def test_registration_binds_preflight_and_parent_identities():
             "role": "PARSER_REPAIR_SOURCE",
             "sha256": EXPECTED_PARSER_REPAIR_REGISTRATION_SHA256,
         },
+        {
+            "complete_source_closure_sha256": (
+                "9f6c3edc9b787a5df7cd9bda0c2f412d69af9ea1a6cc51a9e4efa226ef7eeb73"
+            ),
+            "path": PARENT_BINDING_RELATIVE,
+            "role": "HARNESS_BINDING_REPAIR_SOURCE",
+            "sha256": EXPECTED_PARENT_BINDING_REGISTRATION_SHA256,
+        },
     ]
     assert sha(HISTORICAL_REGISTRATION.read_bytes()) == (
         EXPECTED_HISTORICAL_REGISTRATION_SHA256
     )
     assert sha(PARSER_REPAIR_REGISTRATION.read_bytes()) == (
         EXPECTED_PARSER_REPAIR_REGISTRATION_SHA256
+    )
+    assert sha(PARENT_BINDING_REGISTRATION.read_bytes()) == (
+        EXPECTED_PARENT_BINDING_REGISTRATION_SHA256
     )
