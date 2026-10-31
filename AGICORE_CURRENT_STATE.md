@@ -1,3 +1,56 @@
+# AGIcore current state — targeted recovery-storage parser repair
+
+Date: 2026-10-18 UTC.
+PHASE = EMA_PULLBACK_V2_RECOVERY_STORAGE_PARSER_TARGETED_REPAIR.
+STATUS = PATCHED_FIRST_WORKER_PASS.
+
+The historical storage proof remains `BLOCKED_STORAGE_CONTRACT_EQUIVALENCE`; it has
+not been rewritten or promoted to PASS. Its first failure was isolated to a new JSON
+parser heuristic that inferred rational semantics from the two object keys alone.
+The repair validates rationals only under the applicable frozen schema reference
+`#/$defs/rational`. It changes no strategy rule, result schema, codec, shard boundary,
+hash definition, protocol, dataset, threshold or resource cap.
+
+The broken historical worktree remains untouched. Required bytes were recovered by
+hash into an independent valid checkout at main commit
+`6d01dd3826320270dab5ce75062170d77d22d3af` on branch
+`feature/ema-pullback-v2-recovery-storage-parser-repair`.
+
+Focused parser validation: 24 assertions PASS; Ruff check/format and py_compile PASS.
+The sole historical failing worker `impulse_profit_LONG` now PASSes on 57 invented
+observations. Reference and reconstructed native bytes are exactly identical at
+SHA-256 `420cb64cfceab0ae4bf761ab3ac9ba8b8d08a1ef75eec837f66f954713ec2913`;
+the independent verifier and completion seal both PASS.
+Targeted repair evidence SHA-256 is
+`f8ad80c3451f0db083eb86f032af839a243cff66e3ec05d3cc79a4cd72297422`.
+The compact preservation archive SHA-256 is
+`72b79c1a9b02c8ac7924fecc349a8b7764da69f38b7c7dcb8d0bf67dd07c5888`.
+
+Old/new producer SHA-256:
+`3f0dad5ee903e56596416ee08db8718ab4be2a20dc9cb541ef4d2cd18c853e2d` /
+`bbfc658310f27af6a03b34e8771205af84843b97315266098f21725ebfec03d3`.
+Old/new verifier SHA-256:
+`ea5bc03772fd69124ffffe188c8d9544eed03b404c144b6c3ece044132a21f6e` /
+`9e04e9da8eef04eddaa0c7db53bca6831570416955b5d2c518d6d26a991a1da8`.
+Old/new complete source closure SHA-256:
+`8a188999dfeee33ea71a21327360f1d17962ab7b4083b690b08beef72233dc5c` /
+`7a730b86b51fd1c063cc7ea637763009d2bf303a9d1b4afa879e99116ec077ec`.
+
+FULL_SYNTHETIC_PROOF = NOT_COMPLETED.
+RESOURCE_FEASIBILITY_89841 = NOT_PROVEN.
+RECOVERY_INVOCATIONS = 0 ; RECOVERY_RUN_ID = NOT_REGISTERED.
+REAL_DEVELOPMENT_DATA_ACCESSED_THIS_GATE = FALSE.
+REAL_RECOVERY_EXECUTION = NOT_EXECUTED ; DEVELOPMENT_VERDICT = NOT_AVAILABLE.
+OOS_ACCESSED = FALSE. The original claim remains byte-identical and untracked.
+
+NEXT = EMA_PULLBACK_V2_RECOVERY_STORAGE_SYNTHETIC_PROOF_CONTINUATION_REQUIRED.
+No remaining worker, real replay, recovery claim, registration, PR or merge is
+authorized by this checkpoint.
+
+Historical checkpoints below remain verbatim.
+
+---
+
 # AGIcore current state — recovery storage design precommitted
 
 Date : 2026-10-14 UTC.
