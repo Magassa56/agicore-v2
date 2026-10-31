@@ -21,6 +21,7 @@ def test_generated_input_and_results_repeat_with_nontrivial_events():
     assert first["output"]["evaluations"] == 128
     assert first["output"]["qualified_impulse_events"] > 0
     assert first["output"]["maximum_retained_observations"] == 21
+    assert set(first["address_space_limit_bytes"]) == {"soft", "hard"}
     assert first["scope"] == "INVENTED_INPUT_PARSER_AND_DIRECTIONAL_IMPULSE_ONLY"
 
 

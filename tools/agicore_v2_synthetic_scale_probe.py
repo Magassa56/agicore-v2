@@ -83,6 +83,11 @@ def _peak_rss_bytes() -> int:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
 
 
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
 def run_probe(count: int) -> dict:
     """Run the selected nontrading pipeline and report timings and identities."""
     start_wall = time.perf_counter_ns()
@@ -98,9 +103,22 @@ def run_probe(count: int) -> dict:
         raise AssertionError("parsed count differs from generated count")
     results = evaluate_impulses(bars)
     end_wall = time.perf_counter_ns()
+    end_cpu = time.process_time_ns()
     total_ns = end_wall - start_wall
     parse_ns = parse_end - generation_end
     evaluate_ns = end_wall - parse_end
+    environment = {
+        "python": platform.python_version(),
+        "python_executable_sha256": _file_sha256(Path(sys.executable)),
+        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        "platform": sys.platform,
+    }
+    sources = {
+        "probe": _file_sha256(Path(__file__)),
+        "replay_parser": _file_sha256(Path(replay.__file__)),
+        "directional_impulse": _file_sha256(Path(impulse.__file__)),
+    }
+    final_peak = _peak_rss_bytes()
     return {
         "schema": "agicore:synthetic-ingestion-impulse-scale-probe:v1",
         "scope": "INVENTED_INPUT_PARSER_AND_DIRECTIONAL_IMPULSE_ONLY",
@@ -114,7 +132,7 @@ def run_probe(count: int) -> dict:
             "parse_and_input_hash": parse_ns,
             "impulse_and_output_hash": evaluate_ns,
             "total_wall": total_ns,
-            "total_cpu": time.process_time_ns() - start_cpu,
+            "total_cpu": end_cpu - start_cpu,
         },
         "throughput_observations_per_second": {
             "parse_and_input_hash": count * 1_000_000_000 / parse_ns,
@@ -124,21 +142,14 @@ def run_probe(count: int) -> dict:
         "peak_rss_bytes": {
             "after_generation": generation_peak,
             "after_parse": parse_peak,
-            "whole_process": _peak_rss_bytes(),
+            "before_json_output": final_peak,
         },
-        "environment": {
-            "python": platform.python_version(),
-            "python_executable_sha256": hashlib.sha256(
-                Path(sys.executable).read_bytes()
-            ).hexdigest(),
-            "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
-            "platform": sys.platform,
+        "address_space_limit_bytes": {
+            "soft": resource.getrlimit(resource.RLIMIT_AS)[0],
+            "hard": resource.getrlimit(resource.RLIMIT_AS)[1],
         },
-        "source_sha256": {
-            "probe": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            "replay_parser": hashlib.sha256(Path(replay.__file__).read_bytes()).hexdigest(),
-            "directional_impulse": hashlib.sha256(Path(impulse.__file__).read_bytes()).hexdigest(),
-        },
+        "environment": environment,
+        "source_sha256": sources,
         "limitations": [
             "Observation count and OHLCV format are representative; price distribution is invented.",
             "No complete strategy, storage bundle, paper trading or financial performance is measured.",
