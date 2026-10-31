@@ -20,6 +20,8 @@ from . import directional_impulse_v2 as impulse
 from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
+from . import synthetic_pullback_replay_v2 as pullback
+from . import ema20_pullback_v2 as ema20
 
 SCHEMA = "agicore:invented-observation-bundle:v2"
 MAX_OBSERVATIONS = 89_841
@@ -105,10 +107,92 @@ def replay_events(raw: bytes, *, bounded: bool = True) -> dict:
     return {"observations": len(bars), "counts": counts, "events_sha256": digest.hexdigest()}
 
 
-def produce(bundle: Path, observations: int) -> dict:
+def replay_pullback_events(raw: bytes) -> dict:
+    """Replay events, context and exact EMA pullback, without entering trades."""
+    bars = replay.parse_ninjatrader_last_rows_v2(raw)
+    windows, rejection = {}, {}
+    previous = None
+    ema = pullback.IncrementalEMA20()
+    digest = hashlib.sha256()
+    counts = {
+        "impulses": 0,
+        "reversals": 0,
+        "qualified_contexts": 0,
+        "pullbacks_evaluated": 0,
+        "pullbacks_qualified": 0,
+    }
+    for bar in bars:
+        i = bar.bar_index
+        windows[i] = bar.closed_view()
+        rejection[i] = reversal.RejectionBarV2(
+            i, bar.timestamp_utc, bar.close, True, bar.open, bar.high, bar.low
+        )
+        if i >= WINDOW_SIZE:
+            del windows[i - WINDOW_SIZE]
+            del rejection[i - WINDOW_SIZE]
+        detected = impulse.evaluate_directional_impulse_event_v2(
+            impulse_candidate_bar_index=i, bars_by_index=windows
+        ).event
+        reversal_event = None
+        if i >= reversal.CONFIRMATION_WINDOW_CLOSED_BARS:
+            reversal_event = reversal.evaluate_reversal_transition_event_v2(
+                rejection_candidate_bar_index=i - reversal.CONFIRMATION_WINDOW_CLOSED_BARS,
+                closed_bar_index=i,
+                bars_by_index=rejection,
+            ).event
+        price = ema20.EMA20PullbackBarV2(
+            i, bar.timestamp_utc, bar.open, bar.high, bar.low, bar.close, True
+        )
+        outcome = pullback.advance_pullback(
+            previous,
+            price,
+            ema,
+            directional_impulse_event=detected,
+            reversal_transition_event=None
+            if reversal_event is None
+            else reversal_event.as_regime_event(),
+        )
+        previous = outcome.lifetime
+        counts["impulses"] += detected is not None
+        counts["reversals"] += reversal_event is not None
+        counts["qualified_contexts"] += (
+            previous.composition.status is regime.RegimeContextStatus.QUALIFIED
+        )
+        counts["pullbacks_evaluated"] += outcome.pullback is not None
+        counts["pullbacks_qualified"] += (
+            outcome.pullback is not None and outcome.pullback.pullback_qualified
+        )
+        digest.update(
+            replay.canonical_replay_bytes_v2(
+                pullback.decision_record(i, detected, reversal_event, outcome)
+            )
+        )
+        ema.append(price)
+    terminal = regime.finish_regime_context_v2(previous).context
+    digest.update(
+        replay.canonical_replay_bytes_v2(
+            {
+                "terminal_state": terminal.state.value,
+                "source_event_bar_index": terminal.source_event_bar_index,
+                "pullback_bar_index": terminal.pullback_bar_index,
+                "ema_reference_sha256": pullback.fraction_sha256(terminal.ema_reference),
+            }
+        )
+    )
+    return {
+        "schema": "agicore:synthetic-event-pullback-replay:v1",
+        "observations": len(bars),
+        "counts": counts,
+        "events_sha256": digest.hexdigest(),
+    }
+
+
+def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
+    if stage not in ("events", "pullback"):
+        raise ValueError("unsupported replay stage")
     start = time.perf_counter_ns()
     raw = generate_observations(observations)
     if sha(raw) == replay.CANONICAL_DATASET_RAW_SHA256:
@@ -155,13 +239,14 @@ def produce(bundle: Path, observations: int) -> dict:
     with (bundle / "manifest.json").open("xb") as stream:
         stream.write(manifest_bytes)
     storage_end = time.perf_counter_ns()
-    stage = replay_events(raw)
+    replay_result = replay_events(raw) if stage == "events" else replay_pullback_events(raw)
     result = {
         "schema": "agicore:invented-storage-replay-worker:v2",
         "domain": "SYNTHETIC_ONLY",
         "manifest_sha256": sha(manifest_bytes),
         "input_sha256": sha(raw),
-        "replay": stage,
+        "replay": replay_result,
+        "stage": stage,
         "storage_wall_ns": storage_end - start,
         "replay_wall_ns": time.perf_counter_ns() - storage_end,
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
@@ -176,8 +261,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
+    parser.add_argument("--stage", choices=("events", "pullback"), default="events")
     args = parser.parse_args()
-    produce(args.bundle, args.observations)
+    produce(args.bundle, args.observations, stage=args.stage)
 
 
 if __name__ == "__main__":

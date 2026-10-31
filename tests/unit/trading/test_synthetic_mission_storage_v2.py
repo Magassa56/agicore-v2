@@ -56,6 +56,16 @@ def test_multiple_chunks_verify_and_missing_chunk_fails(tmp_path):
         verify(bundle, 1_001)
 
 
+def test_pullback_stage_is_verified_separately_without_changing_events_mode(tmp_path):
+    bundle = tmp_path / "pullback"
+    result = produce(bundle, 256, stage="pullback")
+    receipt = verify(bundle, 256, stage="pullback")
+    assert receipt["stage"] == "pullback"
+    assert receipt["replay"] == result["replay"]
+    assert result["replay"]["counts"]["pullbacks_evaluated"] > 0
+    assert result["replay"]["schema"] == "agicore:synthetic-event-pullback-replay:v1"
+
+
 def test_changed_chunk_fails_independent_verifier(tmp_path):
     bundle = tmp_path / "bundle"
     produce(bundle, 64)

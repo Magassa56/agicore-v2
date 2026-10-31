@@ -19,9 +19,11 @@ from pathlib import Path
 from tools.agicore_v2_synthetic_scale_probe import generate_observations
 
 from . import directional_impulse_v2 as impulse
+from . import ema20_pullback_v2 as ema20
 from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
+from . import synthetic_pullback_replay_v2 as pullback
 from .synthetic_mission_storage_v2 import (
     MAX_OBSERVATIONS,
     ROWS_PER_CHUNK,
@@ -94,6 +96,90 @@ def recompute_events(raw: bytes) -> dict:
     return {"observations": len(bars), "counts": counts, "events_sha256": digest.hexdigest()}
 
 
+def recompute_pullback_events(raw: bytes) -> dict:
+    """Independently rebuild the event pipeline through exact pullback."""
+    bars = replay.parse_ninjatrader_last_rows_v2(raw)
+    window = deque(maxlen=impulse.IMPULSE_RANGE_LOOKBACK + 1)
+    previous, ema = None, pullback.IncrementalEMA20()
+    digest = hashlib.sha256()
+    counts = {
+        "impulses": 0,
+        "reversals": 0,
+        "qualified_contexts": 0,
+        "pullbacks_evaluated": 0,
+        "pullbacks_qualified": 0,
+    }
+    for bar in bars:
+        window.append(
+            (
+                bar.closed_view(),
+                reversal.RejectionBarV2(
+                    bar.bar_index, bar.timestamp_utc, bar.close, True, bar.open, bar.high, bar.low
+                ),
+            )
+        )
+        impulse_view = {item[0].bar_index: item[0] for item in window}
+        reversal_view = {item[1].bar_index: item[1] for item in window}
+        detected = impulse.evaluate_directional_impulse_event_v2(
+            impulse_candidate_bar_index=bar.bar_index, bars_by_index=impulse_view
+        ).event
+        candidate = bar.bar_index - reversal.CONFIRMATION_WINDOW_CLOSED_BARS
+        reversal_event = (
+            None
+            if candidate < 0
+            else reversal.evaluate_reversal_transition_event_v2(
+                rejection_candidate_bar_index=candidate,
+                closed_bar_index=bar.bar_index,
+                bars_by_index=reversal_view,
+            ).event
+        )
+        price = ema20.EMA20PullbackBarV2(
+            bar.bar_index, bar.timestamp_utc, bar.open, bar.high, bar.low, bar.close, True
+        )
+        outcome = pullback.advance_pullback(
+            previous,
+            price,
+            ema,
+            directional_impulse_event=detected,
+            reversal_transition_event=None
+            if reversal_event is None
+            else reversal_event.as_regime_event(),
+        )
+        previous = outcome.lifetime
+        counts["impulses"] += detected is not None
+        counts["reversals"] += reversal_event is not None
+        counts["qualified_contexts"] += (
+            previous.composition.status is regime.RegimeContextStatus.QUALIFIED
+        )
+        counts["pullbacks_evaluated"] += outcome.pullback is not None
+        counts["pullbacks_qualified"] += (
+            outcome.pullback is not None and outcome.pullback.pullback_qualified
+        )
+        digest.update(
+            replay.canonical_replay_bytes_v2(
+                pullback.decision_record(bar.bar_index, detected, reversal_event, outcome)
+            )
+        )
+        ema.append(price)
+    terminal = regime.finish_regime_context_v2(previous).context
+    digest.update(
+        replay.canonical_replay_bytes_v2(
+            {
+                "terminal_state": terminal.state.value,
+                "source_event_bar_index": terminal.source_event_bar_index,
+                "pullback_bar_index": terminal.pullback_bar_index,
+                "ema_reference_sha256": pullback.fraction_sha256(terminal.ema_reference),
+            }
+        )
+    )
+    return {
+        "schema": "agicore:synthetic-event-pullback-replay:v1",
+        "observations": len(bars),
+        "counts": counts,
+        "events_sha256": digest.hexdigest(),
+    }
+
+
 def read_regular(path: Path, limit: int) -> bytes:
     """Read one bounded regular file without following a symlink or hardlink."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -107,10 +193,12 @@ def read_regular(path: Path, limit: int) -> bytes:
         return content
 
 
-def verify(bundle: Path, observations: int) -> dict:
+def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
+    if stage not in ("events", "pullback"):
+        raise ValueError("unsupported replay stage")
     if bundle.is_symlink() or not bundle.is_dir():
         raise ValueError("invalid bundle directory")
     chunk_dir = bundle / "chunks"
@@ -189,10 +277,15 @@ def verify(bundle: Path, observations: int) -> dict:
         if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail or decoded != expected:
             raise ValueError("decoded chunk differs from generated source")
     worker = json.loads(read_regular(bundle / "worker.json", 1_000_000))
-    repeated = recompute_events(expected_raw)
+    repeated = (
+        recompute_events(expected_raw)
+        if stage == "events"
+        else recompute_pullback_events(expected_raw)
+    )
     if (
         worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
         or worker.get("domain") != "SYNTHETIC_ONLY"
+        or worker.get("stage", "events") != stage
         or worker.get("manifest_sha256") != sha(manifest_bytes)
         or worker.get("input_sha256") != sha(expected_raw)
         or worker.get("replay") != repeated
@@ -202,6 +295,7 @@ def verify(bundle: Path, observations: int) -> dict:
         "schema": "agicore:invented-storage-replay-verification:v2",
         "status": "PASS",
         "observations": observations,
+        "stage": stage,
         "input_sha256": sha(expected_raw),
         "manifest_sha256": sha(manifest_bytes),
         "replay": repeated,
@@ -217,8 +311,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
+    parser.add_argument("--stage", choices=("events", "pullback"), default="events")
     args = parser.parse_args()
-    verify(args.bundle, args.observations)
+    verify(args.bundle, args.observations, stage=args.stage)
 
 
 if __name__ == "__main__":

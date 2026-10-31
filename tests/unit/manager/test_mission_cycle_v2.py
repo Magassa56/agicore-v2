@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
 
@@ -13,6 +14,8 @@ def test_end_to_end_mission_assigns_runs_verifies_and_reports(tmp_path):
     directory = tmp_path / "mission"
     report = manager.run_mission(directory, 64, timeout_seconds=20)
     assert report["status"] == "PASS"
+    assert report["orchestrator"] == "AgentOrchestrator+Dispatcher"
+    assert report["stage"] == "pullback"
     assert report["verification"]["observations"] == 64
     assert report["steps"]["worker"]["exit_code"] == 0
     assert report["steps"]["verifier"]["exit_code"] == 0
@@ -26,21 +29,32 @@ def test_end_to_end_mission_assigns_runs_verifies_and_reports(tmp_path):
         ("manager", "CREATED"),
         ("worker", "ASSIGNED"),
         ("worker", "STARTED"),
+        ("worker", "DISPATCHED"),
         ("worker", "COMPLETED"),
         ("verifier", "ASSIGNED"),
         ("verifier", "STARTED"),
+        ("verifier", "DISPATCHED"),
         ("verifier", "COMPLETED"),
         ("manager", "PASS"),
     ]
     assert all(
         e["task_id"] == report["task_id"] and e["timestamp_utc"].endswith("+00:00") for e in events
     )
+    with sqlite3.connect(directory / "orchestrator.sqlite3") as db:
+        tasks = db.execute("select assigned_to, status from tasks order by assigned_to").fetchall()
+        dispatches = db.execute(
+            "select count(*) from events where event_type = 'task.dispatched'"
+        ).fetchone()[0]
+    assert tasks == [("verifier", "completed"), ("worker", "completed")]
+    assert dispatches == 2
+    assert mission["authorizations"]["real_data"] is False
+    assert mission["authorizations"]["orders"] is False
 
 
 def test_worker_failure_prevents_verification_and_is_reported(tmp_path, monkeypatch):
     called = []
 
-    def fail_once(root, module, role, observations, timeout):
+    def fail_once(root, module, role, observations, timeout, stage):
         called.append(role)
         return {"exit_code": 1, "timeout": False, "stderr": "worker.stderr"}
 
@@ -52,13 +66,49 @@ def test_worker_failure_prevents_verification_and_is_reported(tmp_path, monkeypa
 
 
 def test_zero_exit_without_receipts_never_passes(tmp_path, monkeypatch):
-    def fake_success(root, module, role, observations, timeout):
+    def fake_success(root, module, role, observations, timeout, stage):
         return {"exit_code": 0, "timeout": False, "stderr": f"{role}.stderr"}
 
     monkeypatch.setattr(manager, "_run_process", fake_success)
     report = manager.run_mission(tmp_path / "no-receipts", 64)
     assert report["status"] == "FAILED"
     assert "invalid verification receipt" in report["error"]
+
+
+def test_event_only_mode_retains_the_existing_scope(tmp_path):
+    report = manager.run_mission(tmp_path / "events", 64, stage="events")
+    assert report["status"] == "PASS"
+    assert report["verification"]["stage"] == "events"
+    assert "pullbacks_evaluated" not in report["verification"]["replay"]["counts"]
+
+
+def test_unregistered_adapter_and_unapproved_stage_are_refused(tmp_path):
+    with pytest.raises(ValueError, match="unregistered mission adapter"):
+        manager._run_process(tmp_path, "arbitrary.external.command", "worker", 1, 2, "pullback")
+    with pytest.raises(ValueError, match="unsupported replay stage"):
+        manager.run_mission(tmp_path / "forbidden", 1, stage="trade")
+    assert not (tmp_path / "forbidden").exists()
+
+
+def test_failed_dispatch_audit_prevents_process_execution(tmp_path, monkeypatch):
+    original = manager._event
+    invoked = []
+
+    def fail_dispatch(root, task_id, agent_id, state, **details):
+        if state == "DISPATCHED":
+            raise OSError("synthetic audit failure")
+        return original(root, task_id, agent_id, state, **details)
+
+    def must_not_run(*args):
+        invoked.append(args)
+        raise AssertionError("process executed despite missing audit")
+
+    monkeypatch.setattr(manager, "_event", fail_dispatch)
+    monkeypatch.setattr(manager, "_run_process", must_not_run)
+    report = manager.run_mission(tmp_path / "audit-failure", 64)
+    assert report["status"] == "FAILED"
+    assert "audit projection failed" in report["error"]
+    assert not invoked
 
 
 def test_timeout_stops_without_starting_verifier(tmp_path):
