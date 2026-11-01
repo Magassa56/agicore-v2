@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
+from fractions import Fraction
 
 import pytest
 
@@ -89,6 +91,52 @@ def test_future_prices_cannot_change_the_first_confirmation(direction):
     assert baseline["events_sha256"] == prefix["events_sha256"] == changed["events_sha256"]
     assert baseline["counts"] == prefix["counts"] == changed["counts"]
     assert baseline["processed_observations"] == prefix["processed_observations"] == 36
+
+
+def test_confirmation_timestamp_changes_projection_and_replay_fingerprint():
+    bars = _bars(RegimeDirection.LONG)
+    bars[34] = replace(bars[34], high=Decimal("20006.25"), close=Decimal("20006.00"))
+    original_raw = _raw(bars)
+    original = engine.replay_confirmation_native(original_raw)
+    delayed = {
+        i: replace(b, timestamp_utc=b.timestamp_utc + timedelta(minutes=1)) if i >= 34 else b
+        for i, b in bars.items()
+    }
+    delayed_raw = _raw(delayed)
+    after = engine.replay_confirmation_native(delayed_raw)
+    assert original.native_confirmation.confirmation.confirmation_bar_index == 34
+    assert after.native_confirmation.confirmation.confirmation_bar_index == 34
+    assert (
+        original.native_confirmation.confirmation.confirmation_timestamp
+        != after.native_confirmation.confirmation.confirmation_timestamp
+    )
+    assert original.summary["events_sha256"] != after.summary["events_sha256"]
+    assert original.summary == verifier.recompute_confirmation_events(original_raw)
+    assert after.summary == verifier.recompute_confirmation_events(delayed_raw)
+    assert original.summary["schema"] == "agicore:synthetic-event-confirmation-replay:v2"
+
+
+def test_confirmation_projection_binds_context_and_exact_pullback_body():
+    result = engine.replay_confirmation_native(_raw(_bars(RegimeDirection.LONG)))
+    value = result.native_confirmation
+    snapshot = engine.confirmation_snapshot(value)
+    context = value.opportunity.consumed_context
+    assert snapshot["source_event_types"] == [x.value for x in context.source_event_types]
+    assert snapshot["source_event_timestamp"] == context.source_event_timestamp
+    assert snapshot["pullback_timestamp"] == context.pullback_timestamp
+    assert snapshot["candidate"]["timestamp"] == value.candidate.confirmation_timestamp
+    assert snapshot["confirmation_timestamp"] == value.confirmation.confirmation_timestamp
+    changed = replace(
+        value,
+        opportunity=replace(
+            value.opportunity,
+            pullback_body_low=value.opportunity.pullback_body_low - Fraction(1, 4),
+            pullback_body_high=value.opportunity.pullback_body_high + Fraction(1, 4),
+        ),
+    )
+    altered = engine.confirmation_snapshot(changed)
+    assert snapshot["pullback_body_low_sha256"] != altered["pullback_body_low_sha256"]
+    assert snapshot["pullback_body_high_sha256"] != altered["pullback_body_high_sha256"]
 
 
 def test_prefix_mapping_refuses_future_reads_and_history_scans():

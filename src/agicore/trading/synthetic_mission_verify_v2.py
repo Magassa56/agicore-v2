@@ -25,6 +25,9 @@ from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
+from .synthetic_confirmation_replay_v2 import (
+    SCHEMA as CONFIRMATION_SCHEMA,
+)
 from .synthetic_confirmation_replay_v2 import ClosedPrefix, confirmation_snapshot
 from .synthetic_mission_storage_v2 import (
     MAX_OBSERVATIONS,
@@ -314,7 +317,7 @@ def recompute_confirmation_events(raw: bytes) -> dict:
         )
     )
     return {
-        "schema": "agicore:synthetic-event-confirmation-replay:v1",
+        "schema": CONFIRMATION_SCHEMA,
         "input_observations": len(bars),
         "processed_observations": processed,
         "stop_reason": stop_reason,

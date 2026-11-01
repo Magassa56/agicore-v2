@@ -19,7 +19,7 @@ from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
 
 WINDOW = impulse.IMPULSE_RANGE_LOOKBACK + 1
-SCHEMA = "agicore:synthetic-event-confirmation-replay:v1"
+SCHEMA = "agicore:synthetic-event-confirmation-replay:v2"
 
 
 class ClosedPrefix(Mapping[int, ema20.EMA20PullbackBarV2]):
@@ -55,14 +55,21 @@ def confirmation_snapshot(value: confirmation.EntryConfirmationEvaluationV2 | No
     if value is None:
         return None
     candidate, record = value.candidate, value.confirmation
+    context = value.opportunity.consumed_context
     macd = None if candidate is None else candidate.macd_evaluation
     return {
         "state": value.state.value,
-        "pullback_bar_index": value.opportunity.consumed_context.pullback_bar_index,
+        "state_bar_index": value.closed_bar_index,
+        "state_timestamp": value.closed_bar_timestamp,
+        "pullback_bar_index": context.pullback_bar_index,
+        "pullback_timestamp": context.pullback_timestamp,
+        "pullback_body_low_sha256": pullback.fraction_sha256(value.opportunity.pullback_body_low),
+        "pullback_body_high_sha256": pullback.fraction_sha256(value.opportunity.pullback_body_high),
         "candidate": None
         if candidate is None
         else {
             "bar_index": candidate.confirmation_bar_index,
+            "timestamp": candidate.confirmation_timestamp,
             "status": candidate.status.value,
             "price_qualified": candidate.price_qualified,
             "momentum_qualified": candidate.momentum_qualified,
@@ -78,12 +85,13 @@ def confirmation_snapshot(value: confirmation.EntryConfirmationEvaluationV2 | No
             else pullback.fraction_sha256(macd.previous_histogram),
         },
         "confirmed": record is not None,
-        "source_event_bar_index": value.opportunity.consumed_context.source_event_bar_index,
-        "source_direction": value.opportunity.consumed_context.source_event_direction,
+        "source_event_bar_index": context.source_event_bar_index,
+        "source_event_timestamp": context.source_event_timestamp,
+        "source_event_types": [family.value for family in context.source_event_types],
+        "source_direction": context.source_event_direction,
         "confirmation_bar_index": None if record is None else record.confirmation_bar_index,
-        "ema_reference_sha256": pullback.fraction_sha256(
-            value.opportunity.consumed_context.ema_reference
-        ),
+        "confirmation_timestamp": None if record is None else record.confirmation_timestamp,
+        "ema_reference_sha256": pullback.fraction_sha256(context.ema_reference),
     }
 
 
