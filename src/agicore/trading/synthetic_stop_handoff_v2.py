@@ -13,13 +13,13 @@ from datetime import datetime, timedelta
 from fractions import Fraction
 
 from .ema_pullback_entry_confirmation_v2 import (
+    MAX_CONFIRMATION_ELAPSED_TIME,
     EntryConfirmationCandidateV2,
     EntryConfirmationEvaluationV2,
     EntryConfirmationRecordV2,
     EntryConfirmationStatusV2,
     MACDEvaluationV2,
     MACDStatusV2,
-    MAX_CONFIRMATION_ELAPSED_TIME,
     evaluate_macd_momentum_v2,
 )
 from .ema_pullback_initial_stop_v2 import (
@@ -157,7 +157,7 @@ def capture_synthetic_stop_v2(
         raise ValueError("closed window cannot include bars after confirmation")
     book = InitialStopBookV2() if previous is None else previous
     if not isinstance(book, InitialStopBookV2):
-        raise ValueError("previous stop book has an invalid type")
+        raise TypeError("previous stop book has an invalid type")
     if any(entry.at_entry is not None for entry in book.entries):
         raise ValueError("entry-bound stop books are outside this handoff")
     registered = register_initial_stop_v2(

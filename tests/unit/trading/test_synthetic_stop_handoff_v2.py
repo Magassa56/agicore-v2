@@ -37,6 +37,16 @@ def _confirmation(direction=RegimeDirection.LONG):
     return result
 
 
+def test_non_book_previous_state_is_rejected():
+    upstream = _confirmation()
+    with pytest.raises(TypeError, match="previous stop book"):
+        capture_synthetic_stop_v2(
+            confirmation=upstream.native_confirmation,
+            closed_window=upstream.stop_window,
+            previous={},
+        )
+
+
 @pytest.mark.parametrize("direction", list(RegimeDirection))
 def test_real_confirmation_yields_causal_immutable_stop_without_entry(direction):
     upstream = _confirmation(direction)
@@ -209,7 +219,9 @@ def test_native_macd_clock_and_status_are_required(field):
         "known_at_timestamp": momentum.known_at_timestamp + timedelta(minutes=1),
         "status": MACDStatusV2.INVALID_MACD_INPUT,
     }
-    candidate = replace(native.candidate, macd_evaluation=replace(momentum, **{field: replacements[field]}))
+    candidate = replace(
+        native.candidate, macd_evaluation=replace(momentum, **{field: replacements[field]})
+    )
     with pytest.raises(InitialStopV2Error, match="native MACD|native provenance"):
         capture_synthetic_stop_v2(
             confirmation=replace(native, candidate=candidate), closed_window=upstream.stop_window
@@ -254,9 +266,7 @@ def test_agreeing_timestamps_cannot_bypass_confirmation_elapsed_time():
     momentum = replace(native.candidate.macd_evaluation, known_at_timestamp=late)
     candidate = replace(native.candidate, confirmation_timestamp=late, macd_evaluation=momentum)
     record = replace(native.confirmation, confirmation_timestamp=late)
-    modified = replace(
-        native, closed_bar_timestamp=late, candidate=candidate, confirmation=record
-    )
+    modified = replace(native, closed_bar_timestamp=late, candidate=candidate, confirmation=record)
     with pytest.raises(InitialStopV2Error, match="native clock"):
         capture_synthetic_stop_v2(confirmation=modified, closed_window=upstream.stop_window)
 

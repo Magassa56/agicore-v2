@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from decimal import Decimal
 import hashlib
 import json
 import sqlite3
 import zlib
+from dataclasses import replace
+from decimal import Decimal
 
 import pytest
 

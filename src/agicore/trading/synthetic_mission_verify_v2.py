@@ -37,7 +37,6 @@ from .synthetic_confirmation_replay_v2 import (
     SCHEMA as CONFIRMATION_SCHEMA,
 )
 from .synthetic_confirmation_replay_v2 import ClosedPrefix, confirmation_snapshot
-from .synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 from .synthetic_mission_storage_v2 import (
     MAX_OBSERVATIONS,
     ROWS_PER_CHUNK,
@@ -45,6 +44,7 @@ from .synthetic_mission_storage_v2 import (
     canonical,
     sha,
 )
+from .synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 
 
 def recompute_events(raw: bytes) -> dict:
