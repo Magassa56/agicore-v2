@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -19,12 +20,16 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 import zlib
-from datetime import UTC, datetime
-from pathlib import Path
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from importlib.metadata import version
+from pathlib import Path
+
+from sqlalchemy import select
 
 from agicore.core.events import EventBus
 from agicore.core.retry import RetryPolicy
@@ -37,8 +42,13 @@ from agicore.l2_memory.services.memory_service import MemoryService
 from agicore.l4_planning.dispatcher import Dispatcher
 from agicore.l4_planning.handlers import HandlerRegistry
 from agicore.l4_planning.orchestrator import AgentOrchestrator
+from agicore.trading.synthetic_confirmation_fixture_v2 import (
+    OBSERVATIONS as FIXTURE_OBSERVATIONS,
+)
+from agicore.trading.synthetic_confirmation_fixture_v2 import PROFILES
+from agicore.trading.synthetic_confirmation_fixture_v2 import SCHEMA as FIXTURE_SCHEMA
+from agicore.trading.synthetic_confirmation_replay_v2 import SCHEMA as CONFIRMATION_SCHEMA
 from agicore.trading.synthetic_mission_storage_v2 import MAX_OBSERVATIONS, canonical
-from sqlalchemy import select
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 MAX_TIMEOUT_SECONDS = 300
@@ -46,6 +56,7 @@ MEMORY_LIMIT_BYTES = 2 * 1024**3
 FILE_LIMIT_BYTES = 128 * 1024**2
 WORKER = "agicore.trading.synthetic_mission_storage_v2"
 VERIFIER = "agicore.trading.synthetic_mission_verify_v2"
+DEFAULT_OBSERVATIONS = 64
 
 
 class ResumeBlockedError(RuntimeError):
@@ -85,6 +96,33 @@ def _read_regular(path: Path, limit: int = 1_000_000) -> bytes:
         return raw
 
 
+def _hash_regular(path: Path, limit: int = FILE_LIMIT_BYTES) -> str:
+    """Hash one bounded regular file without following links or loading it all."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
+            raise ResumeBlockedError("invalid evidence file")
+        digest, count = hashlib.sha256(), 0
+        while chunk := stream.read(1024 * 1024):
+            count += len(chunk)
+            if count > limit:
+                raise ResumeBlockedError("evidence exceeds size limit")
+            digest.update(chunk)
+        if count != info.st_size:
+            raise ResumeBlockedError("evidence changed while reading")
+        return digest.hexdigest()
+
+
+def _event_prefix(root: Path, size: int | None = None) -> dict:
+    raw = _read_regular(root / "events.jsonl")
+    if size is None:
+        size = len(raw)
+    if type(size) is not int or not 0 < size <= len(raw) or raw[size - 1 : size] != b"\n":
+        raise ResumeBlockedError("invalid event checkpoint")
+    return {"bytes": size, "sha256": hashlib.sha256(raw[:size]).hexdigest()}
+
+
 def _json_evidence(path: Path) -> tuple[dict, str]:
     raw = _read_regular(path)
     try:
@@ -96,7 +134,7 @@ def _json_evidence(path: Path) -> tuple[dict, str]:
     return value, hashlib.sha256(raw).hexdigest()
 
 
-def _seal_evidence(root: Path, role: str, mission: dict) -> dict:
+def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None = None) -> dict:
     """Hash persisted evidence; on verifier completion check every stored object."""
     bundle = root / "bundle"
     chunks = bundle / "chunks"
@@ -104,22 +142,70 @@ def _seal_evidence(root: Path, role: str, mission: dict) -> dict:
         raise ResumeBlockedError("invalid bundle directory")
     manifest, manifest_sha = _json_evidence(bundle / "manifest.json")
     worker, worker_sha = _json_evidence(bundle / "worker.json")
+    profile = mission["profile"]
+    replay = worker.get("replay")
+    if mission["stage"] == "confirmation" and type(replay) is dict:
+        counts, processed, reason = (
+            replay.get("counts"),
+            replay.get("processed_observations"),
+            replay.get("stop_reason"),
+        )
+        valid_replay = (
+            replay.get("schema") == CONFIRMATION_SCHEMA
+            and type(replay.get("input_observations")) is int
+            and replay["input_observations"] == mission["observations"]
+            and type(processed) is int
+            and 1 <= processed <= mission["observations"]
+            and type(counts) is dict
+            and all(type(value) is int and value >= 0 for value in counts.values())
+            and type(counts.get("confirmations_qualified")) is int
+            and (
+                (reason == "CONFIRMED_BEFORE_RISK" and counts["confirmations_qualified"] == 1)
+                or (
+                    reason in ("END_OF_INPUT", "END_OF_INPUT_AWAITING_CONFIRMATION")
+                    and counts["confirmations_qualified"] == 0
+                    and processed == mission["observations"]
+                )
+            )
+        )
+    else:
+        valid_replay = (
+            type(replay) is dict
+            and type(replay.get("observations")) is int
+            and replay["observations"] == mission["observations"]
+        )
     if (
-        manifest.get("schema") != "agicore:invented-observation-bundle:v2"
+        manifest.get("schema")
+        != ("agicore:invented-observation-bundle:v2" if profile == "standard" else FIXTURE_SCHEMA)
+        or manifest.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in manifest)
         or manifest.get("domain") != "INVENTED_GENERATOR_ONLY"
         or type(manifest.get("observations")) is not int
         or manifest.get("observations") != mission["observations"]
         or worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
         or worker.get("domain") != "SYNTHETIC_ONLY"
         or worker.get("stage") != mission["stage"]
+        or worker.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in worker)
         or worker.get("manifest_sha256") != manifest_sha
         or worker.get("input_sha256") != manifest.get("raw_sha256")
-        or type(worker.get("replay")) is not dict
-        or type(worker.get("replay", {}).get("observations")) is not int
-        or worker.get("replay", {}).get("observations") != mission["observations"]
+        or not valid_replay
     ):
         raise ResumeBlockedError("worker evidence does not match mission")
-    result = {"manifest_sha256": manifest_sha, "worker_sha256": worker_sha}
+    if expected is not None and type(expected) is not dict:
+        raise ResumeBlockedError("invalid stored evidence")
+    checkpoint = None if expected is None else expected.get("event_prefix")
+    if checkpoint is not None and type(checkpoint) is not dict:
+        raise ResumeBlockedError("invalid stored event checkpoint")
+    result = {
+        "manifest_sha256": manifest_sha,
+        "worker_sha256": worker_sha,
+        "stdout_sha256": _hash_regular(root / f"{role}.stdout"),
+        "stderr_sha256": _hash_regular(root / f"{role}.stderr"),
+        "event_prefix": _event_prefix(
+            root, None if checkpoint is None else checkpoint.get("bytes")
+        ),
+    }
     if role == "worker":
         return result
     if role != "verifier":
@@ -129,6 +215,8 @@ def _seal_evidence(root: Path, role: str, mission: dict) -> dict:
         receipt.get("schema") != "agicore:invented-storage-replay-verification:v2"
         or receipt.get("status") != "PASS"
         or receipt.get("stage") != mission["stage"]
+        or receipt.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in receipt)
         or type(receipt.get("observations")) is not int
         or receipt.get("observations") != mission["observations"]
         or receipt.get("manifest_sha256") != manifest_sha
@@ -185,6 +273,7 @@ def _validate_mission(mission: dict) -> None:
         "kind",
         "observations",
         "stage",
+        "profile",
         "worker",
         "verifier",
         "timeout_seconds_per_process",
@@ -195,6 +284,7 @@ def _validate_mission(mission: dict) -> None:
         "source_sha256",
         "python",
         "zlib_runtime",
+        "runtime_packages",
     }
     if set(mission) != expected_keys:
         raise ResumeBlockedError("unsupported historical or altered mission contract")
@@ -207,7 +297,8 @@ def _validate_mission(mission: dict) -> None:
         "synthetic_generation": True,
         "synthetic_storage": True,
         "event_replay": True,
-        "pullback": stage == "pullback",
+        "pullback": stage in ("pullback", "confirmation"),
+        "confirmation": stage == "confirmation",
         "real_data": False,
         "broker": False,
         "orders": False,
@@ -222,7 +313,12 @@ def _validate_mission(mission: dict) -> None:
         or mission["kind"] != "INVENTED_STORAGE_AND_REPLAY"
         or type(mission["observations"]) is not int
         or not 1 <= mission["observations"] <= MAX_OBSERVATIONS
-        or stage not in ("events", "pullback")
+        or stage not in ("events", "pullback", "confirmation")
+        or mission["profile"] not in ("standard", *PROFILES)
+        or (
+            mission["profile"] != "standard"
+            and (stage != "confirmation" or mission["observations"] != FIXTURE_OBSERVATIONS)
+        )
         or mission["worker"] != "local_python_worker"
         or mission["verifier"] != "local_python_independent_verifier"
         or type(mission["timeout_seconds_per_process"]) is not int
@@ -239,6 +335,7 @@ def _validate_mission(mission: dict) -> None:
         or mission["source_sha256"] != _source_hashes()
         or mission["python"] != sys.version.split()[0]
         or mission["zlib_runtime"] != zlib.ZLIB_RUNTIME_VERSION
+        or mission["runtime_packages"] != _runtime_versions()
     ):
         raise ResumeBlockedError("mission contract, sources or runtime changed")
 
@@ -317,26 +414,25 @@ def _validate_lifecycle(
 
 
 def _source_hashes() -> dict[str, str]:
-    paths = {
-        "manager": "src/agicore/manager/mission_cycle_v2.py",
-        "worker": "src/agicore/trading/synthetic_mission_storage_v2.py",
-        "verifier": "src/agicore/trading/synthetic_mission_verify_v2.py",
-        "generator": "tools/agicore_v2_synthetic_scale_probe.py",
-        "parser": "src/agicore/trading/ema_pullback_v2_development_replay.py",
-        "impulse": "src/agicore/trading/directional_impulse_v2.py",
-        "reversal": "src/agicore/trading/reversal_transition_v2.py",
-        "context": "src/agicore/trading/regime_context_v2.py",
-        "frozen_pullback": "src/agicore/trading/ema20_pullback_v2.py",
-        "incremental_pullback": "src/agicore/trading/synthetic_pullback_replay_v2.py",
-        "orchestrator": "src/agicore/l4_planning/orchestrator.py",
-        "dispatcher": "src/agicore/l4_planning/dispatcher.py",
-        "handler_registry": "src/agicore/l4_planning/handlers.py",
-    }
+    # A conservative source snapshot covers imported internal modules, not
+    # third-party wheel bytes or the operating system. Never traverse data/.
+    roots = ("core", "l2_memory", "l4_planning", "manager", "trading")
+    files = [REPOSITORY / "src/agicore/__init__.py"]
+    for root in roots:
+        files.extend((REPOSITORY / "src/agicore" / root).rglob("*.py"))
+    files.extend((REPOSITORY / "tools").glob("*.py"))
     result = {}
-    for name, path in paths.items():
-        with (REPOSITORY / path).open("rb") as source:
-            result[name] = hashlib.file_digest(source, "sha256").hexdigest()
+    for path in sorted(files):
+        relative = path.relative_to(REPOSITORY)
+        if "data" in relative.parts or path.is_symlink() or not path.is_file():
+            raise ResumeBlockedError("invalid source snapshot path")
+        with path.open("rb") as source:
+            result[str(relative)] = hashlib.file_digest(source, "sha256").hexdigest()
     return result
+
+
+def _runtime_versions() -> dict[str, str]:
+    return {name: version(name) for name in ("SQLAlchemy", "pydantic", "structlog")}
 
 
 def _event(root: Path, task_id: str, agent_id: str, state: str, **details: object) -> None:
@@ -359,7 +455,7 @@ def _event(root: Path, task_id: str, agent_id: str, state: str, **details: objec
         os.fsync(output.fileno())
 
 
-def _final_event(root: Path, task_id: str, status: str, error: str | None, *, create: bool) -> None:
+def _final_event(root: Path, task_id: str, status: str, error: str | None, *, create: bool) -> bool:
     """Record or validate one terminal manager event, including after a crash."""
     try:
         raw = _read_regular(root / "events.jsonl")
@@ -385,8 +481,44 @@ def _final_event(root: Path, task_id: str, status: str, error: str | None, *, cr
             raise ResumeBlockedError("contradictory terminal events")
     elif create:
         _event(root, task_id, "manager", status, error=error)
+        return True
     else:
         raise ResumeBlockedError("terminal manager event is missing")
+    return False
+
+
+def _bind_event_checkpoint(root: Path, role: str, *, create: bool) -> dict:
+    """Anchor event bytes in SQLite at each durable completed-task checkpoint."""
+    database = root / "orchestrator.sqlite3"
+    if database.is_symlink() or not database.is_file():
+        raise ResumeBlockedError("invalid orchestration database")
+    with sqlite3.connect(database.as_uri() + "?mode=rw", uri=True) as connection:
+        if create:
+            checkpoint = _event_prefix(root)
+            connection.execute(
+                "INSERT INTO mission_event_binding VALUES (?, ?, ?)",
+                (role, checkpoint["bytes"], checkpoint["sha256"]),
+            )
+        else:
+            row = connection.execute(
+                "SELECT byte_count, sha256 FROM mission_event_binding WHERE role = ?", (role,)
+            ).fetchone()
+            if row is None:
+                raise ResumeBlockedError("missing durable event checkpoint")
+            checkpoint = _event_prefix(root, row[0])
+            if checkpoint["sha256"] != row[1]:
+                raise ResumeBlockedError("event log changed after checkpoint")
+            if role == "manager_final" and checkpoint != _event_prefix(root):
+                raise ResumeBlockedError("event log changed after final checkpoint")
+    return checkpoint
+
+
+def _store_outcome(root: Path, role: str, outcome: dict) -> None:
+    """Write the subprocess result separately before the task can complete."""
+    with (root / f"{role}.outcome.json").open("xb") as stream:
+        stream.write(canonical(outcome))
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def _new_directory(path: Path) -> Path:
@@ -406,11 +538,19 @@ def _new_directory(path: Path) -> Path:
 
 
 def _run_process(
-    root: Path, module: str, role: str, observations: int, timeout: int, stage: str
+    root: Path,
+    module: str,
+    role: str,
+    observations: int,
+    timeout: int,
+    stage: str,
+    profile: str = "standard",
 ) -> dict:
     """Run one allowlisted process and collect its own wait4 resource usage."""
     if module not in (WORKER, VERIFIER):
         raise ValueError("unregistered mission adapter")
+    if threading.active_count() != 1:
+        raise RuntimeError("the supervisor must be single-threaded while launching an adapter")
     env = {
         "PATH": "/usr/bin:/bin",
         "PYTHONPATH": f"{REPOSITORY / 'src'}:{REPOSITORY}",
@@ -430,8 +570,19 @@ def _run_process(
         "--stage",
         stage,
     ]
+    if profile != "standard":
+        command.extend(("--profile", profile))
+
+    supervisor_pid = os.getpid()
 
     def limits() -> None:
+        # Linux sends SIGKILL to this direct child if its supervisor dies.
+        # Check the race where the parent exited before prctl was installed.
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+            raise OSError(ctypes.get_errno(), "cannot bind child lifetime to supervisor")
+        if os.getppid() != supervisor_pid:
+            os.kill(os.getpid(), signal.SIGKILL)
         resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
         resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_LIMIT_BYTES, FILE_LIMIT_BYTES))
         resource.setrlimit(resource.RLIMIT_CPU, (timeout + 5, timeout + 5))
@@ -449,7 +600,7 @@ def _run_process(
             stdout=stdout,
             stderr=stderr,
             start_new_session=True,
-            preexec_fn=limits,
+            preexec_fn=limits,  # noqa: PLW1509 - guarded single-threaded supervisor
         )
         while True:
             pid, status, usage = os.wait4(child.pid, os.WNOHANG)
@@ -484,6 +635,7 @@ def run_mission(
     *,
     timeout_seconds: int = MAX_TIMEOUT_SECONDS,
     stage: str = "pullback",
+    profile: str = "standard",
 ) -> dict:
     """Assign one synthetic mission, execute, independently verify, and report.
 
@@ -496,8 +648,12 @@ def run_mission(
         raise ValueError("invalid synthetic observation count")
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError("invalid timeout")
-    if stage not in ("events", "pullback"):
+    if stage not in ("events", "pullback", "confirmation"):
         raise ValueError("unsupported replay stage")
+    if profile not in ("standard", *PROFILES):
+        raise ValueError("unsupported invented profile")
+    if profile != "standard" and (stage != "confirmation" or observations != FIXTURE_OBSERVATIONS):
+        raise ValueError("confirmation profiles require confirmation and 39 observations")
     sources = _source_hashes()
     root = _new_directory(output_dir)
     task_id = str(uuid.uuid4())
@@ -507,6 +663,7 @@ def run_mission(
         "kind": "INVENTED_STORAGE_AND_REPLAY",
         "observations": observations,
         "stage": stage,
+        "profile": profile,
         "worker": "local_python_worker",
         "verifier": "local_python_independent_verifier",
         "timeout_seconds_per_process": timeout_seconds,
@@ -517,7 +674,8 @@ def run_mission(
             "synthetic_generation": True,
             "synthetic_storage": True,
             "event_replay": True,
-            "pullback": stage == "pullback",
+            "pullback": stage in ("pullback", "confirmation"),
+            "confirmation": stage == "confirmation",
             "real_data": False,
             "broker": False,
             "orders": False,
@@ -528,6 +686,7 @@ def run_mission(
         "source_sha256": sources,
         "python": sys.version.split()[0],
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        "runtime_packages": _runtime_versions(),
     }
     _validate_mission(mission)
     with _mission_lock(root, create=True):
@@ -557,6 +716,7 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
     task_id = mission["task_id"]
     observations = mission["observations"]
     stage = mission["stage"]
+    profile = mission["profile"]
     timeout_seconds = mission["timeout_seconds_per_process"]
     sources = mission["source_sha256"]
     contract_sha = hashlib.sha256(canonical(mission)).hexdigest()
@@ -578,6 +738,10 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                 )
                 connection.exec_driver_sql(
                     "INSERT INTO mission_contract_binding VALUES (?, ?)", (task_id, contract_sha)
+                )
+                connection.exec_driver_sql(
+                    "CREATE TABLE mission_event_binding "
+                    "(role TEXT PRIMARY KEY, byte_count INTEGER NOT NULL, sha256 TEXT NOT NULL)"
                 )
             _checkpoint("contract_bound")
         memory, bus, registry = MemoryService(engine), EventBus(), HandlerRegistry()
@@ -617,7 +781,7 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                         agent_id=role,
                         payload={"task_type": event.payload.get("task_type")},
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - fail closed on any audit failure
                     trace_errors.append(str(exc))
             try:
                 _event(root, task_id, role, states[event.event_type], **details)
@@ -629,6 +793,7 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
             "mission_id": task_id,
             "observations": observations,
             "stage": stage,
+            "profile": profile,
             "timeout_seconds": timeout_seconds,
             "contract_sha256": contract_sha,
         }
@@ -648,7 +813,12 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                     or canonical(task.payload) != canonical(payload)
                 ):
                     raise PermissionError("task exceeds the synthetic mission contract")
-                outcome = _run_process(root, module, role, observations, timeout_seconds, stage)
+                if profile == "standard":
+                    outcome = _run_process(root, module, role, observations, timeout_seconds, stage)
+                else:
+                    outcome = _run_process(
+                        root, module, role, observations, timeout_seconds, stage, profile
+                    )
                 steps[role] = outcome
                 if (
                     type(outcome.get("exit_code")) is not int
@@ -659,6 +829,7 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                 outcome["contract_sha256"] = contract_sha
                 try:
                     outcome["evidence"] = _seal_evidence(root, role, mission)
+                    _store_outcome(root, role, outcome)
                 except (OSError, ValueError, AttributeError, ResumeBlockedError) as exc:
                     raise RuntimeError(f"invalid verification receipt: {exc}") from exc
                 return outcome
@@ -702,14 +873,17 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                 _validate_lifecycle(root, engine, previous, task_id, role)
             if previous is not None and previous.status == "completed":
                 outcome = previous.result
+                _bind_event_checkpoint(root, role, create=False)
+                stored_outcome, _ = _json_evidence(root / f"{role}.outcome.json")
                 if (
                     type(outcome) is not dict
+                    or canonical(outcome) != canonical(stored_outcome)
                     or type(outcome.get("exit_code")) is not int
                     or outcome.get("exit_code") != 0
                     or outcome.get("timeout") is not False
                     or outcome.get("contract_sha256") != contract_sha
                     or canonical(outcome.get("evidence"))
-                    != canonical(_seal_evidence(root, role, mission))
+                    != canonical(_seal_evidence(root, role, mission, outcome.get("evidence")))
                 ):
                     raise ResumeBlockedError("completed task evidence or binding changed")
                 steps[role] = outcome
@@ -717,7 +891,11 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
             else:
                 if previous is not None and previous.status != "pending":
                     raise ResumeBlockedError("task state is running, failed or otherwise ambiguous")
-                reserved = [root / f"{role}.stdout", root / f"{role}.stderr"]
+                reserved = [
+                    root / f"{role}.stdout",
+                    root / f"{role}.stderr",
+                    root / f"{role}.outcome.json",
+                ]
                 reserved.append(
                     root / "bundle" if role == "worker" else root / "bundle" / "verification.json"
                 )
@@ -733,6 +911,8 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                 if trace_errors:
                     raise RuntimeError("task audit projection failed")
                 finished = orchestrator.execute_one(tid)
+                if finished.status == "completed":
+                    _bind_event_checkpoint(root, role, create=True)
                 _checkpoint(f"{role}_completed")
             tasks[role] = {
                 "id": tid,
@@ -761,6 +941,8 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                 or verification.get("observations") != observations
                 or verification.get("stage") != stage
                 or worker.get("stage") != stage
+                or verification.get("profile", "standard") != profile
+                or worker.get("profile", "standard") != profile
                 or verification.get("manifest_sha256") != worker.get("manifest_sha256")
                 or verification.get("input_sha256") != worker.get("input_sha256")
                 or canonical(verification.get("replay")) != canonical(worker.get("replay"))
@@ -784,6 +966,7 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
         "status": status,
         "observations": observations,
         "stage": stage,
+        "profile": profile,
         "orchestrator": "AgentOrchestrator+Dispatcher",
         "tasks": tasks,
         "task_history": "orchestrator.sqlite3",
@@ -794,6 +977,9 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
             "Local deterministic adapters, not Terra or Codex model calls.",
             "Independent storage and event-pipeline verification uses the same frozen V2 predicates.",
             "No full strategy replay, historical storage certification, or profitability.",
+            "Local hashes and runtime versions are not signatures or an operating-system sandbox.",
+            "Child lifetime protection covers direct Linux children, not arbitrary descendants.",
+            "The synchronous Linux supervisor must not start other threads while launching children.",
         ],
     }
     if status == "PASS":
@@ -802,13 +988,17 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
     if report_path.exists() or report_path.is_symlink():
         if not resume:
             raise ResumeBlockedError("mission report already exists")
+        _final_event(root, task_id, status, error, create=False)
+        report["event_checkpoint"] = _bind_event_checkpoint(root, "manager_final", create=False)
         saved, _ = _json_evidence(report_path)
         if status != "PASS" or canonical(saved) != canonical(report):
             raise ResumeBlockedError("existing mission report does not match sealed evidence")
-        _final_event(root, task_id, status, error, create=False)
         return saved
     _checkpoint("before_report")
-    _final_event(root, task_id, status, error, create=True)
+    created_final_event = _final_event(root, task_id, status, error, create=True)
+    report["event_checkpoint"] = _bind_event_checkpoint(
+        root, "manager_final", create=created_final_event
+    )
     _checkpoint("after_report_event")
     _atomic_report(root, report)
     return report
@@ -821,10 +1011,12 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--observations", type=int)
     parser.add_argument("--timeout-seconds", type=int)
-    parser.add_argument("--stage", choices=("events", "pullback"))
+    parser.add_argument("--stage", choices=("events", "pullback", "confirmation"))
+    parser.add_argument("--profile", choices=("standard", *PROFILES))
     args = parser.parse_args()
     if args.resume and any(
-        value is not None for value in (args.observations, args.timeout_seconds, args.stage)
+        value is not None
+        for value in (args.observations, args.timeout_seconds, args.stage, args.profile)
     ):
         parser.error("resume uses the sealed mission contract and accepts no overrides")
     with contextlib.redirect_stdout(sys.stderr):
@@ -833,11 +1025,12 @@ def main() -> None:
         else:
             report = run_mission(
                 args.output_dir,
-                MAX_OBSERVATIONS if args.observations is None else args.observations,
+                DEFAULT_OBSERVATIONS if args.observations is None else args.observations,
                 timeout_seconds=MAX_TIMEOUT_SECONDS
                 if args.timeout_seconds is None
                 else args.timeout_seconds,
                 stage="pullback" if args.stage is None else args.stage,
+                profile="standard" if args.profile is None else args.profile,
             )
     print(json.dumps(report, indent=2, sort_keys=True))
     if report["status"] != "PASS":

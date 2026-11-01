@@ -146,9 +146,11 @@ def test_completed_task_without_audit_projection_is_not_reused(tmp_path, monkeyp
 def test_concurrent_resume_is_refused(tmp_path):
     root = tmp_path / "mission"
     assert manager.run_mission(root, 32, timeout_seconds=20)["status"] == "PASS"
-    with manager._mission_lock(root):
-        with pytest.raises(manager.ResumeBlockedError, match="already active"):
-            manager.resume_mission(root)
+    with (
+        manager._mission_lock(root),
+        pytest.raises(manager.ResumeBlockedError, match="already active"),
+    ):
+        manager.resume_mission(root)
 
 
 def test_contract_tampering_is_rejected_before_any_work(tmp_path, monkeypatch):

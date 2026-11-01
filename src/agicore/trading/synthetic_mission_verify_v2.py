@@ -465,6 +465,10 @@ def verify(
         or worker.get("input_sha256") != sha(expected_raw)
         or worker.get("profile", "standard") != profile
         or (profile == "standard" and "profile" in worker)
+        or any(
+            type(worker.get(field)) is not int or worker[field] < 0
+            for field in ("storage_wall_ns", "replay_wall_ns", "peak_rss_bytes")
+        )
         or type(worker.get("replay")) is not dict
         or canonical(worker["replay"]) != canonical(repeated)
     ):

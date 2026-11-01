@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 from fractions import Fraction
-import json
-import os
 from pathlib import Path
-import subprocess
-import sys
 
 import pytest
 
-from agicore.trading import synthetic_confirmation_replay_v2 as engine
 from agicore.trading import synthetic_confirmation_fixture_v2 as fixture
+from agicore.trading import synthetic_confirmation_replay_v2 as engine
 from agicore.trading import synthetic_mission_storage_v2 as producer
 from agicore.trading import synthetic_mission_verify_v2 as verifier
 from agicore.trading.ema_pullback_entry_confirmation_v2 import EntryConfirmationStateV2
@@ -205,6 +205,20 @@ def test_verifier_rejects_invalid_or_noncanonical_worker_json(tmp_path, invalid)
     (bundle / "worker.json").write_bytes(invalid)
     with pytest.raises(ValueError):
         verifier.verify(bundle, 39, stage="events")
+    assert not (bundle / "verification.json").exists()
+
+
+@pytest.mark.parametrize(
+    "field,invalid",
+    [("storage_wall_ns", False), ("replay_wall_ns", "not-a-duration"), ("peak_rss_bytes", -1)],
+)
+def test_verifier_rejects_impossible_worker_metrics(tmp_path, field, invalid):
+    bundle = tmp_path / "bundle"
+    worker = producer.produce(bundle, 32, stage="events")
+    worker[field] = invalid
+    (bundle / "worker.json").write_bytes(producer.canonical(worker))
+    with pytest.raises(ValueError, match="worker output"):
+        verifier.verify(bundle, 32, stage="events")
     assert not (bundle / "verification.json").exists()
 
 
