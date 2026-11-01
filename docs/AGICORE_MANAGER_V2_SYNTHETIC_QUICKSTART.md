@@ -20,6 +20,17 @@ before risk or any position, and distinguishes input rows from processed rows.
 No external market input, broker, order or profit calculation is accepted by
 these mission adapters.
 
+To continue a fresh mission only as far as the frozen structural stop, use a
+separate new directory and `--stage stop` with either fixed confirmation profile
+and exactly 39 observations. The receipt records the complete input hash, the
+indices and exact-row hash for the pullback-through-confirmation window, the
+native confirmation and stop. No entry, position or target is created. The verifier
+regenerates the profile, validates stored chunks, rebuilds the confirmation and
+its window in a separate process, and calls the same frozen stop predicate.
+The input is parsed in full before the causal decision loop; malformed later
+rows can therefore reject the input, even though later valid prices cannot
+change the already-confirmed stop.
+
 For an interrupted mission, use its existing directory and no overrides:
 
 ```sh

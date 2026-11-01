@@ -21,6 +21,7 @@ from tools.agicore_v2_synthetic_scale_probe import generate_observations
 from . import directional_impulse_v2 as impulse
 from . import ema20_pullback_v2 as ema20
 from . import ema_pullback_entry_confirmation_v2 as confirmation
+from . import ema_pullback_initial_stop_v2 as structural_stop
 from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
@@ -36,6 +37,7 @@ from .synthetic_confirmation_replay_v2 import (
     SCHEMA as CONFIRMATION_SCHEMA,
 )
 from .synthetic_confirmation_replay_v2 import ClosedPrefix, confirmation_snapshot
+from .synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 from .synthetic_mission_storage_v2 import (
     MAX_OBSERVATIONS,
     ROWS_PER_CHUNK,
@@ -192,13 +194,13 @@ def recompute_pullback_events(raw: bytes) -> dict:
     }
 
 
-def recompute_confirmation_events(raw: bytes) -> dict:
+def recompute_confirmation_events(raw: bytes, *, handoff: bool = False):
     """Reconstruct the first confirmed opportunity without orders or risk."""
     bars = replay.parse_ninjatrader_last_rows_v2(raw)
     window = deque(maxlen=impulse.IMPULSE_RANGE_LOOKBACK + 1)
     history = {}
     ema = pullback.IncrementalEMA20()
-    lifetime = pending = None
+    lifetime = pending = native = None
     digest = hashlib.sha256()
     counts = {
         "impulses": 0,
@@ -236,6 +238,7 @@ def recompute_confirmation_events(raw: bytes) -> dict:
             )
             if advanced.entry_confirmation:
                 counts["confirmations_qualified"] += 1
+                native = advanced
                 stop_reason = "CONFIRMED_BEFORE_RISK"
                 digest.update(
                     replay.canonical_replay_bytes_v2(
@@ -323,13 +326,60 @@ def recompute_confirmation_events(raw: bytes) -> dict:
             {"stop_reason": stop_reason, "pending": confirmation_snapshot(pending)}
         )
     )
-    return {
+    summary = {
         "schema": CONFIRMATION_SCHEMA,
         "input_observations": len(bars),
         "processed_observations": processed,
         "stop_reason": stop_reason,
         "counts": counts,
         "events_sha256": digest.hexdigest(),
+    }
+    return (summary, native, history) if handoff else summary
+
+
+def recompute_stop_events(raw: bytes) -> dict:
+    """Rebuild confirmation and evaluate the frozen stop on our own input window.
+
+    This path does not use the producer's stop replay or its supplied tuple.
+    It shares frozen V2 predicates and canonical encoding with the producer.
+    """
+    summary, native, history = recompute_confirmation_events(raw, handoff=True)
+    if native is None or summary["stop_reason"] != "CONFIRMED_BEFORE_RISK":
+        raise ValueError("the fixed stop profile did not confirm")
+    source = native.confirmation
+    k, q = source.pullback_bar_index, source.confirmation_bar_index
+    if (
+        type(k) is not int
+        or type(q) is not int
+        or not 0 <= k < q
+        or q - k not in (1, 2)
+        or summary["processed_observations"] != q + 1
+    ):
+        raise ValueError("invalid independently reconstructed window")
+    # This independent map contains only validated, already-closed k..q bars.
+    selected = {index: history[index] for index in range(k, q + 1)}
+    result = structural_stop.evaluate_initial_stop_v2(confirmation=native, bars_by_index=selected)
+    if (
+        result.status is not structural_stop.InitialStopStatusV2.EVALUATED
+        or result.initial_stop_record is None
+        or result.at_entry is not None
+    ):
+        raise ValueError("independent stop not captured without entry")
+    rows = raw.splitlines(keepends=True)
+    if len(rows) != summary["input_observations"] or q >= len(rows):
+        raise ValueError("independent row boundaries differ from input")
+    return {
+        "schema": STOP_SCHEMA,
+        "input_sha256": hashlib.sha256(raw).hexdigest(),
+        "confirmation_replay": summary,
+        "confirmation": json.loads(replay.canonical_replay_bytes_v2(source)),
+        "window": {
+            "first_bar_index": k,
+            "last_bar_index": q,
+            "raw_rows_sha256": hashlib.sha256(b"".join(rows[k : q + 1])).hexdigest(),
+        },
+        "stop": json.loads(replay.canonical_replay_bytes_v2(result)),
+        "stop_reason": "STOP_CAPTURED_BEFORE_RISK",
     }
 
 
@@ -352,12 +402,14 @@ def verify(
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
-    if stage not in ("events", "pullback", "confirmation"):
+    if stage not in ("events", "pullback", "confirmation", "stop"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *CONFIRMATION_PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage != "confirmation":
-        raise ValueError("confirmation profiles require the confirmation stage")
+    if profile != "standard" and stage not in ("confirmation", "stop"):
+        raise ValueError("confirmation profiles require the confirmation or stop stage")
+    if stage == "stop" and profile == "standard":
+        raise ValueError("stop requires a fixed confirmation profile")
     expected_raw = (
         generate_observations(observations)
         if profile == "standard"
@@ -455,8 +507,10 @@ def verify(
         repeated = recompute_events(expected_raw)
     elif stage == "pullback":
         repeated = recompute_pullback_events(expected_raw)
-    else:
+    elif stage == "confirmation":
         repeated = recompute_confirmation_events(expected_raw)
+    else:
+        repeated = recompute_stop_events(expected_raw)
     if (
         worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
         or worker.get("domain") != "SYNTHETIC_ONLY"
@@ -495,7 +549,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
-    parser.add_argument("--stage", choices=("events", "pullback", "confirmation"), default="events")
+    parser.add_argument(
+        "--stage", choices=("events", "pullback", "confirmation", "stop"), default="events"
+    )
     parser.add_argument(
         "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
     )
