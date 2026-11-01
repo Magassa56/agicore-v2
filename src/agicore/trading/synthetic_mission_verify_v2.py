@@ -25,6 +25,13 @@ from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
+from .synthetic_confirmation_fixture_v2 import (
+    PROFILES as CONFIRMATION_PROFILES,
+)
+from .synthetic_confirmation_fixture_v2 import (
+    SCHEMA as CONFIRMATION_BUNDLE_SCHEMA,
+)
+from .synthetic_confirmation_fixture_v2 import generate_confirmation_fixture
 from .synthetic_confirmation_replay_v2 import (
     SCHEMA as CONFIRMATION_SCHEMA,
 )
@@ -339,12 +346,23 @@ def read_regular(path: Path, limit: int) -> bytes:
         return content
 
 
-def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
+def verify(
+    bundle: Path, observations: int, *, stage: str = "events", profile: str = "standard"
+) -> dict:
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
     if stage not in ("events", "pullback", "confirmation"):
         raise ValueError("unsupported replay stage")
+    if profile not in ("standard", *CONFIRMATION_PROFILES):
+        raise ValueError("unsupported invented profile")
+    if profile != "standard" and stage != "confirmation":
+        raise ValueError("confirmation profiles require the confirmation stage")
+    expected_raw = (
+        generate_observations(observations)
+        if profile == "standard"
+        else generate_confirmation_fixture(profile, observations)
+    )
     if bundle.is_symlink() or not bundle.is_dir():
         raise ValueError("invalid bundle directory")
     chunk_dir = bundle / "chunks"
@@ -352,7 +370,7 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         raise ValueError("invalid chunk directory")
     manifest_bytes = read_regular(bundle / "manifest.json", 1_000_000)
     manifest = json.loads(manifest_bytes)
-    if canonical(manifest) != manifest_bytes or set(manifest) != {
+    expected_manifest_fields = {
         "schema",
         "domain",
         "observations",
@@ -362,12 +380,19 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         "codec",
         "zlib_runtime",
         "chunks",
-    }:
+    }
+    if profile != "standard":
+        expected_manifest_fields.add("profile")
+    if (
+        type(manifest) is not dict
+        or canonical(manifest) != manifest_bytes
+        or set(manifest) != expected_manifest_fields
+    ):
         raise ValueError("invalid canonical bundle manifest")
-    expected_raw = generate_observations(observations)
     rows = expected_raw.splitlines(keepends=True)
     if (
-        manifest["schema"] != SCHEMA
+        manifest["schema"] != (SCHEMA if profile == "standard" else CONFIRMATION_BUNDLE_SCHEMA)
+        or (profile != "standard" and manifest["profile"] != profile)
         or manifest["domain"] != "INVENTED_GENERATOR_ONLY"
         or type(manifest["observations"]) is not int
         or manifest["observations"] != observations
@@ -422,7 +447,10 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         decoded = decoder.decompress(stored, len(expected) + 1)
         if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail or decoded != expected:
             raise ValueError("decoded chunk differs from generated source")
-    worker = json.loads(read_regular(bundle / "worker.json", 1_000_000))
+    worker_bytes = read_regular(bundle / "worker.json", 1_000_000)
+    worker = json.loads(worker_bytes)
+    if type(worker) is not dict or canonical(worker) != worker_bytes:
+        raise ValueError("invalid canonical worker output")
     if stage == "events":
         repeated = recompute_events(expected_raw)
     elif stage == "pullback":
@@ -435,7 +463,10 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         or worker.get("stage", "events") != stage
         or worker.get("manifest_sha256") != sha(manifest_bytes)
         or worker.get("input_sha256") != sha(expected_raw)
-        or worker.get("replay") != repeated
+        or worker.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in worker)
+        or type(worker.get("replay")) is not dict
+        or canonical(worker["replay"]) != canonical(repeated)
     ):
         raise ValueError("worker output does not match independent verification")
     receipt = {
@@ -448,6 +479,8 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         "replay": repeated,
         "scope": "INDEPENDENT_BUNDLE_AND_EVENT_PIPELINE_SHARED_FROZEN_PREDICATES",
     }
+    if profile != "standard":
+        receipt["profile"] = profile
     with (bundle / "verification.json").open("xb") as stream:
         stream.write(canonical(receipt))
     return receipt
@@ -459,8 +492,11 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument("--stage", choices=("events", "pullback", "confirmation"), default="events")
+    parser.add_argument(
+        "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
+    )
     args = parser.parse_args()
-    verify(args.bundle, args.observations, stage=args.stage)
+    verify(args.bundle, args.observations, stage=args.stage, profile=args.profile)
 
 
 if __name__ == "__main__":

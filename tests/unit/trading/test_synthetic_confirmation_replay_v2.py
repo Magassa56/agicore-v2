@@ -6,10 +6,16 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 from fractions import Fraction
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
 from agicore.trading import synthetic_confirmation_replay_v2 as engine
+from agicore.trading import synthetic_confirmation_fixture_v2 as fixture
 from agicore.trading import synthetic_mission_storage_v2 as producer
 from agicore.trading import synthetic_mission_verify_v2 as verifier
 from agicore.trading.ema_pullback_entry_confirmation_v2 import EntryConfirmationStateV2
@@ -165,3 +171,115 @@ def test_synthetic_bundle_uses_independent_confirmation_verifier(tmp_path, monke
     assert receipt["status"] == "PASS"
     assert receipt["replay"] == worker["replay"]
     assert receipt["replay"]["stop_reason"] == "CONFIRMED_BEFORE_RISK"
+
+
+@pytest.mark.parametrize("stage", ["events", "pullback", "confirmation"])
+@pytest.mark.parametrize("alteration", ["float-for-int", "bool-for-int"])
+def test_verifier_rejects_type_confused_replay_receipts(tmp_path, monkeypatch, stage, alteration):
+    if stage == "confirmation":
+        raw = _raw(_bars(RegimeDirection.LONG))
+        monkeypatch.setattr(producer, "generate_observations", lambda count: raw)
+        monkeypatch.setattr(verifier, "generate_observations", lambda count: raw)
+    bundle = tmp_path / "bundle"
+    worker = producer.produce(bundle, 39, stage=stage)
+    replay = worker["replay"]
+    if alteration == "float-for-int":
+        field = "processed_observations" if stage == "confirmation" else "observations"
+        assert type(replay[field]) is int
+        replay[field] = float(replay[field])
+    else:
+        field = "confirmations_qualified" if stage == "confirmation" else "impulses"
+        assert type(replay["counts"][field]) is int
+        assert replay["counts"][field] in (0, 1)
+        replay["counts"][field] = bool(replay["counts"][field])
+    (bundle / "worker.json").write_bytes(producer.canonical(worker))
+    with pytest.raises(ValueError, match="worker output"):
+        verifier.verify(bundle, 39, stage=stage)
+    assert not (bundle / "verification.json").exists()
+
+
+@pytest.mark.parametrize("invalid", [b"{", b'{"x":NaN}', b"[]", b'{ "x": 1 }'])
+def test_verifier_rejects_invalid_or_noncanonical_worker_json(tmp_path, invalid):
+    bundle = tmp_path / "bundle"
+    producer.produce(bundle, 39, stage="events")
+    (bundle / "worker.json").write_bytes(invalid)
+    with pytest.raises(ValueError):
+        verifier.verify(bundle, 39, stage="events")
+    assert not (bundle / "verification.json").exists()
+
+
+@pytest.mark.parametrize("direction", list(RegimeDirection))
+def test_fixed_confirmation_profile_runs_in_separate_processes(tmp_path, direction):
+    profile = f"confirmation-{direction.value.lower()}-v1"
+    assert profile in fixture.PROFILES
+    native = engine.replay_confirmation_native(fixture.generate_confirmation_fixture(profile, 39))
+    assert native.native_confirmation.confirmation.source_regime_event_direction is direction
+    bundle = tmp_path / "bundle"
+    root = Path(__file__).resolve().parents[3]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join((str(root / "src"), str(root), env.get("PYTHONPATH", "")))
+    args = [
+        "--bundle",
+        str(bundle),
+        "--observations",
+        "39",
+        "--stage",
+        "confirmation",
+        "--profile",
+        profile,
+    ]
+    for module in ("synthetic_mission_storage_v2", "synthetic_mission_verify_v2"):
+        subprocess.run(
+            [sys.executable, "-m", f"agicore.trading.{module}", *args],
+            cwd=root,
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    manifest = json.loads((bundle / "manifest.json").read_bytes())
+    worker = json.loads((bundle / "worker.json").read_bytes())
+    receipt = json.loads((bundle / "verification.json").read_bytes())
+    assert manifest["schema"] == fixture.SCHEMA
+    assert manifest["profile"] == worker["profile"] == receipt["profile"] == profile
+    assert worker["replay"] == receipt["replay"]
+    assert receipt["replay"]["schema"] == engine.SCHEMA
+    assert receipt["replay"]["input_observations"] == 39
+    assert receipt["replay"]["processed_observations"] == 36
+    assert receipt["replay"]["stop_reason"] == "CONFIRMED_BEFORE_RISK"
+    assert receipt["replay"]["counts"]["confirmations_qualified"] == 1
+
+
+def test_default_standard_bundle_retains_legacy_identity(tmp_path):
+    bundle = tmp_path / "bundle"
+    worker = producer.produce(bundle, 39)
+    receipt = verifier.verify(bundle, 39)
+    manifest = json.loads((bundle / "manifest.json").read_bytes())
+    assert manifest["schema"] == producer.SCHEMA
+    assert "profile" not in manifest and "profile" not in worker and "profile" not in receipt
+
+
+@pytest.mark.parametrize(
+    "profile,observations,stage",
+    [
+        ("confirmation-long-v1", 38, "confirmation"),
+        ("confirmation-short-v1", 39, "events"),
+        ("external", 39, "confirmation"),
+    ],
+)
+def test_invalid_profile_combinations_fail_before_any_write(tmp_path, profile, observations, stage):
+    bundle = tmp_path / "bundle"
+    with pytest.raises(ValueError):
+        producer.produce(bundle, observations, profile=profile, stage=stage)
+    assert not bundle.exists()
+    with pytest.raises(ValueError):
+        verifier.verify(bundle, observations, profile=profile, stage=stage)
+
+
+def test_profile_identity_cannot_be_swapped(tmp_path):
+    bundle = tmp_path / "bundle"
+    producer.produce(bundle, 39, profile="confirmation-long-v1", stage="confirmation")
+    for wrong_profile in ("confirmation-short-v1", "standard"):
+        with pytest.raises(ValueError):
+            verifier.verify(bundle, 39, profile=wrong_profile, stage="confirmation")
+        assert not (bundle / "verification.json").exists()

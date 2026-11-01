@@ -22,6 +22,13 @@ from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
 from . import ema20_pullback_v2 as ema20
+from .synthetic_confirmation_fixture_v2 import (
+    PROFILES as CONFIRMATION_PROFILES,
+)
+from .synthetic_confirmation_fixture_v2 import (
+    SCHEMA as CONFIRMATION_BUNDLE_SCHEMA,
+)
+from .synthetic_confirmation_fixture_v2 import generate_confirmation_fixture
 from .synthetic_confirmation_replay_v2 import replay_confirmation_native
 
 SCHEMA = "agicore:invented-observation-bundle:v2"
@@ -188,14 +195,24 @@ def replay_pullback_events(raw: bytes) -> dict:
     }
 
 
-def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
+def produce(
+    bundle: Path, observations: int, *, stage: str = "events", profile: str = "standard"
+) -> dict:
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
     if stage not in ("events", "pullback", "confirmation"):
         raise ValueError("unsupported replay stage")
+    if profile not in ("standard", *CONFIRMATION_PROFILES):
+        raise ValueError("unsupported invented profile")
+    if profile != "standard" and stage != "confirmation":
+        raise ValueError("confirmation profiles require the confirmation stage")
     start = time.perf_counter_ns()
-    raw = generate_observations(observations)
+    raw = (
+        generate_observations(observations)
+        if profile == "standard"
+        else generate_confirmation_fixture(profile, observations)
+    )
     if sha(raw) == replay.CANONICAL_DATASET_RAW_SHA256:
         raise ValueError("canonical market identity is not a synthetic input")
     lines = raw.splitlines(keepends=True)
@@ -226,7 +243,7 @@ def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
             }
         )
     manifest = {
-        "schema": SCHEMA,
+        "schema": SCHEMA if profile == "standard" else CONFIRMATION_BUNDLE_SCHEMA,
         "domain": "INVENTED_GENERATOR_ONLY",
         "observations": observations,
         "raw_bytes": len(raw),
@@ -236,6 +253,8 @@ def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
         "chunks": chunks,
     }
+    if profile != "standard":
+        manifest["profile"] = profile
     manifest_bytes = canonical(manifest)
     with (bundle / "manifest.json").open("xb") as stream:
         stream.write(manifest_bytes)
@@ -257,6 +276,8 @@ def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         "replay_wall_ns": time.perf_counter_ns() - storage_end,
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
     }
+    if profile != "standard":
+        result["profile"] = profile
     with (bundle / "worker.json").open("xb") as stream:
         stream.write(canonical(result))
     return result
@@ -268,8 +289,11 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument("--stage", choices=("events", "pullback", "confirmation"), default="events")
+    parser.add_argument(
+        "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
+    )
     args = parser.parse_args()
-    produce(args.bundle, args.observations, stage=args.stage)
+    produce(args.bundle, args.observations, stage=args.stage, profile=args.profile)
 
 
 if __name__ == "__main__":
