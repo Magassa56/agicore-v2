@@ -49,6 +49,7 @@ from agicore.trading.synthetic_confirmation_fixture_v2 import PROFILES
 from agicore.trading.synthetic_confirmation_fixture_v2 import SCHEMA as FIXTURE_SCHEMA
 from agicore.trading.synthetic_confirmation_replay_v2 import SCHEMA as CONFIRMATION_SCHEMA
 from agicore.trading.synthetic_mission_storage_v2 import MAX_OBSERVATIONS, canonical
+from agicore.trading.synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 MAX_TIMEOUT_SECONDS = 300
@@ -144,16 +145,21 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
     worker, worker_sha = _json_evidence(bundle / "worker.json")
     profile = mission["profile"]
     replay = worker.get("replay")
-    if mission["stage"] == "confirmation" and type(replay) is dict:
+    confirmation_replay = (
+        replay.get("confirmation_replay")
+        if mission["stage"] == "stop" and type(replay) is dict
+        else replay
+    )
+    if mission["stage"] in ("confirmation", "stop") and type(confirmation_replay) is dict:
         counts, processed, reason = (
-            replay.get("counts"),
-            replay.get("processed_observations"),
-            replay.get("stop_reason"),
+            confirmation_replay.get("counts"),
+            confirmation_replay.get("processed_observations"),
+            confirmation_replay.get("stop_reason"),
         )
         valid_replay = (
-            replay.get("schema") == CONFIRMATION_SCHEMA
-            and type(replay.get("input_observations")) is int
-            and replay["input_observations"] == mission["observations"]
+            confirmation_replay.get("schema") == CONFIRMATION_SCHEMA
+            and type(confirmation_replay.get("input_observations")) is int
+            and confirmation_replay["input_observations"] == mission["observations"]
             and type(processed) is int
             and 1 <= processed <= mission["observations"]
             and type(counts) is dict
@@ -168,6 +174,10 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
                 )
             )
         )
+        if mission["stage"] == "stop":
+            valid_replay = valid_replay and _valid_stop_replay(replay, worker)
+    elif mission["stage"] in ("confirmation", "stop"):
+        valid_replay = False
     else:
         valid_replay = (
             type(replay) is dict
@@ -243,6 +253,54 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
     return result
 
 
+def _valid_stop_replay(replay: object, worker: dict) -> bool:
+    """Check the stop envelope before trusting a separately verified receipt."""
+    if type(replay) is not dict:
+        return False
+    confirmation, window, stop = (
+        replay.get("confirmation"),
+        replay.get("window"),
+        replay.get("stop"),
+    )
+    if type(confirmation) is not dict or type(window) is not dict or type(stop) is not dict:
+        return False
+    record = stop.get("initial_stop_record")
+    if type(record) is not dict:
+        return False
+    k, q = window.get("first_bar_index"), window.get("last_bar_index")
+    digest = window.get("raw_rows_sha256")
+    summary = replay.get("confirmation_replay")
+    return (
+        replay.get("schema") == STOP_SCHEMA
+        and replay.get("input_sha256") == worker.get("input_sha256")
+        and replay.get("stop_reason") == "STOP_CAPTURED_BEFORE_RISK"
+        and type(summary) is dict
+        and summary.get("stop_reason") == "CONFIRMED_BEFORE_RISK"
+        and type(k) is int
+        and type(q) is int
+        and 0 <= k < q
+        and q - k in (1, 2)
+        and q + 1 == summary.get("processed_observations")
+        and type(digest) is str
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and type(confirmation.get("pullback_bar_index")) is int
+        and confirmation["pullback_bar_index"] == k
+        and type(confirmation.get("confirmation_bar_index")) is int
+        and confirmation["confirmation_bar_index"] == q
+        and stop.get("status") == "EVALUATED"
+        and stop.get("at_entry") is None
+        and canonical(stop.get("confirmation")) == canonical(confirmation)
+        and canonical(record.get("confirmation")) == canonical(confirmation)
+        and type(record.get("structural_window_first_bar")) is int
+        and record["structural_window_first_bar"] == k
+        and type(record.get("structural_window_last_bar")) is int
+        and record["structural_window_last_bar"] == q
+        and type(record.get("stop_known_at_bar_index")) is int
+        and record["stop_known_at_bar_index"] == q
+    )
+
+
 def _atomic_report(root: Path, report: dict) -> None:
     """Publish a complete report once without overwriting existing evidence."""
     fd, name = tempfile.mkstemp(prefix=".report-", dir=root)
@@ -297,8 +355,8 @@ def _validate_mission(mission: dict) -> None:
         "synthetic_generation": True,
         "synthetic_storage": True,
         "event_replay": True,
-        "pullback": stage in ("pullback", "confirmation"),
-        "confirmation": stage == "confirmation",
+        "pullback": stage in ("pullback", "confirmation", "stop"),
+        "confirmation": stage in ("confirmation", "stop"),
         "real_data": False,
         "broker": False,
         "orders": False,
@@ -306,6 +364,8 @@ def _validate_mission(mission: dict) -> None:
         "network": False,
         "merge": False,
     }
+    if stage == "stop":
+        expected_auth["initial_stop"] = True
     auth = mission["authorizations"]
     if (
         mission_id != mission["task_id"]
@@ -313,12 +373,16 @@ def _validate_mission(mission: dict) -> None:
         or mission["kind"] != "INVENTED_STORAGE_AND_REPLAY"
         or type(mission["observations"]) is not int
         or not 1 <= mission["observations"] <= MAX_OBSERVATIONS
-        or stage not in ("events", "pullback", "confirmation")
+        or stage not in ("events", "pullback", "confirmation", "stop")
         or mission["profile"] not in ("standard", *PROFILES)
         or (
             mission["profile"] != "standard"
-            and (stage != "confirmation" or mission["observations"] != FIXTURE_OBSERVATIONS)
+            and (
+                stage not in ("confirmation", "stop")
+                or mission["observations"] != FIXTURE_OBSERVATIONS
+            )
         )
+        or (stage == "stop" and mission["profile"] == "standard")
         or mission["worker"] != "local_python_worker"
         or mission["verifier"] != "local_python_independent_verifier"
         or type(mission["timeout_seconds_per_process"]) is not int
@@ -648,12 +712,16 @@ def run_mission(
         raise ValueError("invalid synthetic observation count")
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError("invalid timeout")
-    if stage not in ("events", "pullback", "confirmation"):
+    if stage not in ("events", "pullback", "confirmation", "stop"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and (stage != "confirmation" or observations != FIXTURE_OBSERVATIONS):
-        raise ValueError("confirmation profiles require confirmation and 39 observations")
+    if profile != "standard" and (
+        stage not in ("confirmation", "stop") or observations != FIXTURE_OBSERVATIONS
+    ):
+        raise ValueError("confirmation profiles require confirmation or stop and 39 observations")
+    if stage == "stop" and profile == "standard":
+        raise ValueError("stop requires a fixed confirmation profile")
     sources = _source_hashes()
     root = _new_directory(output_dir)
     task_id = str(uuid.uuid4())
@@ -674,8 +742,8 @@ def run_mission(
             "synthetic_generation": True,
             "synthetic_storage": True,
             "event_replay": True,
-            "pullback": stage in ("pullback", "confirmation"),
-            "confirmation": stage == "confirmation",
+            "pullback": stage in ("pullback", "confirmation", "stop"),
+            "confirmation": stage in ("confirmation", "stop"),
             "real_data": False,
             "broker": False,
             "orders": False,
@@ -688,6 +756,8 @@ def run_mission(
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
         "runtime_packages": _runtime_versions(),
     }
+    if stage == "stop":
+        mission["authorizations"]["initial_stop"] = True
     _validate_mission(mission)
     with _mission_lock(root, create=True):
         with (root / "mission.json").open("xb") as stream:
@@ -1011,7 +1081,7 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--observations", type=int)
     parser.add_argument("--timeout-seconds", type=int)
-    parser.add_argument("--stage", choices=("events", "pullback", "confirmation"))
+    parser.add_argument("--stage", choices=("events", "pullback", "confirmation", "stop"))
     parser.add_argument("--profile", choices=("standard", *PROFILES))
     args = parser.parse_args()
     if args.resume and any(

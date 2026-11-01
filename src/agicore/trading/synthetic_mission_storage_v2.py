@@ -30,6 +30,7 @@ from .synthetic_confirmation_fixture_v2 import (
 )
 from .synthetic_confirmation_fixture_v2 import generate_confirmation_fixture
 from .synthetic_confirmation_replay_v2 import replay_confirmation_native
+from .synthetic_stop_replay_v2 import replay_stop_native
 
 SCHEMA = "agicore:invented-observation-bundle:v2"
 MAX_OBSERVATIONS = 89_841
@@ -201,12 +202,14 @@ def produce(
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
-    if stage not in ("events", "pullback", "confirmation"):
+    if stage not in ("events", "pullback", "confirmation", "stop"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *CONFIRMATION_PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage != "confirmation":
-        raise ValueError("confirmation profiles require the confirmation stage")
+    if profile != "standard" and stage not in ("confirmation", "stop"):
+        raise ValueError("confirmation profiles require the confirmation or stop stage")
+    if stage == "stop" and profile == "standard":
+        raise ValueError("stop requires a fixed confirmation profile")
     start = time.perf_counter_ns()
     raw = (
         generate_observations(observations)
@@ -263,8 +266,10 @@ def produce(
         replay_result = replay_events(raw)
     elif stage == "pullback":
         replay_result = replay_pullback_events(raw)
-    else:
+    elif stage == "confirmation":
         replay_result = replay_confirmation_native(raw).summary
+    else:
+        replay_result = replay_stop_native(raw)
     result = {
         "schema": "agicore:invented-storage-replay-worker:v2",
         "domain": "SYNTHETIC_ONLY",
@@ -288,7 +293,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
-    parser.add_argument("--stage", choices=("events", "pullback", "confirmation"), default="events")
+    parser.add_argument(
+        "--stage", choices=("events", "pullback", "confirmation", "stop"), default="events"
+    )
     parser.add_argument(
         "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
     )
