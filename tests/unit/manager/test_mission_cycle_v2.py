@@ -4,11 +4,36 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import sys
 
 import pytest
 
 from agicore.manager import mission_cycle_v2 as manager
+
+
+def test_cli_writes_one_parseable_report(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agicore.manager.mission_cycle_v2",
+            "--output-dir",
+            str(tmp_path / "cli"),
+            "--observations",
+            "1",
+            "--stage",
+            "events",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    report = json.loads(result.stdout)
+    assert report["status"] == "PASS"
+    assert report["observations"] == 1
+    assert report["stage"] == "events"
 
 
 def test_end_to_end_mission_assigns_runs_verifies_and_reports(tmp_path):
