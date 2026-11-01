@@ -22,6 +22,7 @@ from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
 from . import ema20_pullback_v2 as ema20
+from .synthetic_confirmation_replay_v2 import replay_confirmation_native
 
 SCHEMA = "agicore:invented-observation-bundle:v2"
 MAX_OBSERVATIONS = 89_841
@@ -191,7 +192,7 @@ def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
-    if stage not in ("events", "pullback"):
+    if stage not in ("events", "pullback", "confirmation"):
         raise ValueError("unsupported replay stage")
     start = time.perf_counter_ns()
     raw = generate_observations(observations)
@@ -239,7 +240,12 @@ def produce(bundle: Path, observations: int, *, stage: str = "events") -> dict:
     with (bundle / "manifest.json").open("xb") as stream:
         stream.write(manifest_bytes)
     storage_end = time.perf_counter_ns()
-    replay_result = replay_events(raw) if stage == "events" else replay_pullback_events(raw)
+    if stage == "events":
+        replay_result = replay_events(raw)
+    elif stage == "pullback":
+        replay_result = replay_pullback_events(raw)
+    else:
+        replay_result = replay_confirmation_native(raw).summary
     result = {
         "schema": "agicore:invented-storage-replay-worker:v2",
         "domain": "SYNTHETIC_ONLY",
@@ -261,7 +267,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
-    parser.add_argument("--stage", choices=("events", "pullback"), default="events")
+    parser.add_argument("--stage", choices=("events", "pullback", "confirmation"), default="events")
     args = parser.parse_args()
     produce(args.bundle, args.observations, stage=args.stage)
 
