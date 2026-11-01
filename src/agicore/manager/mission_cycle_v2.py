@@ -1032,7 +1032,7 @@ def main() -> None:
                 stage="pullback" if args.stage is None else args.stage,
                 profile="standard" if args.profile is None else args.profile,
             )
-    print(json.dumps(report, indent=2, sort_keys=True))
+    sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
     if report["status"] != "PASS":
         raise SystemExit(1)
 
