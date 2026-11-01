@@ -8,7 +8,11 @@ from fractions import Fraction
 
 import pytest
 
-from agicore.trading.ema_pullback_entry_confirmation_v2 import EntryConfirmationStateV2
+from agicore.trading.ema_pullback_entry_confirmation_v2 import (
+    EntryConfirmationStateV2,
+    EntryConfirmationStatusV2,
+    MACDStatusV2,
+)
 from agicore.trading.ema_pullback_initial_stop_v2 import InitialStopStatusV2, InitialStopV2Error
 from agicore.trading.regime_context_v2 import RegimeDirection
 from agicore.trading.synthetic_confirmation_replay_v2 import replay_confirmation_native
@@ -157,4 +161,124 @@ def test_nonqualified_or_changed_source_provenance_is_rejected():
             confirmation=replace(native, confirmation=altered_record),
             closed_window=(),
             previous=original.book,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("status", EntryConfirmationStatusV2.INVALID_CONFIRMATION_INPUT),
+        ("price_qualified", False),
+        ("price_qualified", 1),
+        ("momentum_qualified", False),
+        ("momentum_qualified", 1),
+        ("entry_confirmation", 1),
+        ("macd_evaluation", None),
+    ],
+)
+def test_contradictory_confirmation_candidate_is_rejected(field, replacement):
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    modified = replace(native.candidate, **{field: replacement})
+    with pytest.raises(InitialStopV2Error, match="candidate qualification|native MACD"):
+        capture_synthetic_stop_v2(
+            confirmation=replace(native, candidate=modified), closed_window=upstream.stop_window
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ["macd", "signal", "histogram", "previous_macd", "previous_histogram"]
+)
+def test_macd_record_cannot_differ_from_native_candidate(field):
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    altered = replace(native.confirmation, **{field: getattr(native.confirmation, field) + 1})
+    with pytest.raises(InitialStopV2Error, match="MACD record provenance"):
+        capture_synthetic_stop_v2(
+            confirmation=replace(native, confirmation=altered), closed_window=upstream.stop_window
+        )
+
+
+@pytest.mark.parametrize("field", ["through_bar_index", "known_at_timestamp", "status"])
+def test_native_macd_clock_and_status_are_required(field):
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    momentum = native.candidate.macd_evaluation
+    replacements = {
+        "through_bar_index": momentum.through_bar_index + 1,
+        "known_at_timestamp": momentum.known_at_timestamp + timedelta(minutes=1),
+        "status": MACDStatusV2.INVALID_MACD_INPUT,
+    }
+    candidate = replace(native.candidate, macd_evaluation=replace(momentum, **{field: replacements[field]}))
+    with pytest.raises(InitialStopV2Error, match="native MACD|native provenance"):
+        capture_synthetic_stop_v2(
+            confirmation=replace(native, candidate=candidate), closed_window=upstream.stop_window
+        )
+
+
+def test_coherent_but_nonqualifying_macd_momentum_is_rejected():
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    momentum = native.candidate.macd_evaluation
+    zero = Fraction(0)
+    changed = replace(
+        momentum,
+        ema12=zero,
+        ema26=zero,
+        macd=zero,
+        signal=zero,
+        histogram=zero,
+        previous_macd=zero,
+        previous_histogram=zero,
+    )
+    record = replace(
+        native.confirmation,
+        macd=zero,
+        signal=zero,
+        histogram=zero,
+        previous_macd=zero,
+        previous_histogram=zero,
+    )
+    candidate = replace(native.candidate, macd_evaluation=changed)
+    with pytest.raises(InitialStopV2Error, match="MACD momentum"):
+        capture_synthetic_stop_v2(
+            confirmation=replace(native, candidate=candidate, confirmation=record),
+            closed_window=upstream.stop_window,
+        )
+
+
+def test_agreeing_timestamps_cannot_bypass_confirmation_elapsed_time():
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    late = native.confirmation.pullback_timestamp + timedelta(minutes=3)
+    momentum = replace(native.candidate.macd_evaluation, known_at_timestamp=late)
+    candidate = replace(native.candidate, confirmation_timestamp=late, macd_evaluation=momentum)
+    record = replace(native.confirmation, confirmation_timestamp=late)
+    modified = replace(
+        native, closed_bar_timestamp=late, candidate=candidate, confirmation=record
+    )
+    with pytest.raises(InitialStopV2Error, match="native clock"):
+        capture_synthetic_stop_v2(confirmation=modified, closed_window=upstream.stop_window)
+
+
+@pytest.mark.parametrize("field", ["source_regime_event_bar_index", "confirmation_bar_index"])
+def test_float_indices_cannot_impersonate_native_integer_provenance(field):
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    record = replace(native.confirmation, **{field: float(getattr(native.confirmation, field))})
+    with pytest.raises(InitialStopV2Error, match="native provenance"):
+        capture_synthetic_stop_v2(
+            confirmation=replace(native, confirmation=record), closed_window=upstream.stop_window
+        )
+
+
+def test_raw_strings_cannot_impersonate_native_event_enums():
+    upstream = _confirmation()
+    native = upstream.native_confirmation
+    events = tuple(event.value for event in native.confirmation.source_regime_event_types)
+    assert events == native.confirmation.source_regime_event_types
+    record = replace(native.confirmation, source_regime_event_types=events)
+    with pytest.raises(InitialStopV2Error, match="native provenance"):
+        capture_synthetic_stop_v2(
+            confirmation=replace(native, confirmation=record), closed_window=upstream.stop_window
         )
