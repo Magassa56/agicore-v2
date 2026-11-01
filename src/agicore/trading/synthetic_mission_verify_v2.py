@@ -20,10 +20,22 @@ from tools.agicore_v2_synthetic_scale_probe import generate_observations
 
 from . import directional_impulse_v2 as impulse
 from . import ema20_pullback_v2 as ema20
+from . import ema_pullback_entry_confirmation_v2 as confirmation
 from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
+from .synthetic_confirmation_fixture_v2 import (
+    PROFILES as CONFIRMATION_PROFILES,
+)
+from .synthetic_confirmation_fixture_v2 import (
+    SCHEMA as CONFIRMATION_BUNDLE_SCHEMA,
+)
+from .synthetic_confirmation_fixture_v2 import generate_confirmation_fixture
+from .synthetic_confirmation_replay_v2 import (
+    SCHEMA as CONFIRMATION_SCHEMA,
+)
+from .synthetic_confirmation_replay_v2 import ClosedPrefix, confirmation_snapshot
 from .synthetic_mission_storage_v2 import (
     MAX_OBSERVATIONS,
     ROWS_PER_CHUNK,
@@ -180,6 +192,147 @@ def recompute_pullback_events(raw: bytes) -> dict:
     }
 
 
+def recompute_confirmation_events(raw: bytes) -> dict:
+    """Reconstruct the first confirmed opportunity without orders or risk."""
+    bars = replay.parse_ninjatrader_last_rows_v2(raw)
+    window = deque(maxlen=impulse.IMPULSE_RANGE_LOOKBACK + 1)
+    history = {}
+    ema = pullback.IncrementalEMA20()
+    lifetime = pending = None
+    digest = hashlib.sha256()
+    counts = {
+        "impulses": 0,
+        "reversals": 0,
+        "qualified_contexts": 0,
+        "pullbacks_evaluated": 0,
+        "pullbacks_qualified": 0,
+        "opportunities_started": 0,
+        "confirmation_candidates": 0,
+        "confirmations_qualified": 0,
+        "confirmations_expired": 0,
+        "events_suppressed_while_pending": 0,
+    }
+    stop_reason, processed = "END_OF_INPUT", 0
+    for bar in bars:
+        index = bar.bar_index
+        price = ema20.EMA20PullbackBarV2(
+            index, bar.timestamp_utc, bar.open, bar.high, bar.low, bar.close, True
+        )
+        history[index] = price
+        advanced = None
+        if pending is not None:
+            advanced = confirmation.advance_entry_confirmation_momentum_v2(
+                previous=pending,
+                closed_bar_index=index,
+                closed_bar_timestamp=bar.timestamp_utc,
+                source_bar_closed=True,
+                bars_by_index=ClosedPrefix(history, index),
+            )
+            counts["confirmation_candidates"] += advanced.candidate is not None
+            pending = (
+                advanced
+                if advanced.state is confirmation.EntryConfirmationStateV2.AWAITING_CONFIRMATION
+                else None
+            )
+            if advanced.entry_confirmation:
+                counts["confirmations_qualified"] += 1
+                stop_reason = "CONFIRMED_BEFORE_RISK"
+                digest.update(
+                    replay.canonical_replay_bytes_v2(
+                        {
+                            "bar_index": index,
+                            "confirmation_progress": confirmation_snapshot(advanced),
+                            "stop_reason": stop_reason,
+                        }
+                    )
+                )
+                processed = index + 1
+                break
+            if pending is None:
+                counts["confirmations_expired"] += 1
+        window.append(
+            (
+                bar.closed_view(),
+                reversal.RejectionBarV2(
+                    index, bar.timestamp_utc, bar.close, True, bar.open, bar.high, bar.low
+                ),
+            )
+        )
+        impulse_bars = {pair[0].bar_index: pair[0] for pair in window}
+        reversal_bars = {pair[1].bar_index: pair[1] for pair in window}
+        detected = impulse.evaluate_directional_impulse_event_v2(
+            impulse_candidate_bar_index=index, bars_by_index=impulse_bars
+        ).event
+        candidate = index - reversal.CONFIRMATION_WINDOW_CLOSED_BARS
+        reversed_event = (
+            None
+            if candidate < 0
+            else reversal.evaluate_reversal_transition_event_v2(
+                rejection_candidate_bar_index=candidate,
+                closed_bar_index=index,
+                bars_by_index=reversal_bars,
+            ).event
+        )
+        counts["impulses"] += detected is not None
+        counts["reversals"] += reversed_event is not None
+        suppressed = pending is not None
+        if suppressed:
+            counts["events_suppressed_while_pending"] += (detected is not None) + (
+                reversed_event is not None
+            )
+        outcome = pullback.advance_pullback(
+            lifetime,
+            price,
+            ema,
+            directional_impulse_event=None if suppressed else detected,
+            reversal_transition_event=None
+            if suppressed or reversed_event is None
+            else reversed_event.as_regime_event(),
+        )
+        lifetime = outcome.lifetime
+        counts["qualified_contexts"] += (
+            lifetime.composition.status is regime.RegimeContextStatus.QUALIFIED
+        )
+        counts["pullbacks_evaluated"] += outcome.pullback is not None
+        qualified = outcome.pullback is not None and outcome.pullback.pullback_qualified
+        counts["pullbacks_qualified"] += qualified
+        started = None
+        if qualified:
+            pending = confirmation.begin_entry_confirmation_momentum_v2(
+                pullback=outcome, pullback_bar=price
+            )
+            started = pending
+            counts["opportunities_started"] += 1
+        digest.update(
+            replay.canonical_replay_bytes_v2(
+                {
+                    "bar_index": index,
+                    "signal": pullback.decision_record(index, detected, reversed_event, outcome),
+                    "suppressed": suppressed,
+                    "confirmation_progress": confirmation_snapshot(advanced),
+                    "confirmation_started": confirmation_snapshot(started),
+                }
+            )
+        )
+        ema.append(price)
+        processed = index + 1
+    if stop_reason == "END_OF_INPUT" and pending is not None:
+        stop_reason = "END_OF_INPUT_AWAITING_CONFIRMATION"
+    digest.update(
+        replay.canonical_replay_bytes_v2(
+            {"stop_reason": stop_reason, "pending": confirmation_snapshot(pending)}
+        )
+    )
+    return {
+        "schema": CONFIRMATION_SCHEMA,
+        "input_observations": len(bars),
+        "processed_observations": processed,
+        "stop_reason": stop_reason,
+        "counts": counts,
+        "events_sha256": digest.hexdigest(),
+    }
+
+
 def read_regular(path: Path, limit: int) -> bytes:
     """Read one bounded regular file without following a symlink or hardlink."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -193,12 +346,23 @@ def read_regular(path: Path, limit: int) -> bytes:
         return content
 
 
-def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
+def verify(
+    bundle: Path, observations: int, *, stage: str = "events", profile: str = "standard"
+) -> dict:
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
-    if stage not in ("events", "pullback"):
+    if stage not in ("events", "pullback", "confirmation"):
         raise ValueError("unsupported replay stage")
+    if profile not in ("standard", *CONFIRMATION_PROFILES):
+        raise ValueError("unsupported invented profile")
+    if profile != "standard" and stage != "confirmation":
+        raise ValueError("confirmation profiles require the confirmation stage")
+    expected_raw = (
+        generate_observations(observations)
+        if profile == "standard"
+        else generate_confirmation_fixture(profile, observations)
+    )
     if bundle.is_symlink() or not bundle.is_dir():
         raise ValueError("invalid bundle directory")
     chunk_dir = bundle / "chunks"
@@ -206,7 +370,7 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         raise ValueError("invalid chunk directory")
     manifest_bytes = read_regular(bundle / "manifest.json", 1_000_000)
     manifest = json.loads(manifest_bytes)
-    if canonical(manifest) != manifest_bytes or set(manifest) != {
+    expected_manifest_fields = {
         "schema",
         "domain",
         "observations",
@@ -216,12 +380,19 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         "codec",
         "zlib_runtime",
         "chunks",
-    }:
+    }
+    if profile != "standard":
+        expected_manifest_fields.add("profile")
+    if (
+        type(manifest) is not dict
+        or canonical(manifest) != manifest_bytes
+        or set(manifest) != expected_manifest_fields
+    ):
         raise ValueError("invalid canonical bundle manifest")
-    expected_raw = generate_observations(observations)
     rows = expected_raw.splitlines(keepends=True)
     if (
-        manifest["schema"] != SCHEMA
+        manifest["schema"] != (SCHEMA if profile == "standard" else CONFIRMATION_BUNDLE_SCHEMA)
+        or (profile != "standard" and manifest["profile"] != profile)
         or manifest["domain"] != "INVENTED_GENERATOR_ONLY"
         or type(manifest["observations"]) is not int
         or manifest["observations"] != observations
@@ -276,19 +447,30 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         decoded = decoder.decompress(stored, len(expected) + 1)
         if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail or decoded != expected:
             raise ValueError("decoded chunk differs from generated source")
-    worker = json.loads(read_regular(bundle / "worker.json", 1_000_000))
-    repeated = (
-        recompute_events(expected_raw)
-        if stage == "events"
-        else recompute_pullback_events(expected_raw)
-    )
+    worker_bytes = read_regular(bundle / "worker.json", 1_000_000)
+    worker = json.loads(worker_bytes)
+    if type(worker) is not dict or canonical(worker) != worker_bytes:
+        raise ValueError("invalid canonical worker output")
+    if stage == "events":
+        repeated = recompute_events(expected_raw)
+    elif stage == "pullback":
+        repeated = recompute_pullback_events(expected_raw)
+    else:
+        repeated = recompute_confirmation_events(expected_raw)
     if (
         worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
         or worker.get("domain") != "SYNTHETIC_ONLY"
         or worker.get("stage", "events") != stage
         or worker.get("manifest_sha256") != sha(manifest_bytes)
         or worker.get("input_sha256") != sha(expected_raw)
-        or worker.get("replay") != repeated
+        or worker.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in worker)
+        or any(
+            type(worker.get(field)) is not int or worker[field] < 0
+            for field in ("storage_wall_ns", "replay_wall_ns", "peak_rss_bytes")
+        )
+        or type(worker.get("replay")) is not dict
+        or canonical(worker["replay"]) != canonical(repeated)
     ):
         raise ValueError("worker output does not match independent verification")
     receipt = {
@@ -301,6 +483,8 @@ def verify(bundle: Path, observations: int, *, stage: str = "events") -> dict:
         "replay": repeated,
         "scope": "INDEPENDENT_BUNDLE_AND_EVENT_PIPELINE_SHARED_FROZEN_PREDICATES",
     }
+    if profile != "standard":
+        receipt["profile"] = profile
     with (bundle / "verification.json").open("xb") as stream:
         stream.write(canonical(receipt))
     return receipt
@@ -311,9 +495,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
-    parser.add_argument("--stage", choices=("events", "pullback"), default="events")
+    parser.add_argument("--stage", choices=("events", "pullback", "confirmation"), default="events")
+    parser.add_argument(
+        "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
+    )
     args = parser.parse_args()
-    verify(args.bundle, args.observations, stage=args.stage)
+    verify(args.bundle, args.observations, stage=args.stage, profile=args.profile)
 
 
 if __name__ == "__main__":

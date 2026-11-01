@@ -4,10 +4,36 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
 from agicore.manager import mission_cycle_v2 as manager
+
+
+def test_cli_writes_one_parseable_report(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agicore.manager.mission_cycle_v2",
+            "--output-dir",
+            str(tmp_path / "cli"),
+            "--observations",
+            "1",
+            "--stage",
+            "events",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    report = json.loads(result.stdout)
+    assert report["status"] == "PASS"
+    assert report["observations"] == 1
+    assert report["stage"] == "events"
 
 
 def test_end_to_end_mission_assigns_runs_verifies_and_reports(tmp_path):
@@ -111,8 +137,17 @@ def test_failed_dispatch_audit_prevents_process_execution(tmp_path, monkeypatch)
     assert not invoked
 
 
-def test_timeout_stops_without_starting_verifier(tmp_path):
-    report = manager.run_mission(tmp_path / "timeout", 89_841, timeout_seconds=1)
+def test_timeout_stops_without_starting_verifier(tmp_path, monkeypatch):
+    # A real deliberately stalled child makes the deadline deterministic without
+    # starting the representative-volume benchmark as a side effect of CI.
+    popen = manager.subprocess.Popen
+
+    def stalled_child(command, **kwargs):
+        assert command[3] == manager.WORKER
+        return popen([sys.executable, "-c", "import time; time.sleep(10)"], **kwargs)
+
+    monkeypatch.setattr(manager.subprocess, "Popen", stalled_child)
+    report = manager.run_mission(tmp_path / "timeout", 64, timeout_seconds=1)
     assert report["status"] == "FAILED"
     assert report["steps"]["worker"]["timeout"] is True
     assert "verifier" not in report["steps"]
