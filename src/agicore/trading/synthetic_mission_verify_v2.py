@@ -26,6 +26,11 @@ from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
 from . import synthetic_pullback_replay_v2 as pullback
+from .ema_pullback_risk_position_sizing_v2 import (
+    INSTRUMENT,
+    PositionStateV2,
+    evaluate_risk_position_sizing_v2,
+)
 from .synthetic_confirmation_fixture_v2 import (
     PROFILES as CONFIRMATION_PROFILES,
 )
@@ -44,6 +49,7 @@ from .synthetic_mission_storage_v2 import (
     canonical,
     sha,
 )
+from .synthetic_risk_replay_v2 import SCHEMA as RISK_SCHEMA
 from .synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 
 
@@ -383,9 +389,71 @@ def recompute_stop_events(raw: bytes) -> dict:
     }
 
 
+def reconstruct_risk_native(raw: bytes) -> dict:
+    """Independently rebuild confirmation, structural stop and risk decision."""
+    summary, native, history = recompute_confirmation_events(raw, handoff=True)
+    if native is None or summary["stop_reason"] != "CONFIRMED_BEFORE_RISK":
+        raise ValueError("the fixed risk profile did not confirm")
+    source = native.confirmation
+    k, q = source.pullback_bar_index, source.confirmation_bar_index
+    if (
+        type(k) is not int
+        or type(q) is not int
+        or not 0 <= k < q
+        or q - k not in (1, 2)
+        or summary["processed_observations"] != q + 1
+    ):
+        raise ValueError("invalid independently reconstructed window")
+    selected = {index: history[index] for index in range(k, q + 1)}
+    stop_result = structural_stop.evaluate_initial_stop_v2(
+        confirmation=native, bars_by_index=selected
+    )
+    if (
+        stop_result.status is not structural_stop.InitialStopStatusV2.EVALUATED
+        or stop_result.initial_stop_record is None
+        or stop_result.at_entry is not None
+    ):
+        raise ValueError("independent stop not captured without entry")
+    candidate_bar = history[q]
+    risk_result = evaluate_risk_position_sizing_v2(
+        instrument=INSTRUMENT,
+        closed_bar_index=q,
+        closed_bar_timestamp=source.confirmation_timestamp,
+        source_bar_closed=True,
+        confirmation=native,
+        initial_stop=stop_result,
+        position_state=PositionStateV2.FLAT,
+        bars_by_index={q: candidate_bar},
+    )
+    rows = raw.splitlines(keepends=True)
+    if len(rows) != summary["input_observations"] or q >= len(rows):
+        raise ValueError("independent row boundaries differ from input")
+    return {
+        "schema": RISK_SCHEMA,
+        "input_sha256": hashlib.sha256(raw).hexdigest(),
+        "confirmation_replay": summary,
+        "confirmation": json.loads(replay.canonical_replay_bytes_v2(source)),
+        "window": {
+            "first_bar_index": k,
+            "last_bar_index": q,
+            "raw_rows_sha256": hashlib.sha256(b"".join(rows[k : q + 1])).hexdigest(),
+        },
+        "stop": json.loads(replay.canonical_replay_bytes_v2(stop_result)),
+        "risk": json.loads(replay.canonical_replay_bytes_v2(risk_result)),
+        "stop_reason": "RISK_DECIDED_BEFORE_ENTRY",
+    }
+
+
 def read_regular(path: Path, limit: int) -> bytes:
     """Read one bounded regular file without following a symlink or hardlink."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    if path.is_symlink():
+        raise ValueError("symlink forbidden")
+    fd = os.open(path, flags)
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
@@ -402,13 +470,13 @@ def verify(
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
-    if stage not in ("events", "pullback", "confirmation", "stop"):
+    if stage not in ("events", "pullback", "confirmation", "stop", "risk"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *CONFIRMATION_PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage not in ("confirmation", "stop"):
+    if profile != "standard" and stage not in ("confirmation", "stop", "risk"):
         raise ValueError("confirmation profiles require the confirmation or stop stage")
-    if stage == "stop" and profile == "standard":
+    if stage in ("stop", "risk") and profile == "standard":
         raise ValueError("stop requires a fixed confirmation profile")
     expected_raw = (
         generate_observations(observations)
@@ -509,8 +577,10 @@ def verify(
         repeated = recompute_pullback_events(expected_raw)
     elif stage == "confirmation":
         repeated = recompute_confirmation_events(expected_raw)
-    else:
+    elif stage == "stop":
         repeated = recompute_stop_events(expected_raw)
+    else:
+        repeated = reconstruct_risk_native(expected_raw)
     if (
         worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
         or worker.get("domain") != "SYNTHETIC_ONLY"
@@ -550,7 +620,7 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument(
-        "--stage", choices=("events", "pullback", "confirmation", "stop"), default="events"
+        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk"), default="events"
     )
     parser.add_argument(
         "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
