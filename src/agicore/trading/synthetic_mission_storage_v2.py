@@ -9,10 +9,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import resource
 import time
 import zlib
 from pathlib import Path
+
+try:
+    import resource
+except ImportError:
+    resource = None
 
 from tools.agicore_v2_synthetic_scale_probe import generate_observations
 
@@ -30,6 +34,7 @@ from .synthetic_confirmation_fixture_v2 import (
 )
 from .synthetic_confirmation_fixture_v2 import generate_confirmation_fixture
 from .synthetic_confirmation_replay_v2 import replay_confirmation_native
+from .synthetic_risk_replay_v2 import replay_risk_native
 from .synthetic_stop_replay_v2 import replay_stop_native
 
 SCHEMA = "agicore:invented-observation-bundle:v2"
@@ -202,14 +207,14 @@ def produce(
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
-    if stage not in ("events", "pullback", "confirmation", "stop"):
+    if stage not in ("events", "pullback", "confirmation", "stop", "risk"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *CONFIRMATION_PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage not in ("confirmation", "stop"):
-        raise ValueError("confirmation profiles require the confirmation or stop stage")
-    if stage == "stop" and profile == "standard":
-        raise ValueError("stop requires a fixed confirmation profile")
+    if profile != "standard" and stage not in ("confirmation", "stop", "risk"):
+        raise ValueError("confirmation profiles require the confirmation, stop or risk stage")
+    if stage in ("stop", "risk") and profile == "standard":
+        raise ValueError(f"{stage} requires a fixed confirmation profile")
     start = time.perf_counter_ns()
     raw = (
         generate_observations(observations)
@@ -268,8 +273,15 @@ def produce(
         replay_result = replay_pullback_events(raw)
     elif stage == "confirmation":
         replay_result = replay_confirmation_native(raw).summary
-    else:
+    elif stage == "stop":
         replay_result = replay_stop_native(raw)
+    else:
+        replay_result = replay_risk_native(raw)
+    peak_rss = (
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+        if resource is not None
+        else 0
+    )
     result = {
         "schema": "agicore:invented-storage-replay-worker:v2",
         "domain": "SYNTHETIC_ONLY",
@@ -279,7 +291,7 @@ def produce(
         "stage": stage,
         "storage_wall_ns": storage_end - start,
         "replay_wall_ns": time.perf_counter_ns() - storage_end,
-        "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
+        "peak_rss_bytes": peak_rss,
     }
     if profile != "standard":
         result["profile"] = profile
@@ -294,7 +306,7 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument(
-        "--stage", choices=("events", "pullback", "confirmation", "stop"), default="events"
+        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk"), default="events"
     )
     parser.add_argument(
         "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"

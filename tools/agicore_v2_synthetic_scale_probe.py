@@ -11,7 +11,10 @@ import argparse
 import hashlib
 import json
 import platform
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 import sys
 import time
 import zlib
@@ -80,6 +83,8 @@ def _peak_rss_bytes() -> int:
     """Return the Linux process high-water resident set size in bytes."""
     if sys.platform != "linux":
         raise RuntimeError("RSS measurement is supported only on Linux")
+    if resource is None:
+        return 0
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
 
 
@@ -145,8 +150,8 @@ def run_probe(count: int) -> dict:
             "before_json_output": final_peak,
         },
         "address_space_limit_bytes": {
-            "soft": resource.getrlimit(resource.RLIMIT_AS)[0],
-            "hard": resource.getrlimit(resource.RLIMIT_AS)[1],
+            "soft": resource.getrlimit(resource.RLIMIT_AS)[0] if resource else 0,
+            "hard": resource.getrlimit(resource.RLIMIT_AS)[1] if resource else 0,
         },
         "environment": environment,
         "source_sha256": sources,
