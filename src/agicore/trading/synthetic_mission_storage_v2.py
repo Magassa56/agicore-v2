@@ -34,6 +34,7 @@ from .synthetic_confirmation_fixture_v2 import (
 )
 from .synthetic_confirmation_fixture_v2 import generate_confirmation_fixture
 from .synthetic_confirmation_replay_v2 import replay_confirmation_native
+from .synthetic_entry_replay_v2 import replay_entry_native
 from .synthetic_risk_replay_v2 import replay_risk_native
 from .synthetic_stop_replay_v2 import replay_stop_native
 
@@ -207,13 +208,13 @@ def produce(
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
-    if stage not in ("events", "pullback", "confirmation", "stop", "risk"):
+    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *CONFIRMATION_PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage not in ("confirmation", "stop", "risk"):
-        raise ValueError("confirmation profiles require the confirmation, stop or risk stage")
-    if stage in ("stop", "risk") and profile == "standard":
+    if profile != "standard" and stage not in ("confirmation", "stop", "risk", "entry"):
+        raise ValueError("confirmation profiles require the confirmation, stop, risk or entry stage")
+    if stage in ("stop", "risk", "entry") and profile == "standard":
         raise ValueError(f"{stage} requires a fixed confirmation profile")
     start = time.perf_counter_ns()
     raw = (
@@ -275,8 +276,10 @@ def produce(
         replay_result = replay_confirmation_native(raw).summary
     elif stage == "stop":
         replay_result = replay_stop_native(raw)
-    else:
+    elif stage == "risk":
         replay_result = replay_risk_native(raw)
+    else:
+        replay_result = replay_entry_native(raw)
     peak_rss = (
         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
         if resource is not None
@@ -306,7 +309,7 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument(
-        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk"), default="events"
+        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry"), default="events"
     )
     parser.add_argument(
         "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"

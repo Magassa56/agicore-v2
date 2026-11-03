@@ -57,7 +57,7 @@ toutes les observations ; la fenêtre des détecteurs est bornée à 21 barres.
 - Les adaptateurs sont inscrits dans le code, pas chargés comme des commandes
   arbitraires. Les limites de processus ne constituent pas un bac à sable pour
   du code non fiable et n'imposent pas une isolation réseau au niveau système.
-- Le replay s'arrête au pullback : confirmation, entrées, sorties, risque,
-  stockage natif de résultat et stratégie complète restent hors portée.
+- Le replay s'arrête à l'entrée : sorties, stockage natif de résultat et
+  stratégie complète restent hors portée.
 - Les missions sont synchrones et locales ; il n'y a ni service permanent,
   ni file distribuée, ni fusion de PR, ni déploiement.
