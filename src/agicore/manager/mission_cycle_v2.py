@@ -56,6 +56,7 @@ from agicore.trading.synthetic_confirmation_fixture_v2 import SCHEMA as FIXTURE_
 from agicore.trading.synthetic_confirmation_replay_v2 import SCHEMA as CONFIRMATION_SCHEMA
 from agicore.trading.synthetic_mission_storage_v2 import MAX_OBSERVATIONS, canonical
 from agicore.trading.synthetic_entry_replay_v2 import SCHEMA as ENTRY_SCHEMA
+from agicore.trading.synthetic_exit_replay_v2 import SCHEMA as EXIT_SCHEMA
 from agicore.trading.synthetic_risk_replay_v2 import SCHEMA as RISK_SCHEMA
 from agicore.trading.synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 
@@ -155,10 +156,10 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
     replay = worker.get("replay")
     confirmation_replay = (
         replay.get("confirmation_replay")
-        if mission["stage"] in ("stop", "risk", "entry") and type(replay) is dict
+        if mission["stage"] in ("stop", "risk", "entry", "exit") and type(replay) is dict
         else replay
     )
-    if mission["stage"] in ("confirmation", "stop", "risk", "entry") and type(confirmation_replay) is dict:
+    if mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit") and type(confirmation_replay) is dict:
         counts, processed, reason = (
             confirmation_replay.get("counts"),
             confirmation_replay.get("processed_observations"),
@@ -188,7 +189,9 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
             valid_replay = valid_replay and _valid_risk_replay(replay, worker)
         elif mission["stage"] == "entry":
             valid_replay = valid_replay and _valid_entry_replay(replay, worker)
-    elif mission["stage"] in ("confirmation", "stop", "risk", "entry"):
+        elif mission["stage"] == "exit":
+            valid_replay = valid_replay and _valid_exit_replay(replay, worker)
+    elif mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit"):
         valid_replay = False
     else:
         valid_replay = (
@@ -373,6 +376,146 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
     return True
 
 
+def _valid_exit_replay(replay: object, worker: dict) -> bool:
+    """Check the exit envelope before trusting a separately verified receipt."""
+    if type(replay) is not dict:
+        return False
+    confirmation, window, stop, risk, entry, sized_entry, exit_, end_state = (
+        replay.get("confirmation"),
+        replay.get("window"),
+        replay.get("stop"),
+        replay.get("risk"),
+        replay.get("entry"),
+        replay.get("sized_entry"),
+        replay.get("exit"),
+        replay.get("end_state"),
+    )
+    if (
+        type(confirmation) is not dict
+        or type(window) is not dict
+        or type(stop) is not dict
+        or type(risk) is not dict
+    ):
+        return False
+    record = stop.get("initial_stop_record")
+    if type(record) is not dict:
+        return False
+    k, q = window.get("first_bar_index"), window.get("last_bar_index")
+    digest = window.get("raw_rows_sha256")
+    summary = replay.get("confirmation_replay")
+    stop_reason = replay.get("stop_reason")
+    if stop_reason not in (
+        "EXIT_STRUCTURAL_STOP_FILLED",
+        "EXIT_EMA20_FILLED",
+        "OPEN_UNREALIZED_END_OF_DATA",
+        "ENTRY_REJECTED_BY_RISK",
+    ):
+        return False
+    base_valid = (
+        replay.get("schema") == EXIT_SCHEMA
+        and replay.get("input_sha256") == worker.get("input_sha256")
+        and type(summary) is dict
+        and summary.get("stop_reason") == "CONFIRMED_BEFORE_RISK"
+        and type(k) is int
+        and type(q) is int
+        and 0 <= k < q
+        and q - k in (1, 2)
+        and q + 1 == summary.get("processed_observations")
+        and type(digest) is str
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and confirmation.get("pullback_bar_index") == k
+        and confirmation.get("confirmation_bar_index") == q
+        and stop.get("status") == "EVALUATED"
+        and canonical(stop.get("confirmation")) == canonical(confirmation)
+        and canonical(record.get("confirmation")) == canonical(confirmation)
+        and record.get("structural_window_first_bar") == k
+        and record.get("structural_window_last_bar") == q
+        and record.get("stop_known_at_bar_index") == q
+        and canonical(risk.get("confirmation")) == canonical(confirmation)
+        and canonical(risk.get("initial_stop_record")) == canonical(record)
+        and risk.get("confirmation_bar_index") == q
+        and risk.get("sizing_decision_known_at_bar") == q
+    )
+    if not base_valid:
+        return False
+    decision = risk.get("decision")
+    if decision not in ("APPROVE", "REJECT"):
+        return False
+    if decision == "APPROVE":
+        if (
+            type(entry) is not dict
+            or type(sized_entry) is not dict
+            or stop.get("at_entry") is None
+        ):
+            return False
+        at_entry = stop["at_entry"]
+        if (
+            type(at_entry) is not dict
+            or at_entry.get("entry_bar_index") != q + 1
+            or at_entry.get("stop_state") not in ("ARMED", "BREACHED_AT_ENTRY_OPEN")
+            or type(at_entry.get("entry_price")) is not dict
+        ):
+            return False
+        if (
+            entry.get("execution_state") != "FILLED"
+            or entry.get("status") != "EVALUATED"
+            or type(entry.get("execution")) is not dict
+        ):
+            return False
+        execution = entry["execution"]
+        if (
+            execution.get("execution_bar_index") != q + 1
+            or execution.get("order_semantics") != "MARKET"
+            or execution.get("execution_action") not in ("BUY", "SELL_SHORT")
+            or execution.get("execution_side") != confirmation.get("source_regime_event_direction")
+            or canonical(execution.get("confirmation")) != canonical(confirmation)
+            or canonical(at_entry.get("execution")) != canonical(execution)
+        ):
+            return False
+        if (
+            canonical(sized_entry.get("risk_decision")) != canonical(risk)
+            or canonical(sized_entry.get("execution")) != canonical(execution)
+        ):
+            return False
+        if stop_reason == "EXIT_STRUCTURAL_STOP_FILLED":
+            if type(exit_) is not dict or end_state != "FLAT":
+                return False
+            if (
+                exit_.get("trigger_bar_index") is None
+                or exit_.get("order_semantics") != "STOP_MARKET"
+                or canonical(exit_.get("initial_stop_at_entry")) != canonical(at_entry)
+            ):
+                return False
+        elif stop_reason == "EXIT_EMA20_FILLED":
+            if type(exit_) is not dict or end_state != "FLAT":
+                return False
+            if (
+                exit_.get("exit_reason") != "EMA20_POSITION_EXIT"
+                or exit_.get("order_semantics") != "MARKET"
+                or type(exit_.get("signal")) is not dict
+                or canonical(exit_["signal"].get("initial_stop_at_entry")) != canonical(at_entry)
+            ):
+                return False
+        elif stop_reason == "OPEN_UNREALIZED_END_OF_DATA":
+            if exit_ is not None or end_state != "OPEN_UNREALIZED":
+                return False
+        else:
+            return False
+    else:
+        if (
+            stop_reason != "ENTRY_REJECTED_BY_RISK"
+            or entry is not None
+            or sized_entry is not None
+            or exit_ is not None
+            or end_state is not None
+            or stop.get("at_entry") is not None
+            or risk.get("approved_quantity") != 0
+        ):
+            return False
+    return True
+
+
 def _valid_risk_replay(replay: object, worker: dict) -> bool:
     """Check the risk envelope before trusting a separately verified receipt."""
     if type(replay) is not dict:
@@ -550,8 +693,8 @@ def _validate_mission(mission: dict) -> None:
         "synthetic_generation": True,
         "synthetic_storage": True,
         "event_replay": True,
-        "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry"),
-        "confirmation": stage in ("confirmation", "stop", "risk", "entry"),
+        "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry", "exit"),
+        "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit"),
         "real_data": False,
         "broker": False,
         "orders": False,
@@ -559,12 +702,14 @@ def _validate_mission(mission: dict) -> None:
         "network": False,
         "merge": False,
     }
-    if stage in ("stop", "risk", "entry"):
+    if stage in ("stop", "risk", "entry", "exit"):
         expected_auth["initial_stop"] = True
-    if stage in ("risk", "entry"):
+    if stage in ("risk", "entry", "exit"):
         expected_auth["risk_decision"] = True
-    if stage == "entry":
+    if stage in ("entry", "exit"):
         expected_auth["entry_execution"] = True
+    if stage == "exit":
+        expected_auth["exit_execution"] = True
     auth = mission["authorizations"]
     if (
         mission_id != mission["task_id"]
@@ -572,16 +717,16 @@ def _validate_mission(mission: dict) -> None:
         or mission["kind"] != "INVENTED_STORAGE_AND_REPLAY"
         or type(mission["observations"]) is not int
         or not 1 <= mission["observations"] <= MAX_OBSERVATIONS
-        or stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry")
+        or stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit")
         or mission["profile"] not in ("standard", *PROFILES)
         or (
             mission["profile"] != "standard"
             and (
-                stage not in ("confirmation", "stop", "risk", "entry")
+                stage not in ("confirmation", "stop", "risk", "entry", "exit")
                 or mission["observations"] != FIXTURE_OBSERVATIONS
             )
         )
-        or (stage in ("stop", "risk", "entry") and mission["profile"] == "standard")
+        or (stage in ("stop", "risk", "entry", "exit") and mission["profile"] == "standard")
         or mission["worker"] != "local_python_worker"
         or mission["verifier"] != "local_python_independent_verifier"
         or type(mission["timeout_seconds_per_process"]) is not int
@@ -911,15 +1056,15 @@ def run_mission(
         raise ValueError("invalid synthetic observation count")
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError("invalid timeout")
-    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry"):
+    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *PROFILES):
         raise ValueError("unsupported invented profile")
     if profile != "standard" and (
-        stage not in ("confirmation", "stop", "risk", "entry") or observations != FIXTURE_OBSERVATIONS
+        stage not in ("confirmation", "stop", "risk", "entry", "exit") or observations != FIXTURE_OBSERVATIONS
     ):
         raise ValueError("confirmation profiles require confirmation or stop and 39 observations")
-    if stage in ("stop", "risk", "entry") and profile == "standard":
+    if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
         raise ValueError(f"{stage} requires a fixed confirmation profile")
     sources = _source_hashes()
     root = _new_directory(output_dir)
@@ -941,8 +1086,8 @@ def run_mission(
             "synthetic_generation": True,
             "synthetic_storage": True,
             "event_replay": True,
-            "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry"),
-            "confirmation": stage in ("confirmation", "stop", "risk", "entry"),
+            "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry", "exit"),
+            "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit"),
             "real_data": False,
             "broker": False,
             "orders": False,
@@ -955,12 +1100,14 @@ def run_mission(
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
         "runtime_packages": _runtime_versions(),
     }
-    if stage in ("stop", "risk", "entry"):
+    if stage in ("stop", "risk", "entry", "exit"):
         mission["authorizations"]["initial_stop"] = True
-    if stage in ("risk", "entry"):
+    if stage in ("risk", "entry", "exit"):
         mission["authorizations"]["risk_decision"] = True
-    if stage == "entry":
+    if stage in ("entry", "exit"):
         mission["authorizations"]["entry_execution"] = True
+    if stage == "exit":
+        mission["authorizations"]["exit_execution"] = True
     _validate_mission(mission)
     with _mission_lock(root, create=True):
         with (root / "mission.json").open("xb") as stream:
@@ -1284,7 +1431,7 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--observations", type=int)
     parser.add_argument("--timeout-seconds", type=int)
-    parser.add_argument("--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry"))
+    parser.add_argument("--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"))
     parser.add_argument("--profile", choices=("standard", *PROFILES))
     args = parser.parse_args()
     if args.resume and any(

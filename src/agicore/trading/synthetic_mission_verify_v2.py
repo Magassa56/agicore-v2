@@ -7,6 +7,8 @@ is not an independent reimplementation of the frozen strategy predicates.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import argparse
 import hashlib
 import json
@@ -20,6 +22,7 @@ from tools.agicore_v2_synthetic_scale_probe import generate_observations
 
 from . import directional_impulse_v2 as impulse
 from . import ema20_pullback_v2 as ema20
+from .ema20_pullback_v2 import EMA20PullbackBarV2
 from . import ema_pullback_entry_confirmation_v2 as confirmation
 from . import ema_pullback_initial_stop_v2 as structural_stop
 from . import ema_pullback_v2_development_replay as replay
@@ -33,14 +36,33 @@ from .ema_pullback_entry_execution_v2 import (
     execute_entry_open_v2,
     register_entry_execution_v2,
 )
+from .ema_pullback_exit_policy_v2 import (
+    EMA20ExitFillRecordV2,
+    ExitPolicyEndStateV2,
+    begin_exit_policy_v2,
+    finish_exit_policy_v2,
+    process_exit_policy_close_v2,
+    process_exit_policy_open_v2,
+)
+from .ema_pullback_open_position_signal_policy_v2 import (
+    OpenPositionSignalPolicyBookV2,
+    PositionRecordV2,
+)
 from .ema_pullback_risk_position_sizing_v2 import (
     INSTRUMENT,
     PositionStateV2,
+    RiskPositionSizingBookV2,
     RiskSizedEntryRecordV2,
     RiskSizingDecisionV2,
     evaluate_risk_position_sizing_v2,
 )
+from .ema_pullback_structural_stop_trigger_fill_v2 import (
+    StructuralStopExecutionBookV2,
+    StructuralStopFillRecordV2,
+    register_structural_stop_execution_v2,
+)
 from .synthetic_entry_replay_v2 import SCHEMA as ENTRY_SCHEMA
+from .synthetic_exit_replay_v2 import SCHEMA as EXIT_SCHEMA
 from .synthetic_confirmation_fixture_v2 import (
     PROFILES as CONFIRMATION_PROFILES,
 )
@@ -558,6 +580,189 @@ def reconstruct_entry_native(raw: bytes) -> dict:
     }
 
 
+def reconstruct_exit_native(raw: bytes) -> dict:
+    """Independently rebuild confirmation, stop, risk, entry and exit policy."""
+    summary, native, history = recompute_confirmation_events(raw, handoff=True)
+    if native is None or summary["stop_reason"] != "CONFIRMED_BEFORE_RISK":
+        raise ValueError("the fixed exit profile did not confirm")
+    source = native.confirmation
+    k, q = source.pullback_bar_index, source.confirmation_bar_index
+    if (
+        type(k) is not int
+        or type(q) is not int
+        or not 0 <= k < q
+        or q - k not in (1, 2)
+        or summary["processed_observations"] != q + 1
+    ):
+        raise ValueError("invalid independently reconstructed window")
+    selected = {index: history[index] for index in range(k, q + 1)}
+    stop_result = structural_stop.evaluate_initial_stop_v2(
+        confirmation=native, bars_by_index=selected
+    )
+    if (
+        stop_result.status is not structural_stop.InitialStopStatusV2.EVALUATED
+        or stop_result.initial_stop_record is None
+        or stop_result.at_entry is not None
+    ):
+        raise ValueError("independent stop not captured without entry")
+    candidate_bar = history[q]
+    risk_result = evaluate_risk_position_sizing_v2(
+        instrument=INSTRUMENT,
+        closed_bar_index=q,
+        closed_bar_timestamp=source.confirmation_timestamp,
+        source_bar_closed=True,
+        confirmation=native,
+        initial_stop=stop_result,
+        position_state=PositionStateV2.FLAT,
+        bars_by_index={q: candidate_bar},
+    )
+    bars = replay.parse_ninjatrader_last_rows_v2(raw)
+    rows = raw.splitlines(keepends=True)
+    if len(rows) != summary["input_observations"] or len(bars) != len(rows) or q >= len(bars):
+        raise ValueError("independent row boundaries differ from input")
+
+    if risk_result.decision is RiskSizingDecisionV2.REJECT:
+        entry_eval = None
+        sized_entry = None
+        bound_stop = stop_result
+        exit_record = None
+        end_state = None
+        stop_reason = "ENTRY_REJECTED_BY_RISK"
+    else:
+        opening_bar = None
+        if q + 1 < len(bars):
+            next_b = bars[q + 1]
+            opening_bar = EntryExecutionOpenV2(
+                bar_index=next_b.bar_index,
+                timestamp_utc=next_b.timestamp_utc,
+                open=next_b.open,
+            )
+        book = register_entry_execution_v2(previous=EntryExecutionBookV2(), confirmation=native)
+        book = execute_entry_open_v2(previous=book, confirmation=source, opening_bar=opening_bar)
+        entry_eval = book.for_confirmation(source)
+        if entry_eval.execution_state is EntryExecutionStateV2.FILLED:
+            if entry_eval.execution is None:
+                raise ValueError("filled execution must contain execution record")
+            sized_entry = RiskSizedEntryRecordV2(
+                risk_decision=risk_result, execution=entry_eval.execution
+            )
+            stop_book = structural_stop.InitialStopBookV2(entries=(stop_result,))
+            bound_stop_book = structural_stop.bind_initial_stop_to_entry_v2(
+                previous=stop_book, confirmation=source, executions=book
+            )
+            bound_stop = bound_stop_book.for_confirmation(source)
+
+            e = entry_eval.execution.execution_bar_index
+            pos_stop_executions = register_structural_stop_execution_v2(
+                previous=StructuralStopExecutionBookV2(),
+                initial_stops=bound_stop_book,
+                confirmation=source,
+            )
+            pos_active_stop = pos_stop_executions.for_confirmation(source)
+            position = PositionRecordV2(
+                entry=entry_eval.execution,
+                initial_stop_at_entry=bound_stop.at_entry,
+            )
+            positions = OpenPositionSignalPolicyBookV2(
+                strategy_instance_id="synthetic-strategy",
+                series_id="synthetic-series",
+                positions=(position,),
+                active_stop=pos_active_stop,
+            )
+            risk_sizing = RiskPositionSizingBookV2(
+                strategy_instance_id="synthetic-strategy",
+                series_id="synthetic-series",
+                decisions=(risk_result,),
+                executions=EntryExecutionBookV2(entries=(entry_eval,)),
+                filled_entries=(sized_entry,),
+            )
+            exit_book = begin_exit_policy_v2(positions=positions, risk_sizing=risk_sizing)
+            bars_by_index = {
+                bar.bar_index: EMA20PullbackBarV2(
+                    bar.bar_index, bar.timestamp_utc, bar.open, bar.high, bar.low, bar.close, True
+                )
+                for bar in bars
+            }
+            is_long = source.source_regime_event_direction is regime.RegimeDirection.LONG
+            adverse_name = "low" if is_long else "high"
+
+            for idx in sorted(bars_by_index):
+                if idx < e:
+                    continue
+                bar = bars_by_index[idx]
+                open_obs = SimpleNamespace(
+                    bar_index=idx,
+                    timestamp_utc=bar.timestamp_utc,
+                    open=bar.open,
+                )
+                exit_book = process_exit_policy_open_v2(previous=exit_book, observation=open_obs)
+                close_obs = SimpleNamespace(
+                    bar_index=idx,
+                    timestamp_utc=bar.timestamp_utc,
+                    **{adverse_name: getattr(bar, adverse_name)},
+                )
+                exit_book = process_exit_policy_close_v2(
+                    previous=exit_book,
+                    closed_bar_index=idx,
+                    closed_bar_timestamp=bar.timestamp_utc,
+                    source_bar_closed=True,
+                    bars_by_index=bars_by_index,
+                    stop_observation=close_obs,
+                )
+            exit_book = finish_exit_policy_v2(previous=exit_book)
+            exit_record = exit_book.positions.positions[-1].exit
+            end_state = exit_book.end_state.value if exit_book.end_state is not None else None
+            if isinstance(exit_record, StructuralStopFillRecordV2):
+                stop_reason = "EXIT_STRUCTURAL_STOP_FILLED"
+            elif isinstance(exit_record, EMA20ExitFillRecordV2):
+                stop_reason = "EXIT_EMA20_FILLED"
+            elif exit_book.end_state is ExitPolicyEndStateV2.OPEN_UNREALIZED:
+                stop_reason = "OPEN_UNREALIZED_END_OF_DATA"
+            else:
+                stop_reason = f"EXIT_{end_state}"
+        else:
+            sized_entry = None
+            bound_stop = stop_result
+            exit_record = None
+            end_state = None
+            stop_reason = f"ENTRY_{entry_eval.execution_state.value}"
+
+    entry_json = (
+        json.loads(replay.canonical_replay_bytes_v2(entry_eval))
+        if entry_eval is not None
+        else None
+    )
+    sized_json = (
+        json.loads(replay.canonical_replay_bytes_v2(sized_entry))
+        if sized_entry is not None
+        else None
+    )
+    exit_json = (
+        json.loads(replay.canonical_replay_bytes_v2(exit_record))
+        if exit_record is not None
+        else None
+    )
+
+    return {
+        "schema": EXIT_SCHEMA,
+        "input_sha256": hashlib.sha256(raw).hexdigest(),
+        "confirmation_replay": summary,
+        "confirmation": json.loads(replay.canonical_replay_bytes_v2(source)),
+        "window": {
+            "first_bar_index": k,
+            "last_bar_index": q,
+            "raw_rows_sha256": hashlib.sha256(b"".join(rows[k : q + 1])).hexdigest(),
+        },
+        "stop": json.loads(replay.canonical_replay_bytes_v2(bound_stop)),
+        "risk": json.loads(replay.canonical_replay_bytes_v2(risk_result)),
+        "entry": entry_json,
+        "sized_entry": sized_json,
+        "exit": exit_json,
+        "end_state": end_state,
+        "stop_reason": stop_reason,
+    }
+
+
 def read_regular(path: Path, limit: int) -> bytes:
     """Read one bounded regular file without following a symlink or hardlink."""
     flags = os.O_RDONLY
@@ -584,13 +789,13 @@ def verify(
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
-    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry"):
+    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"):
         raise ValueError("unsupported replay stage")
     if profile not in ("standard", *CONFIRMATION_PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage not in ("confirmation", "stop", "risk", "entry"):
-        raise ValueError("confirmation profiles require the confirmation, stop, risk or entry stage")
-    if stage in ("stop", "risk", "entry") and profile == "standard":
+    if profile != "standard" and stage not in ("confirmation", "stop", "risk", "entry", "exit"):
+        raise ValueError("confirmation profiles require the confirmation, stop, risk, entry or exit stage")
+    if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
         raise ValueError(f"{stage} requires a fixed confirmation profile")
     expected_raw = (
         generate_observations(observations)
@@ -695,8 +900,10 @@ def verify(
         repeated = recompute_stop_events(expected_raw)
     elif stage == "risk":
         repeated = reconstruct_risk_native(expected_raw)
-    else:
+    elif stage == "entry":
         repeated = reconstruct_entry_native(expected_raw)
+    else:
+        repeated = reconstruct_exit_native(expected_raw)
     if (
         worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
         or worker.get("domain") != "SYNTHETIC_ONLY"
@@ -736,7 +943,7 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument(
-        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry"), default="events"
+        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"), default="events"
     )
     parser.add_argument(
         "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"

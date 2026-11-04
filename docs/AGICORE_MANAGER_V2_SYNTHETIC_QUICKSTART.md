@@ -21,8 +21,8 @@ No external market input, broker, order or profit calculation is accepted by
 these mission adapters.
 
 To continue a fresh mission through the frozen structural stop, risk sizing
-decision or deterministic next-Open entry execution, use a separate new directory
-and `--stage stop`, `--stage risk` or `--stage entry` with fixed confirmation profiles
+decision, deterministic next-Open entry execution or deterministic exit policy, use a separate new directory
+and `--stage stop`, `--stage risk`, `--stage entry` or `--stage exit` with fixed confirmation profiles
 and exactly 39 observations. The receipt records the complete input hash, the
 indices and exact-row hash for the pullback-through-confirmation window, the
 native confirmation and stop. No entry, position or target is created. The verifier
