@@ -1,64 +1,121 @@
-# AGIcoreManager V2: bounded synthetic mission
+# AGIcoreManager V2: Bounded Synthetic Mission Quickstart
 
 This is a local Linux engineering candidate. It runs fixed Python producer and
 verifier adapters via the existing `AgentOrchestrator` and `Dispatcher`; it does
-not call Terra, Sol, Astra or any other model API.
+not call Terra, Sol, Astra or any remote model API.
 
-With the project dependencies installed, run one invented confirmation profile
-into a new absolute directory whose parent already exists:
+All runs operate strictly in-memory on deterministic synthetic fixtures with
+zero broker connection, zero real orders, zero account mutations, and zero PnL
+claims.
+
+---
+
+## 1. Architecture of the Synthetic Cycle
+
+The deterministic synthetic pipeline is strictly causal and partitioned into distinct stages:
+
+```
+[Signal Analysis Stages]
+  ├── confirmation : Impulse, pullback & first causal confirmation (bar q)
+  ├── stop         : Structural stop calculation anchored to window [k, q]
+  └── risk         : Position sizing & risk gate evaluation (APPROVE / REJECT)
+
+[Simulated Execution Stages]
+  ├── entry        : Simulated next-bar Open market fill (bar e = q + 1)
+  └── exit         : Simulated structural stop fill or next-open EMA20 market fill
+```
+
+### Signal Analysis Stages (`confirmation`, `stop`, `risk`)
+- **`--stage confirmation`**: Identifies the impulse, pullback, and the first qualified confirmation signal at bar index $q$. Evaluation stops immediately upon qualification. No stop, risk decision, entry, or position is generated.
+- **`--stage stop`**: Reconstructs the confirmation window $[k, q]$ and evaluates the frozen initial structural stop level. Stops before any risk evaluation or trade execution.
+- **`--stage risk`**: Evaluates the pre-trade risk policy at bar $q$. Produces a deterministic decision: `APPROVE` with an approved contract quantity, or `REJECT` (with quantity 0). Stops before order execution.
+
+### Simulated Execution Stages (`entry`, `exit`)
+- **`--stage entry`**: Takes an approved risk decision and simulates entry execution at the subsequent bar's Open ($e = q + 1$) using `MARKET` order semantics. Creates an in-memory virtual open position record (`PositionRecordV2`) and arms the structural stop at entry.
+- **`--stage exit`**: Causally evaluates the active virtual position across subsequent bars ($t \ge e$):
+  - **Structural Stop Breach**: Triggers intrabar (gap open or adverse price penetration) as a `STOP_MARKET` order fill, returning the position to `FLAT`.
+  - **EMA20 Reversal**: Triggers when a bar closes beyond the EMA20, executing a `MARKET` exit on the subsequent bar's Open, returning the position to `FLAT`.
+  - **End of Observations**: If no exit condition is met within the available data, records the explicit state `OPEN_UNREALIZED_END_OF_DATA`.
+
+---
+
+## 2. Virtual Positions and Core Invariants
+
+The synthetic cycle operates exclusively with simulated in-memory structures:
+1. **Virtual Representation Only**: Positions are represented by frozen immutable data structures (`PositionRecordV2`, `ExitPolicyBookV2`). There is no persistent live portfolio state or external state sync.
+2. **Strict Quantity Conservation**: The quantity approved by the risk policy at entry is strictly preserved upon exit. Partial fills or unauthorized quantity changes fail closed.
+3. **No Double Closes (Idempotence)**: Once an exit trigger is filled, the position transitions irreversibly to `FLAT`. Subsequent bars leave the book in flat state idempotently.
+4. **Upstream Rejection Invariant**: If the risk gate rejects an entry (`ENTRY_REJECTED_BY_RISK`), no simulated entry, position, or exit record is created.
+5. **No Take-Profit or Trailing Rules**: Consistent with frozen V2 rules, exits only execute on structural stop triggers or EMA20 bar-close crossings; no fixed profit targets or trailing stops are invented.
+
+---
+
+## 3. Absolute Safety Boundaries
+
+> [!IMPORTANT]
+> - **No Real Broker**: No connection to Alpaca, NinjaTrader, Interactive Brokers, or any other broker.
+> - **No Real Orders**: No financial orders are created, signed, or submitted to any exchange or gateway.
+> - **No Account Access**: No account credentials, balances, or purchasing power are queried or modified.
+> - **No PnL Claims**: No financial gain/loss, yield, or profitability metrics are tracked or claimed in this synthetic layer.
+> - **100% Offline & Hermetic**: Runs entirely without external network access or external market data feeds.
+
+---
+
+## 4. Synthetic Data Validation Boundaries
+
+> [!WARNING]
+> - **Deterministic Scenarios**: Validation uses synthetic 39-bar fixtures designed to exercise specific deterministic execution branches.
+> - **Integrity & Causality Testing**: These missions prove causal sequencing, producer/verifier bit-level reconstruction parity, and tamper detection.
+> - **Not a Commercial Backtest**: Synthetic validation does **not** constitute a statistical backtest on historical Out-Of-Sample (OOS) market data, nor does it establish strategy profitability or live market performance.
+
+---
+
+## 5. Running Synthetic Missions
+
+Execute a bounded synthetic mission using the canonical CLI:
 
 ```sh
+# Signal Confirmation Stage (39 observations, LONG profile)
 PYTHONPATH=src:. python -m agicore.manager.mission_cycle_v2 \
-  --output-dir /tmp/agicore-mission-long \
+  --output-dir /tmp/mission-confirm-long \
   --observations 39 --stage confirmation --profile confirmation-long-v1
+
+# Structural Stop Stage
+PYTHONPATH=src:. python -m agicore.manager.mission_cycle_v2 \
+  --output-dir /tmp/mission-stop-long \
+  --observations 39 --stage stop --profile confirmation-long-v1
+
+# Risk Allocation Stage
+PYTHONPATH=src:. python -m agicore.manager.mission_cycle_v2 \
+  --output-dir /tmp/mission-risk-long \
+  --observations 39 --stage risk --profile confirmation-long-v1
+
+# Simulated Entry Stage
+PYTHONPATH=src:. python -m agicore.manager.mission_cycle_v2 \
+  --output-dir /tmp/mission-entry-long \
+  --observations 39 --stage entry --profile confirmation-long-v1
+
+# Simulated Exit Stage (Structural Stop Exit profile)
+PYTHONPATH=src:. python -m agicore.manager.mission_cycle_v2 \
+  --output-dir /tmp/mission-exit-stop-long \
+  --observations 39 --stage exit --profile confirmation-long-exit-stop-v1
 ```
 
-Use `confirmation-short-v1` for the second fixed 39-row profile. Other stages
-use the `standard` generator; the default count is 64, and a larger count must
-be requested explicitly. Confirmation stops at the first qualified signal,
-before risk or any position, and distinguishes input rows from processed rows.
-No external market input, broker, order or profit calculation is accepted by
-these mission adapters.
+Available fixed profiles include:
+- `confirmation-long-v1` / `confirmation-short-v1` (unrealized at end of data)
+- `confirmation-long-rejected-v1` / `confirmation-short-rejected-v1` (rejected by risk)
+- `confirmation-long-exit-stop-v1` / `confirmation-short-exit-stop-v1` (structural stop exit)
+- `confirmation-long-exit-ema-v1` / `confirmation-short-exit-ema-v1` (EMA20 market exit)
 
-To continue a fresh mission through the frozen structural stop, risk sizing
-decision, deterministic next-Open entry execution or deterministic exit policy, use a separate new directory
-and `--stage stop`, `--stage risk`, `--stage entry` or `--stage exit` with fixed confirmation profiles
-and exactly 39 observations. The receipt records the complete input hash, the
-indices and exact-row hash for the pullback-through-confirmation window, the
-native confirmation and stop. No entry, position or target is created. The verifier
-regenerates the profile, validates stored chunks, rebuilds the confirmation and
-its window in a separate process, and calls the same frozen stop predicate.
-The input is parsed in full before the causal decision loop; malformed later
-rows can therefore reject the input, even though later valid prices cannot
-change the already-confirmed stop.
+---
 
-For an interrupted mission, use its existing directory and no overrides:
+## 6. Resuming Interrupted Missions (`--resume`)
+
+If a mission process is interrupted before final verification, resume it using the existing directory without modifying parameters:
 
 ```sh
 PYTHONPATH=src:. python -m agicore.manager.mission_cycle_v2 \
-  --output-dir /tmp/agicore-mission-long --resume
+  --output-dir /tmp/mission-exit-stop-long --resume
 ```
 
-Resume rechecks the contract, source snapshot, selected runtime versions,
-completed task checkpoints, bundle, receipts, process logs and events. It
-refuses running, failed, ambiguous, altered or old unsealed missions; it never
-relaunches an uncertain task. Preserve the directory for review on refusal.
-Completed evidence and the final report are not overwritten.
-
-`mission.json`, `report.json`, `events.jsonl`, `orchestrator.sqlite3`, the
-per-process outputs and `bundle/` form the local evidence. The Manager records
-resource usage measured by `wait4`; worker-reported timings are not independent
-measurements. The verifier independently reconstructs storage and control flow,
-but shares the fixed generator and V2 predicates with the producer.
-
-The fingerprints provide relative local integrity, not a signature against
-someone able to rewrite both the evidence and its anchors. External packages
-are checked by version, not by wheel bytes. The Linux limits and parent-death
-signal cover the trusted direct child; they are not a network sandbox and do
-not supervise arbitrary grandchildren. The synchronous supervisor must remain
-single-threaded while launching children. Human review and approval remain
-required before merge, publication or deployment.
-
-The historical `engineering_mission.py` Codex contract and its original evidence
-package were not recovered from the accessible locations. This implementation
-must not be represented as a recovered copy of that contract.
+`--resume` verifies the existing SQLite orchestration state, sealed bundle hash, task audit trail, and receipts. It refuses to resume any task with incomplete or tampered checkpoints, guaranteeing strict fail-closed safety.
