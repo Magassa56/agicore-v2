@@ -29,6 +29,119 @@ class SimulatedPowerLoss(BaseException):
     """Interrupt after a durable checkpoint without creating a failure report."""
 
 
+def test_source_snapshot_skips_data_before_inspecting_metadata(monkeypatch):
+    """Use an in-memory entry; no actual data directory is created or accessed."""
+
+    class ForbiddenEntry:
+        name = "data"
+
+        def __getattr__(self, name):
+            pytest.fail(f"source walker inspected forbidden entry metadata: {name}")
+
+    class DirectoryListing:
+        def __enter__(self):
+            return iter([ForbiddenEntry()])
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(manager.os, "scandir", lambda path: DirectoryListing())
+    assert manager._source_python_files(Path("/simulated"), recursive=True) == []
+
+
+def test_source_snapshot_fails_closed_on_walk_error(monkeypatch):
+    def failed_scan(path):
+        raise PermissionError("simulated source access failure")
+
+    monkeypatch.setattr(manager.os, "scandir", failed_scan)
+    with pytest.raises(manager.ResumeBlockedError, match="cannot traverse source snapshot"):
+        manager._source_python_files(Path("/simulated"), recursive=True)
+
+
+def test_source_snapshot_rejects_linked_entries(monkeypatch):
+    class LinkedEntry:
+        name = "alias"
+
+        def is_symlink(self):
+            return True
+
+    class DirectoryListing:
+        def __enter__(self):
+            return iter([LinkedEntry()])
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(manager.os, "scandir", lambda path: DirectoryListing())
+    with pytest.raises(manager.ResumeBlockedError, match="symlink in source snapshot"):
+        manager._source_python_files(Path("/simulated"), recursive=True)
+
+
+def test_source_snapshot_walks_only_requested_levels(monkeypatch):
+    class Entry:
+        def __init__(self, name, path, directory):
+            self.name, self.path, self.directory = name, path, directory
+
+        def is_symlink(self):
+            return False
+
+        def is_dir(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            return self.directory
+
+        def is_file(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            return not self.directory
+
+    class DirectoryListing:
+        def __init__(self, entries):
+            self.entries = entries
+
+        def __enter__(self):
+            return iter(self.entries)
+
+        def __exit__(self, *args):
+            return False
+
+    listings = {
+        Path("/simulated"): [
+            Entry("one.py", "/simulated/one.py", False),
+            Entry("nested", "/simulated/nested", True),
+        ],
+        Path("/simulated/nested"): [Entry("two.py", "/simulated/nested/two.py", False)],
+    }
+    monkeypatch.setattr(manager.os, "scandir", lambda path: DirectoryListing(listings[path]))
+    assert manager._source_python_files(Path("/simulated"), recursive=False) == [
+        Path("/simulated/one.py")
+    ]
+    assert set(manager._source_python_files(Path("/simulated"), recursive=True)) == {
+        Path("/simulated/one.py"),
+        Path("/simulated/nested/two.py"),
+    }
+
+
+def test_source_snapshot_refuses_root_under_data_without_access(monkeypatch):
+    monkeypatch.setattr(manager, "REPOSITORY", Path("/simulated/data/project"))
+    monkeypatch.setattr(manager.os, "scandir", lambda path: pytest.fail("accessed forbidden root"))
+    with pytest.raises(manager.ResumeBlockedError, match="invalid source snapshot root"):
+        manager._source_hashes()
+
+
+def test_source_snapshot_refuses_linked_root_before_walking(tmp_path, monkeypatch):
+    package = tmp_path / "src" / "agicore"
+    package.mkdir(parents=True)
+    (tmp_path / "tools").mkdir()
+    for name in ("core", "l2_memory", "l4_planning", "manager"):
+        (package / name).mkdir()
+    benign = tmp_path / "benign"
+    benign.mkdir()
+    (package / "trading").symlink_to(benign, target_is_directory=True)
+    monkeypatch.setattr(manager, "REPOSITORY", tmp_path)
+    monkeypatch.setattr(manager.os, "scandir", lambda path: pytest.fail("followed a linked root"))
+    with pytest.raises(manager.ResumeBlockedError, match="invalid source snapshot root"):
+        manager._source_hashes()
+
+
 def _interrupt_at(name):
     def interrupt(checkpoint):
         if checkpoint == name:

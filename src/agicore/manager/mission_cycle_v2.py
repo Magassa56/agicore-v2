@@ -861,14 +861,49 @@ def _validate_lifecycle(
         raise ResumeBlockedError("persisted task lifecycle and audit do not agree")
 
 
+def _source_python_files(root: Path, *, recursive: bool) -> list[Path]:
+    """List source files without opening or inspecting any entry named data."""
+    files: list[Path] = []
+    pending = [root]
+    try:
+        while pending:
+            directory = pending.pop()
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    # Check the name before asking the OS for target metadata.
+                    if entry.name == "data":
+                        continue
+                    if entry.is_symlink():
+                        raise ResumeBlockedError("symlink in source snapshot")
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name.endswith(".py"):
+                            raise ResumeBlockedError("invalid source snapshot path")
+                        if recursive:
+                            pending.append(Path(entry.path))
+                    elif entry.name.endswith(".py"):
+                        if not entry.is_file(follow_symlinks=False):
+                            raise ResumeBlockedError("invalid source snapshot path")
+                        files.append(Path(entry.path))
+    except OSError as error:
+        raise ResumeBlockedError("cannot traverse source snapshot") from error
+    return files
+
+
 def _source_hashes() -> dict[str, str]:
     # A conservative source snapshot covers imported internal modules, not
     # third-party wheel bytes or the operating system. Never traverse data/.
     roots = ("core", "l2_memory", "l4_planning", "manager", "trading")
     files = [REPOSITORY / "src/agicore/__init__.py"]
-    for root in roots:
-        files.extend((REPOSITORY / "src/agicore" / root).rglob("*.py"))
-    files.extend((REPOSITORY / "tools").glob("*.py"))
+    package = REPOSITORY / "src/agicore"
+    source_roots = [package / root for root in roots]
+    if "data" in REPOSITORY.parts:
+        raise ResumeBlockedError("invalid source snapshot root")
+    for directory in (REPOSITORY, REPOSITORY / "src", package, REPOSITORY / "tools", *source_roots):
+        if directory.is_symlink() or not directory.is_dir():
+            raise ResumeBlockedError("invalid source snapshot root")
+    for root in source_roots:
+        files.extend(_source_python_files(root, recursive=True))
+    files.extend(_source_python_files(REPOSITORY / "tools", recursive=False))
     result = {}
     for path in sorted(files):
         relative = path.relative_to(REPOSITORY)

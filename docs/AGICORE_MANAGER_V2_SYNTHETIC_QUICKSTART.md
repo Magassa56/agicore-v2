@@ -99,6 +99,10 @@ Le nettoyage suppose qu'aucun autre gestionnaire ne récolte simultanément ses
 enfants ; la récupération d'un PID et l'arrêt de son groupe ne sont pas
 atomiques. Les signaux usuels sont masqués pendant le lancement, mais une
 exception arbitraire avant le retour de `Popen` n'est pas entièrement couverte.
+L'inventaire des sources ignore toute entrée nommée `data` avant de consulter
+ses métadonnées et refuse les liens symboliques dans les racines parcourues.
+Il suppose toutefois que l'arbre source ne change pas de manière hostile
+pendant le contrôle ; les vérifications de chemins ne sont pas atomiques.
 
 ## Limites et retour arrière
 
