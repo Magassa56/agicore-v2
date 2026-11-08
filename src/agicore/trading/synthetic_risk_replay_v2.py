@@ -16,7 +16,7 @@ from .ema_pullback_v2_development_replay import (
     parse_ninjatrader_last_rows_v2,
 )
 from .synthetic_confirmation_replay_v2 import replay_confirmation_native
-from .synthetic_risk_handoff_v2 import capture_synthetic_risk_v2
+from .synthetic_risk_handoff_v2 import capture_admitted_synthetic_risk_v2
 from .synthetic_stop_handoff_v2 import capture_synthetic_stop_v2
 
 SCHEMA = "agicore:synthetic-confirmation-risk-replay:v1"
@@ -57,8 +57,8 @@ def replay_risk_native(raw: bytes) -> dict:
         raise ValueError("stop not captured without entry")
 
     candidate_bar = selected[-1]
-    risk_handoff = capture_synthetic_risk_v2(
-        confirmation=signal, initial_stop=stop_eval, closed_candidate=candidate_bar
+    risk_handoff = capture_admitted_synthetic_risk_v2(
+        raw=raw, confirmation=signal, initial_stop=stop_eval, closed_candidate=candidate_bar
     )
     risk_record = risk_handoff.decision
 
