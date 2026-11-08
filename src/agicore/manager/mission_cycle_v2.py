@@ -12,6 +12,7 @@ import ctypes
 import hashlib
 import json
 import os
+
 try:
     import fcntl
 except ImportError:
@@ -54,9 +55,9 @@ from agicore.trading.synthetic_confirmation_fixture_v2 import (
 from agicore.trading.synthetic_confirmation_fixture_v2 import PROFILES
 from agicore.trading.synthetic_confirmation_fixture_v2 import SCHEMA as FIXTURE_SCHEMA
 from agicore.trading.synthetic_confirmation_replay_v2 import SCHEMA as CONFIRMATION_SCHEMA
-from agicore.trading.synthetic_mission_storage_v2 import MAX_OBSERVATIONS, canonical
 from agicore.trading.synthetic_entry_replay_v2 import SCHEMA as ENTRY_SCHEMA
 from agicore.trading.synthetic_exit_replay_v2 import SCHEMA as EXIT_SCHEMA
+from agicore.trading.synthetic_mission_storage_v2 import MAX_OBSERVATIONS, canonical
 from agicore.trading.synthetic_risk_replay_v2 import SCHEMA as RISK_SCHEMA
 from agicore.trading.synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
 
@@ -159,7 +160,10 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
         if mission["stage"] in ("stop", "risk", "entry", "exit") and type(replay) is dict
         else replay
     )
-    if mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit") and type(confirmation_replay) is dict:
+    if (
+        mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit")
+        and type(confirmation_replay) is dict
+    ):
         counts, processed, reason = (
             confirmation_replay.get("counts"),
             confirmation_replay.get("processed_observations"),
@@ -268,6 +272,11 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
     return result
 
 
+def _same_integer(value: object, expected: int) -> bool:
+    """Do not treat JSON booleans or floats as integer evidence."""
+    return type(value) is int and value == expected
+
+
 def _valid_entry_replay(replay: object, worker: dict) -> bool:
     """Check the entry envelope before trusting a separately verified receipt."""
     if type(replay) is not dict:
@@ -305,22 +314,22 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
         and type(q) is int
         and 0 <= k < q
         and q - k in (1, 2)
-        and q + 1 == summary.get("processed_observations")
+        and _same_integer(summary.get("processed_observations"), q + 1)
         and type(digest) is str
         and len(digest) == 64
         and all(character in "0123456789abcdef" for character in digest)
-        and confirmation.get("pullback_bar_index") == k
-        and confirmation.get("confirmation_bar_index") == q
+        and _same_integer(confirmation.get("pullback_bar_index"), k)
+        and _same_integer(confirmation.get("confirmation_bar_index"), q)
         and stop.get("status") == "EVALUATED"
         and canonical(stop.get("confirmation")) == canonical(confirmation)
         and canonical(record.get("confirmation")) == canonical(confirmation)
-        and record.get("structural_window_first_bar") == k
-        and record.get("structural_window_last_bar") == q
-        and record.get("stop_known_at_bar_index") == q
+        and _same_integer(record.get("structural_window_first_bar"), k)
+        and _same_integer(record.get("structural_window_last_bar"), q)
+        and _same_integer(record.get("stop_known_at_bar_index"), q)
         and canonical(risk.get("confirmation")) == canonical(confirmation)
         and canonical(risk.get("initial_stop_record")) == canonical(record)
-        and risk.get("confirmation_bar_index") == q
-        and risk.get("sizing_decision_known_at_bar") == q
+        and _same_integer(risk.get("confirmation_bar_index"), q)
+        and _same_integer(risk.get("sizing_decision_known_at_bar"), q)
     )
     if not base_valid:
         return False
@@ -330,6 +339,8 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
     if decision == "APPROVE":
         if (
             stop_reason != "ENTRY_FILLED_BEFORE_EXIT"
+            or type(risk.get("approved_quantity")) is not int
+            or not 1 <= risk["approved_quantity"] <= 2
             or type(entry) is not dict
             or type(sized_entry) is not dict
             or stop.get("at_entry") is None
@@ -338,7 +349,7 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
         at_entry = stop["at_entry"]
         if (
             type(at_entry) is not dict
-            or at_entry.get("entry_bar_index") != q + 1
+            or not _same_integer(at_entry.get("entry_bar_index"), q + 1)
             or at_entry.get("stop_state") not in ("ARMED", "BREACHED_AT_ENTRY_OPEN")
             or type(at_entry.get("entry_price")) is not dict
         ):
@@ -351,7 +362,7 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
             return False
         execution = entry["execution"]
         if (
-            execution.get("execution_bar_index") != q + 1
+            not _same_integer(execution.get("execution_bar_index"), q + 1)
             or execution.get("order_semantics") != "MARKET"
             or execution.get("execution_action") not in ("BUY", "SELL_SHORT")
             or execution.get("execution_side") != confirmation.get("source_regime_event_direction")
@@ -359,10 +370,9 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
             or canonical(at_entry.get("execution")) != canonical(execution)
         ):
             return False
-        if (
-            canonical(sized_entry.get("risk_decision")) != canonical(risk)
-            or canonical(sized_entry.get("execution")) != canonical(execution)
-        ):
+        if canonical(sized_entry.get("risk_decision")) != canonical(risk) or canonical(
+            sized_entry.get("execution")
+        ) != canonical(execution):
             return False
     else:
         if (
@@ -370,7 +380,7 @@ def _valid_entry_replay(replay: object, worker: dict) -> bool:
             or entry is not None
             or sized_entry is not None
             or stop.get("at_entry") is not None
-            or risk.get("approved_quantity") != 0
+            or not _same_integer(risk.get("approved_quantity"), 0)
         ):
             return False
     return True
@@ -403,6 +413,7 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
     k, q = window.get("first_bar_index"), window.get("last_bar_index")
     digest = window.get("raw_rows_sha256")
     summary = replay.get("confirmation_replay")
+    input_observations = summary.get("input_observations") if type(summary) is dict else None
     stop_reason = replay.get("stop_reason")
     if stop_reason not in (
         "EXIT_STRUCTURAL_STOP_FILLED",
@@ -420,22 +431,24 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
         and type(q) is int
         and 0 <= k < q
         and q - k in (1, 2)
-        and q + 1 == summary.get("processed_observations")
+        and type(input_observations) is int
+        and q < input_observations <= MAX_OBSERVATIONS
+        and _same_integer(summary.get("processed_observations"), q + 1)
         and type(digest) is str
         and len(digest) == 64
         and all(character in "0123456789abcdef" for character in digest)
-        and confirmation.get("pullback_bar_index") == k
-        and confirmation.get("confirmation_bar_index") == q
+        and _same_integer(confirmation.get("pullback_bar_index"), k)
+        and _same_integer(confirmation.get("confirmation_bar_index"), q)
         and stop.get("status") == "EVALUATED"
         and canonical(stop.get("confirmation")) == canonical(confirmation)
         and canonical(record.get("confirmation")) == canonical(confirmation)
-        and record.get("structural_window_first_bar") == k
-        and record.get("structural_window_last_bar") == q
-        and record.get("stop_known_at_bar_index") == q
+        and _same_integer(record.get("structural_window_first_bar"), k)
+        and _same_integer(record.get("structural_window_last_bar"), q)
+        and _same_integer(record.get("stop_known_at_bar_index"), q)
         and canonical(risk.get("confirmation")) == canonical(confirmation)
         and canonical(risk.get("initial_stop_record")) == canonical(record)
-        and risk.get("confirmation_bar_index") == q
-        and risk.get("sizing_decision_known_at_bar") == q
+        and _same_integer(risk.get("confirmation_bar_index"), q)
+        and _same_integer(risk.get("sizing_decision_known_at_bar"), q)
     )
     if not base_valid:
         return False
@@ -444,7 +457,10 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
         return False
     if decision == "APPROVE":
         if (
-            type(entry) is not dict
+            type(risk.get("approved_quantity")) is not int
+            or not 1 <= risk["approved_quantity"] <= 2
+            or q + 1 >= input_observations
+            or type(entry) is not dict
             or type(sized_entry) is not dict
             or stop.get("at_entry") is None
         ):
@@ -452,7 +468,7 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
         at_entry = stop["at_entry"]
         if (
             type(at_entry) is not dict
-            or at_entry.get("entry_bar_index") != q + 1
+            or not _same_integer(at_entry.get("entry_bar_index"), q + 1)
             or at_entry.get("stop_state") not in ("ARMED", "BREACHED_AT_ENTRY_OPEN")
             or type(at_entry.get("entry_price")) is not dict
         ):
@@ -465,7 +481,7 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
             return False
         execution = entry["execution"]
         if (
-            execution.get("execution_bar_index") != q + 1
+            not _same_integer(execution.get("execution_bar_index"), q + 1)
             or execution.get("order_semantics") != "MARKET"
             or execution.get("execution_action") not in ("BUY", "SELL_SHORT")
             or execution.get("execution_side") != confirmation.get("source_regime_event_direction")
@@ -473,16 +489,30 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
             or canonical(at_entry.get("execution")) != canonical(execution)
         ):
             return False
-        if (
-            canonical(sized_entry.get("risk_decision")) != canonical(risk)
-            or canonical(sized_entry.get("execution")) != canonical(execution)
-        ):
+        if canonical(sized_entry.get("risk_decision")) != canonical(risk) or canonical(
+            sized_entry.get("execution")
+        ) != canonical(execution):
             return False
         if stop_reason == "EXIT_STRUCTURAL_STOP_FILLED":
             if type(exit_) is not dict or end_state != "FLAT":
                 return False
+            trigger_index = exit_.get("trigger_bar_index")
+            phase = exit_.get("trigger_phase")
             if (
-                exit_.get("trigger_bar_index") is None
+                type(trigger_index) is not int
+                or not q + 1 <= trigger_index < input_observations
+                or not _same_integer(exit_.get("entry_bar_index"), q + 1)
+                or not _same_integer(exit_.get("confirmation_bar_index"), q)
+                or phase not in ("ENTRY_OPEN", "BAR_OPEN_GAP", "INTRABAR")
+                or (phase == "ENTRY_OPEN" and trigger_index != q + 1)
+                or (phase == "BAR_OPEN_GAP" and trigger_index <= q + 1)
+                or exit_.get("trigger_known_at")
+                != {
+                    "ENTRY_OPEN": "Open[e]",
+                    "BAR_OPEN_GAP": "Open[r]",
+                    "INTRABAR": "NO_LATER_THAN_CLOSE[r]",
+                }.get(phase)
+                or exit_.get("exact_intrabar_timestamp") is not None
                 or exit_.get("order_semantics") != "STOP_MARKET"
                 or canonical(exit_.get("initial_stop_at_entry")) != canonical(at_entry)
             ):
@@ -490,11 +520,21 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
         elif stop_reason == "EXIT_EMA20_FILLED":
             if type(exit_) is not dict or end_state != "FLAT":
                 return False
+            signal_record = exit_.get("signal")
+            if type(signal_record) is not dict:
+                return False
+            signal_index = signal_record.get("exit_signal_bar_index")
+            execution_index = exit_.get("exit_execution_bar_index")
             if (
                 exit_.get("exit_reason") != "EMA20_POSITION_EXIT"
                 or exit_.get("order_semantics") != "MARKET"
-                or type(exit_.get("signal")) is not dict
-                or canonical(exit_["signal"].get("initial_stop_at_entry")) != canonical(at_entry)
+                or type(signal_index) is not int
+                or not q + 1 <= signal_index < input_observations
+                or type(execution_index) is not int
+                or execution_index != signal_index + 1
+                or execution_index >= input_observations
+                or not _same_integer(signal_record.get("quantity"), risk["approved_quantity"])
+                or canonical(signal_record.get("initial_stop_at_entry")) != canonical(at_entry)
             ):
                 return False
         elif stop_reason == "OPEN_UNREALIZED_END_OF_DATA":
@@ -510,7 +550,7 @@ def _valid_exit_replay(replay: object, worker: dict) -> bool:
             or exit_ is not None
             or end_state is not None
             or stop.get("at_entry") is not None
-            or risk.get("approved_quantity") != 0
+            or not _same_integer(risk.get("approved_quantity"), 0)
         ):
             return False
     return True
@@ -549,19 +589,19 @@ def _valid_risk_replay(replay: object, worker: dict) -> bool:
         and type(q) is int
         and 0 <= k < q
         and q - k in (1, 2)
-        and q + 1 == summary.get("processed_observations")
+        and _same_integer(summary.get("processed_observations"), q + 1)
         and type(digest) is str
         and len(digest) == 64
         and all(character in "0123456789abcdef" for character in digest)
-        and confirmation.get("pullback_bar_index") == k
-        and confirmation.get("confirmation_bar_index") == q
+        and _same_integer(confirmation.get("pullback_bar_index"), k)
+        and _same_integer(confirmation.get("confirmation_bar_index"), q)
         and stop.get("status") == "EVALUATED"
         and stop.get("at_entry") is None
         and canonical(stop.get("confirmation")) == canonical(confirmation)
         and canonical(record.get("confirmation")) == canonical(confirmation)
-        and record.get("structural_window_first_bar") == k
-        and record.get("structural_window_last_bar") == q
-        and record.get("stop_known_at_bar_index") == q
+        and _same_integer(record.get("structural_window_first_bar"), k)
+        and _same_integer(record.get("structural_window_last_bar"), q)
+        and _same_integer(record.get("stop_known_at_bar_index"), q)
     )
     if not stop_valid:
         return False
@@ -579,15 +619,15 @@ def _valid_risk_replay(replay: object, worker: dict) -> bool:
     else:
         if (
             type(risk.get("rejection_reason")) is not str
-            or risk.get("approved_quantity") != 0
+            or not _same_integer(risk.get("approved_quantity"), 0)
             or risk.get("planned_total_risk_usd") is not None
         ):
             return False
     return (
         canonical(risk.get("confirmation")) == canonical(confirmation)
         and canonical(risk.get("initial_stop_record")) == canonical(record)
-        and risk.get("confirmation_bar_index") == q
-        and risk.get("sizing_decision_known_at_bar") == q
+        and _same_integer(risk.get("confirmation_bar_index"), q)
+        and _same_integer(risk.get("sizing_decision_known_at_bar"), q)
     )
 
 
@@ -618,7 +658,7 @@ def _valid_stop_replay(replay: object, worker: dict) -> bool:
         and type(q) is int
         and 0 <= k < q
         and q - k in (1, 2)
-        and q + 1 == summary.get("processed_observations")
+        and _same_integer(summary.get("processed_observations"), q + 1)
         and type(digest) is str
         and len(digest) == 64
         and all(character in "0123456789abcdef" for character in digest)
@@ -982,6 +1022,7 @@ def _run_process(
         command.extend(("--profile", profile))
 
     supervisor_pid = os.getpid()
+    parent_signal_mask = None
 
     def limits() -> None:
         # Linux sends SIGKILL to this direct child if its supervisor dies.
@@ -994,6 +1035,9 @@ def _run_process(
         resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
         resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_LIMIT_BYTES, FILE_LIMIT_BYTES))
         resource.setrlimit(resource.RLIMIT_CPU, (timeout + 5, timeout + 5))
+        # Popen temporarily defers termination signals in the single-threaded
+        # supervisor. The child must not inherit that temporary mask.
+        signal.pthread_sigmask(signal.SIG_SETMASK, parent_signal_mask)
 
     start = time.perf_counter_ns()
     timed_out = False
@@ -1001,30 +1045,88 @@ def _run_process(
         (root / f"{role}.stdout").open("xb") as stdout,
         (root / f"{role}.stderr").open("xb") as stderr,
     ):
-        child = subprocess.Popen(
-            command,
-            cwd=REPOSITORY,
-            env=env,
-            stdout=stdout,
-            stderr=stderr,
-            start_new_session=True,
-            preexec_fn=limits,  # noqa: PLW1509 - guarded single-threaded supervisor
-        )
-        while True:
-            pid, status, usage = os.wait4(child.pid, os.WNOHANG)
-            if pid:
-                break
-            if time.perf_counter_ns() - start >= timeout * 1_000_000_000:
-                timed_out = True
+        child = None
+        try:
+            # A handled signal during Popen could otherwise interrupt Python
+            # after the OS child exists but before its object is assigned.
+            parent_signal_mask = signal.pthread_sigmask(
+                signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT}
+            )
+            try:
+                child = subprocess.Popen(
+                    command,
+                    cwd=REPOSITORY,
+                    env=env,
+                    stdout=stdout,
+                    stderr=stderr,
+                    start_new_session=True,
+                    preexec_fn=limits,  # noqa: PLW1509 - guarded single-threaded supervisor
+                )
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, parent_signal_mask)
+            while True:
+                pid, status, usage = os.wait4(child.pid, os.WNOHANG)
+                if pid:
+                    break
+                if time.perf_counter_ns() - start >= timeout * 1_000_000_000:
+                    timed_out = True
+                    try:
+                        os.killpg(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    pid, status, usage = os.wait4(child.pid, 0)
+                    break
+                time.sleep(0.05)
+            code = os.waitstatus_to_exitcode(status)
+            child.returncode = code
+        except BaseException as original_error:
+            # The parent can survive an interruption (e.g. an embedded caller
+            # catches KeyboardInterrupt), so PDEATHSIG alone is insufficient.
+            # Check that the PID is still our waitable child before signalling.
+            # This assumes no other child reaper (including a signal handler):
+            # waitid and killpg are not atomic against an asynchronous reap.
+            if child is None:
+                raise
+            try:
+                while True:
+                    try:
+                        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                        break
+                    except InterruptedError:
+                        continue
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                pid, status, usage = os.wait4(child.pid, 0)
-                break
-            time.sleep(0.05)
-        code = os.waitstatus_to_exitcode(status)
-        child.returncode = code
+                except OSError:
+                    # The group may have disappeared while the child remains.
+                    try:
+                        os.kill(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                while True:
+                    try:
+                        _, child_status, _ = os.wait4(child.pid, 0)
+                        child.returncode = os.waitstatus_to_exitcode(child_status)
+                        break
+                    except InterruptedError:
+                        continue
+            except ChildProcessError:
+                # A signal handler may already have reaped the child.
+                pass
+            except BaseException as cleanup_error:  # noqa: BLE001 - keep the triggering error
+                # Keep the triggering exception visible, with a cleanup warning.
+                original_error.add_note(f"child cleanup failed: {type(cleanup_error).__name__}")
+            raise
+        finally:
+            if parent_signal_mask is not None:
+                active_error = sys.exception()
+                try:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, parent_signal_mask)
+                except BaseException as mask_error:
+                    if active_error is None:
+                        raise
+                    active_error.add_note(
+                        f"signal mask restore failed: {type(mask_error).__name__}"
+                    )
     return {
         "pid": child.pid,
         "exit_code": code,
@@ -1061,7 +1163,8 @@ def run_mission(
     if profile not in ("standard", *PROFILES):
         raise ValueError("unsupported invented profile")
     if profile != "standard" and (
-        stage not in ("confirmation", "stop", "risk", "entry", "exit") or observations != FIXTURE_OBSERVATIONS
+        stage not in ("confirmation", "stop", "risk", "entry", "exit")
+        or observations != FIXTURE_OBSERVATIONS
     ):
         raise ValueError("confirmation profiles require confirmation or stop and 39 observations")
     if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
@@ -1431,7 +1534,9 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--observations", type=int)
     parser.add_argument("--timeout-seconds", type=int)
-    parser.add_argument("--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"))
+    parser.add_argument(
+        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit")
+    )
     parser.add_argument("--profile", choices=("standard", *PROFILES))
     args = parser.parse_args()
     if args.resume and any(
