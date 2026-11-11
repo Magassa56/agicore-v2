@@ -73,6 +73,34 @@ sur 89 841 observations. Les mesures historiques du WIP à 1 000 et 5 000
 observations portent sur une version antérieure du candidat ; elles ne prouvent
 pas les ressources ou l'équivalence du candidat révisé à la taille cible.
 
+## Contrôle des ressources des petits workers
+
+Le superviseur historique échantillonne les ressources pendant l'exécution mais
+ne recontrôle pas ses mesures finales avant d'accepter son reçu. Avec un plafond
+de test réduit à un octet, un worker rapide a été accepté malgré une occupation
+finale mesurée de 12 288 octets. Les 150 reçus archivés indiquent chacun des
+maxima mesurés sous leurs plafonds ; ce défaut ne change pas les résultats de
+reconstruction conservés.
+
+Le garde additif `tools/ema_pullback_v2_storage_g2_guard.py` réutilise le
+superviseur et la registration historiques, puis refuse les dépassements finaux
+de temps, mémoire ou stockage, en comptant aussi le reçu du superviseur. Il
+préserve ce reçu et lie séparément son propre hash ; il n'enregistre pas de
+nouvelle closure historique. Son entrée de commande n'accepte que les fixtures
+natives inventées déjà préengagées. Le reçu écrit indique l'état avant son propre
+comptage ; le résultat PASS n'est renvoyé qu'après le contrôle de la réserve.
+
+Cette correction ne constitue pas un quota disque temps réel ni une mesure
+générale de tous les descendants d'un processus. Elle concerne le worker natif
+historique, sans sous-worker, et ne lève aucune limite de 200 observations.
+
+Sur le profil préengagé `dense_gapped_LONG` de 114 observations inventées, le
+garde formel a renvoyé PASS : 3,005 secondes, 122 007 552 octets de pic
+superviseur + worker et 380 928 octets physiques avec le reçu G2. Le reçu
+pré-comptage est conservé sous `AGICORE_G2_GUARDED_SYNTHETIC_114_20261111.json`,
+SHA-256 `d5cd582935043345d3e4baba6fc94ccf71a742bad936ef055817a668937ebe2f`.
+Ce seul échantillon ne démontre pas la capacité cible.
+
 ## Travail restant
 
 Le raccordement doit garder le runner optimisé sous sa propre identité, établir
@@ -88,7 +116,8 @@ Le test ciblé est :
 
 ```bash
 PYTHONPATH=src:. python -B -m pytest -q -o addopts= --show-capture=no \
-  tests/integration/test_ema_pullback_v2_recovery_identity_boundary.py
+  tests/integration/test_ema_pullback_v2_recovery_identity_boundary.py \
+  tests/integration/test_ema_pullback_v2_storage_g2.py
 ```
 
 Cette livraison ne modifie ni stratégie gelée, ni manifeste historique, ni preuve
