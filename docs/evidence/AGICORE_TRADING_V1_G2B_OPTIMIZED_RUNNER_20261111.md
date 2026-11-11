@@ -10,9 +10,9 @@ Les cinq modules optimisés sont repris octet pour octet depuis
 `f40445911d3b8c8599c0228d1342fdba0a4aecff`. Le runner conserve son propre
 SHA-256 `854a6cbe7b89f3c6f0e9f49a8a5095745baf20693c2e89b115dfcadbfacbdf56`.
 La nouvelle registration `EMA_PULLBACK_V2_G2B_SYNTHETIC_CONTRACT_V1.json` a pour
-SHA-256 `1d5d01c390326cba6f0a4f24f3db2820832a831847f9b31a17487780f503e935` ;
+SHA-256 `1d0a7b3f929825c3a7009d694b02b618643bd22b246b75865be71dc7de1567d4` ;
 sa closure de 47 sources a pour SHA-256
-`17681d345cd9ddb590b584466945c18f4951b657a4665780b9c5a0cd5e0be45c`.
+`0099cbcbeafabdfd9a61c5266cb62574047810726043016f31f6a6ffaf587196`.
 Elle lie le runner, les producteurs, le codec, le vérificateur, l'auditeur, les
 fixtures, le manifeste de stratégie et le protocole gelé. Le SHA du contrat est
 une ancre de confiance **externe** : le recalculer depuis un fichier non fiable
@@ -42,25 +42,34 @@ exécution native de cette taille ni une preuve de capacité DEVELOPMENT.
 
 ## Résultats ciblés
 
-Les tests différentiels comparent les résultats natifs complets sur 12 fixtures
+Les tests différentiels comparent les résultats natifs complets sur 13 fixtures
 inventées : long, short, gaps, stop, expiration, refus de risque, suppression en
-position, fin de données, deux positions successives et une série de 201 lignes.
+position, fin de données, deux positions successives et deux séries de 201 lignes.
 Après normalisation d'identité limitée aux tests, tous les champs causaux,
 quantités, frais, slippage, résultats comptables et preuves correspondent à la
 référence sur ces cas. Les octets non normalisés restent distincts. Un test de
 mutation future vérifie que les décisions précédentes ne changent pas.
 
-Deux producteurs indépendants sur 201 observations ont produit les mêmes reçus
-et octets natifs ; un vérificateur distinct a reconstruit et scellé le bundle,
-puis l'a relu. Les tests négatifs couvrent notamment source, identité, fragment,
-scellement et résultat comptable falsifiés. Le résumé des mesures est conservé
-dans `AGICORE_G2B_OPTIMIZED_SYNTHETIC_201_20261111.json`, SHA-256
-`e07088db5aea3a63679069ec2964f53cdb1e9f50f13c18e1f2076fa0d4d1223c`.
+Deux producteurs indépendants sur la fixture inventée `invented-multitrade-201-v1`
+ont chacun produit les mêmes reçus et octets natifs, avec deux positions fermées ;
+un vérificateur distinct a reconstruit et scellé le bundle, puis l'a relu. Cette
+fixture est une seule session : le scénario historique de 114 observations est
+suivi de 87 lignes inventées, sans relancer le replay sur un suffixe. Les tests
+négatifs couvrent notamment source, identité, fragment, scellement et résultat
+comptable falsifiés. Le résumé est conservé dans
+`AGICORE_G2B_MULTITRADE_SYNTHETIC_201_20261111.json`, SHA-256
+`2bff74e9c971e48753ba515d1c3487c8ade91c5f20b75c38c24663e0de497d4e`.
 
-Sur cet essai Linux, le plus lent des deux producteurs a pris 0,905 s et atteint
-52 297 728 octets de RSS ; le plus lent des deux passages du vérificateur a pris
-0,554 s et atteint 48 390 144 octets de RSS. L'espace physique des deux bundles
-et de leurs journaux était de 135 168 octets avant le résumé. Les temps, RSS et
+La première preuve G2B, `AGICORE_G2B_OPTIMIZED_SYNTHETIC_201_20261111.json`,
+reste conservée sous le contrat précédent `1d5d01c390326cba6f0a4f24f3db2820832a831847f9b31a17487780f503e935`
+du commit `106d08002b00ef30e1736c7ad1b0eff7eb0dd4ce`. Cette première fixture
+comportait 201 observations mais aucun trade ; son reçu n'est pas réattribué au
+contrat courant.
+
+Sur cet essai Linux, le plus lent des deux producteurs a pris 1,105 s et atteint
+64 217 088 octets de RSS ; le plus lent des deux passages du vérificateur a pris
+0,705 s et atteint 49 176 576 octets de RSS. L'espace physique des deux bundles
+et de leurs journaux était de 151 552 octets avant le résumé. Les temps, RSS et
 espace sont des mesures de ce seul cas, pas des estimations à grande échelle.
 Les processus ont été bornés à 60 s, 512 Mio d'espace d'adressage et 256 Mio par
 fichier ; l'espace total a été vérifié après exécution. Le CLI ne fournit pas un
@@ -72,8 +81,8 @@ Après installation et vérification indépendante de l'ancre du contrat :
 
 ```bash
 timeout 60s env PYTHONPATH=src:. python -B -m tools.ema_pullback_v2_g2b_synthetic \
-  --role produce --fixture invented-scale-201-v1 \
-  --contract-sha256 1d5d01c390326cba6f0a4f24f3db2820832a831847f9b31a17487780f503e935 \
+  --role produce --fixture invented-multitrade-201-v1 \
+  --contract-sha256 1d0a7b3f929825c3a7009d694b02b618643bd22b246b75865be71dc7de1567d4 \
   --bundle /tmp/agicore-g2b-example
 ```
 
@@ -85,7 +94,7 @@ comptables **synthétiques**, non des performances de marché réelles.
 
 ## Limites et suite
 
-Les 30 tests G2B ciblés et les 56 tests de non-régression sélectionnés passent
+Les 32 tests G2B ciblés et les 56 tests de non-régression sélectionnés passent
 localement. Ruff `check` passe sur les cinq sources historiques et les nouvelles
 sources ; `format --check` passe sur les nouvelles sources, mais reformaterait
 les cinq sources historiques, conservées identiques pour ne pas changer leur SHA.

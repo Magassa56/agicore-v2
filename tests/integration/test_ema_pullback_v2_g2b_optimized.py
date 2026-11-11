@@ -54,6 +54,7 @@ CASES = (
     "dense_gapped_LONG",
     "dense_gapped_SHORT",
     "invented-scale-201-v1",
+    "invented-multitrade-201-v1",
 )
 
 
@@ -85,7 +86,7 @@ def test_frozen_reference_and_optimized_causal_financial_parity(registered, fixt
         {key: value for key, value in projected.items() if key != "output_sha256"}
     )
     assert encoder.bytes(projected) == original.canonical_utf8
-    if fixture.startswith("dense_gapped_"):
+    if fixture.startswith("dense_gapped_") or fixture == "invented-multitrade-201-v1":
         assert len(candidate["closed_trade_records"]) >= 2
     if fixture.startswith("gap_stop_"):
         assert (
@@ -143,7 +144,7 @@ def completed_bundle(tmp_path_factory, registered):
         str(bundle),
     ]
     producer = subprocess.run(
-        base + ["--role", "produce", "--fixture", "invented-scale-201-v1"],
+        base + ["--role", "produce", "--fixture", "invented-multitrade-201-v1"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -183,6 +184,7 @@ def test_separate_producer_verifier_preserves_original_identity(completed_bundle
     )
     document = parse_canonical([native_bytes], limit=33_554_432)
     assert document["run_identity"]["runner_source_sha256"] == RUNNER_SHA256
+    assert len(document["closed_trade_records"]) == 2
     assert audit["runner_sha256"] == RUNNER_SHA256
     assert audit["audit"]["strategy_recomputed"] is False
     assert sha(native_bytes) == receipt["native_sha256"]
@@ -240,7 +242,7 @@ def test_second_independent_producer_has_identical_bytes(completed_bundle, tmp_p
         "--bundle",
         str(tmp_path / "second"),
         "--fixture",
-        "invented-scale-201-v1",
+        "invented-multitrade-201-v1",
     ]
     result = subprocess.run(
         command, cwd=ROOT, capture_output=True, text=True, timeout=60, check=False
@@ -284,7 +286,9 @@ print(v['status'])
     assert result.stdout.strip() == "PASS"
 
 
-@pytest.mark.parametrize("fixture", ["impulse_profit_LONG", "invented-scale-201-v1"])
+@pytest.mark.parametrize(
+    "fixture", ["impulse_profit_LONG", "invented-scale-201-v1", "invented-multitrade-201-v1"]
+)
 def test_producer_loaded_repository_sources_are_registered(registered, tmp_path, fixture):
     digest, _ = registered
     script = """

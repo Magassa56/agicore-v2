@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from .ema_pullback_v2_storage_format import (
@@ -21,6 +23,7 @@ STRATEGY_SHA256 = "965b44c837477bac8a81bbcde5df354997fcd84a0afd4f66f76a30e0a6542
 PROTOCOL_SHA256 = "68dc6e6409aea4efb88e4a19e09a7ba17a68043a79f14ec23e569d3353267402"
 FIXTURE_REGISTRATION_SHA256 = "60038227f5b57bf777149fad00e37ce764fc77169c5d26443aeeda664b98a714"
 SCALE_201_SHA256 = "878a37c771595d1d98c6c9b20e6933137ddcf099a9e0be0b125aa9b13fac7a12"
+MULTITRADE_201_SHA256 = "0e3e93e6296a664d63454dd21d187873585f38a955dccdce50a93314ea626642"
 MAX_OBSERVATIONS = 201
 MAX_LOGICAL_BYTES = 33_554_432
 
@@ -137,11 +140,19 @@ def fixture_spec(contract: dict, name: str) -> dict:
             ),
             "G2B fixture is not historically registered",
         )
-    else:
+    elif spec["generator"] == "INVENTED_OHLCV_MINUTE_V1":
         require(
             name == "invented-scale-201-v1"
             and spec["generator"] == "INVENTED_OHLCV_MINUTE_V1"
             and spec["input_sha256"] == SCALE_201_SHA256
+            and spec["observations"] == 201,
+            "G2B generator not authorized",
+        )
+    else:
+        require(
+            name == "invented-multitrade-201-v1"
+            and spec["generator"] == "HISTORICAL_INVENTED_MULTITRADE_201_V1"
+            and spec["input_sha256"] == MULTITRADE_201_SHA256
             and spec["observations"] == 201,
             "G2B generator not authorized",
         )
@@ -155,7 +166,7 @@ def generate_fixture(contract: dict, name: str) -> bytes:
         from tests.unit.trading.v2_recovery_storage_fixtures import synthetic_raw
 
         raw = synthetic_raw(name)
-    else:
+    elif spec["generator"] == "INVENTED_OHLCV_MINUTE_V1":
         require(
             name == "invented-scale-201-v1"
             and spec["generator"] == "INVENTED_OHLCV_MINUTE_V1"
@@ -166,6 +177,26 @@ def generate_fixture(contract: dict, name: str) -> bytes:
         from tools.agicore_v2_synthetic_scale_probe import generate_observations
 
         raw = generate_observations(201)
+    else:
+        from tests.unit.trading.v2_recovery_storage_fixtures import synthetic_raw
+
+        prefix = synthetic_raw("dense_gapped_LONG")
+        prefix_spec = fixture_spec(contract, "dense_gapped_LONG")
+        require(
+            sha(prefix) == prefix_spec["input_sha256"] and len(prefix.splitlines()) == 114,
+            "G2B multitrade prefix identity",
+        )
+        last = prefix.splitlines()[-1].decode("ascii").split(";")
+        timestamp = datetime.strptime(last[0], "%Y%m%d %H%M%S")
+        close = Decimal(last[4])
+        tail = []
+        for index in range(1, 88):
+            stamp = (timestamp + timedelta(minutes=index)).strftime("%Y%m%d %H%M%S")
+            tail.append(
+                f"{stamp};{close};{close + Decimal('.25')};"
+                f"{close - Decimal('.25')};{close};100\n".encode("ascii")
+            )
+        raw = prefix + b"".join(tail)
     require(
         sha(raw) == spec["input_sha256"] and len(raw.splitlines()) == spec["observations"],
         "G2B input drift",
