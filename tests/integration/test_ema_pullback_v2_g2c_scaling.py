@@ -122,6 +122,37 @@ def test_5000_preflight_fails_if_cgroup_memory_is_unknown(tmp_path, monkeypatch)
         supervisor.preflight(caps, tmp_path / "probe", require_cgroup_memory=True)
 
 
+def test_nested_cgroup_cannot_be_mistaken_for_mount_root(tmp_path):
+    membership = tmp_path / "membership"
+    root = tmp_path / "cgroup"
+    root.mkdir()
+    (root / "memory.max").write_text("1000\n")
+    (root / "memory.current").write_text("100\n")
+    membership.write_text("0::/restricted-child\n")
+    assert supervisor._cgroup_memory(membership_path=membership, root=root) is None
+    membership.write_text("0::/\n")
+    assert supervisor._cgroup_memory(membership_path=membership, root=root) == {
+        "limit_bytes": 1000,
+        "current_bytes": 100,
+    }
+
+
+def test_preflight_uses_tier_disk_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(supervisor, "_cgroup_memory", lambda: None)
+    monkeypatch.setattr(supervisor, "_memory_available", lambda: 10_000_000_000)
+    monkeypatch.setattr(supervisor.shutil, "disk_usage", lambda _: SimpleNamespace(free=3_000_000))
+    caps = {
+        "address_space_bytes": 100_000_000,
+        "cpu_seconds": 10,
+        "file_bytes": 1_000_000,
+        "physical_bytes": 1_000_000,
+        "tier_physical_bytes": 2_000_000,
+        "wall_seconds": 10,
+    }
+    with pytest.raises(RuntimeError, match="insufficient observed memory or storage"):
+        supervisor.preflight(caps, tmp_path / "probe")
+
+
 def test_external_contract_and_registered_invented_1000_inputs():
     digest = sha(g2c.CONTRACT_PATH.read_bytes())
     contract = g2c.load_contract(digest)

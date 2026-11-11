@@ -44,11 +44,19 @@ préflight est préservé dans `AGICORE_G2C_5000_E304_PREFLIGHT_20261111.json`.
 
 Le contrat G2C V2 conserve les fixtures et les plafonds, et ajoute une condition
 fermée : le palier 5 000 ne peut pas démarrer si la limite mémoire cgroup n'est
-pas lisible ou si la marge observée est insuffisante. Son empreinte doit être
-conservée séparément et ses propres résultats ne doivent pas être attribués au
-contrat V1. Aucun replay 5 000 n'a été lancé pendant le premier préflight.
+pas lisible ou si la marge observée est insuffisante. Ses six replays 1 000 ont
+réussi sous le commit `f3f4ed0d8679aad7c6dce3589c7914e7516c6c47`, avec le
+contrat `b5a00c165b150974baa6267ad3794e2e79ee0b5cdf3f432a67da0f7f1013cb13`.
+Le rapport est `AGICORE_G2C_1000_F3F4_TIER_REPORT_20261111.json`, SHA-256
+`20c6ccc56eb66b6c3deadf4e17eba4d4d413f10c8f098eccaf67a9b1938d41df`.
+
+Le contrat V3 ajoute deux vérifications : refuser les appartenances cgroup
+imbriquées ou ambiguës plutôt que d'utiliser par erreur la limite du groupe
+racine, et vérifier la marge disque par rapport au budget total du palier. Les
+registrations V1 et V2 restent inchangées. Aucun replay 5 000 n'a été lancé
+pendant le premier préflight.
 
 La surveillance de l'occupation physique est périodique, avec vérification
 finale ; elle n'est pas un quota disque instantané. Les temps et mémoires de ces
 fixtures ne démontrent pas la capacité à 89 841 observations ni une performance
-sur le marché. Les replays 1 000 de V2 restent à exécuter après préengagement.
+sur le marché. Les replays 1 000 de V3 restent à exécuter après préengagement.

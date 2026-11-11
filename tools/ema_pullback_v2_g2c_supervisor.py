@@ -173,16 +173,28 @@ def supervision_selfcheck(destination: Path, caps: dict, *, root: Path) -> dict:
     }
 
 
-def _cgroup_memory() -> dict | None:
-    """Read visible cgroup-v2 memory constraints without assuming they exist."""
-    limit_path = Path("/sys/fs/cgroup/memory.max")
-    current_path = Path("/sys/fs/cgroup/memory.current")
-    if not limit_path.is_file() or not current_path.is_file():
+def _cgroup_memory(
+    *, membership_path: Path = Path("/proc/self/cgroup"), root: Path = Path("/sys/fs/cgroup")
+) -> dict | None:
+    """Read the visible cgroup root only when it is this process's own group.
+
+    Nested memberships are unsupported: the mount root could conceal a stricter
+    child limit, so absence or ambiguity must block the larger tier.
+    """
+    try:
+        if membership_path.read_text().splitlines() != ["0::/"]:
+            return None
+        limit_path, current_path = root / "memory.max", root / "memory.current"
+        if not limit_path.is_file() or not current_path.is_file():
+            return None
+        text = limit_path.read_text().strip()
+        limit = None if text == "max" else int(text)
+        current = int(current_path.read_text().strip())
+        if current < 0 or (limit is not None and limit < 0):
+            return None
+        return {"limit_bytes": limit, "current_bytes": current}
+    except (OSError, ValueError):
         return None
-    text = limit_path.read_text().strip()
-    limit = None if text == "max" else int(text)
-    current = int(current_path.read_text().strip())
-    return {"limit_bytes": limit, "current_bytes": current}
 
 
 def preflight(caps: dict, destination: Path, *, require_cgroup_memory: bool = False) -> dict:
@@ -197,7 +209,8 @@ def preflight(caps: dict, destination: Path, *, require_cgroup_memory: bool = Fa
     available = memory
     if group is not None and group["limit_bytes"] is not None:
         available = min(memory, max(0, group["limit_bytes"] - group["current_bytes"]))
-    if available < caps["address_space_bytes"] * 2 or disk < caps["physical_bytes"] * 2:
+    disk_budget = max(caps["physical_bytes"], caps.get("tier_physical_bytes", 0))
+    if available < caps["address_space_bytes"] * 2 or disk < disk_budget * 2:
         raise RuntimeError("insufficient observed memory or storage headroom")
     for key, requested in (
         (resource.RLIMIT_AS, caps["address_space_bytes"]),

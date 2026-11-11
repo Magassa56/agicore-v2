@@ -38,7 +38,7 @@ from .ema_pullback_v2_storage_format import (
     sha,
 )
 
-CONTRACT_PATH = ROOT / "docs/evidence/EMA_PULLBACK_V2_G2C_SYNTHETIC_CONTRACT_V2.json"
+CONTRACT_PATH = ROOT / "docs/evidence/EMA_PULLBACK_V2_G2C_SYNTHETIC_CONTRACT_V3.json"
 PARENT_SHA256 = "1d0a7b3f929825c3a7009d694b02b618643bd22b246b75865be71dc7de1567d4"
 PAGE_BYTES = 33_554_432
 MAX_LOGICAL_BYTES = 268_435_456
@@ -58,7 +58,7 @@ def load_contract(expected_sha256: str) -> dict:
     contract = parse_canonical([raw], limit=2_097_152)
     parent = load_g2b_contract(PARENT_SHA256)
     require(
-        contract["schema"] == "agicore:g2c-invented-scaling-contract:v2"
+        contract["schema"] == "agicore:g2c-invented-scaling-contract:v3"
         and contract["g2b_contract_sha256"] == PARENT_SHA256
         and contract["runner_sha256"] == RUNNER_SHA256
         and contract["strategy_manifest_sha256"] == STRATEGY_SHA256
