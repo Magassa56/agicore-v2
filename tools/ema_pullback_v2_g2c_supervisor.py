@@ -173,13 +173,31 @@ def supervision_selfcheck(destination: Path, caps: dict, *, root: Path) -> dict:
     }
 
 
-def preflight(caps: dict, destination: Path) -> dict:
+def _cgroup_memory() -> dict | None:
+    """Read visible cgroup-v2 memory constraints without assuming they exist."""
+    limit_path = Path("/sys/fs/cgroup/memory.max")
+    current_path = Path("/sys/fs/cgroup/memory.current")
+    if not limit_path.is_file() or not current_path.is_file():
+        return None
+    text = limit_path.read_text().strip()
+    limit = None if text == "max" else int(text)
+    current = int(current_path.read_text().strip())
+    return {"limit_bytes": limit, "current_bytes": current}
+
+
+def preflight(caps: dict, destination: Path, *, require_cgroup_memory: bool = False) -> dict:
     """Check observed host headroom and inherited Linux limits before a tier."""
     if sys.platform != "linux" or not Path("/proc/meminfo").is_file():
         raise RuntimeError("Linux resource supervision unavailable")
     memory = _memory_available()
     disk = shutil.disk_usage(destination.parent).free
-    if memory < caps["address_space_bytes"] * 2 or disk < caps["physical_bytes"] * 2:
+    group = _cgroup_memory()
+    if require_cgroup_memory and group is None:
+        raise RuntimeError("effective cgroup memory limit is not observable")
+    available = memory
+    if group is not None and group["limit_bytes"] is not None:
+        available = min(memory, max(0, group["limit_bytes"] - group["current_bytes"]))
+    if available < caps["address_space_bytes"] * 2 or disk < caps["physical_bytes"] * 2:
         raise RuntimeError("insufficient observed memory or storage headroom")
     for key, requested in (
         (resource.RLIMIT_AS, caps["address_space_bytes"]),
@@ -192,8 +210,9 @@ def preflight(caps: dict, destination: Path) -> dict:
     return {
         "status": "PASS",
         "available_memory_bytes": memory,
+        "available_effective_memory_bytes": available if group is not None else None,
         "free_disk_bytes": disk,
-        "cgroup_memory_limit_visible": Path("/sys/fs/cgroup/memory.max").is_file(),
+        "cgroup_memory": group,
         "cgroup_memory_limit_note": "NOT_VERIFIED_IF_NOT_VISIBLE",
         "limits": caps,
         "utc": _utc(),
@@ -289,6 +308,7 @@ def _worker(args) -> None:
     caps = contract["tiers"][str(tier)]
     if tier == 5000:
         _require_gate(args, contract)
+        preflight(caps, Path.cwd() / "g2c-worker-resource-check", require_cgroup_memory=True)
     for key, expected in (
         (resource.RLIMIT_AS, caps["address_space_bytes"]),
         (resource.RLIMIT_CPU, caps["cpu_seconds"]),
@@ -341,7 +361,7 @@ def run_tier(args) -> int:
     ):
         raise RuntimeError("invalid or existing output path")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    ready = preflight(caps, destination)
+    ready = preflight(caps, destination, require_cgroup_memory=args.tier == 5000)
     destination.mkdir()
     root = Path(__file__).resolve().parents[1]
     ready["process_group_selfcheck"] = supervision_selfcheck(

@@ -15,6 +15,7 @@ import pytest
 from agicore.trading import ema_pullback_v2_g2c_scaling as g2c
 from agicore.trading.ema_pullback_v2_g2b_contract import generate_fixture, load_contract
 from agicore.trading.ema_pullback_v2_storage_format import StorageProofError, codec_profile, sha
+from tools import ema_pullback_v2_g2c_supervisor as supervisor
 from tools.ema_pullback_v2_g2c_supervisor import _require_gate, supervision_selfcheck
 
 
@@ -106,6 +107,19 @@ def test_5000_rejects_missing_or_forged_gate(tmp_path):
     args.gate_report, args.gate_sha256 = path, "0" * 64
     with pytest.raises(RuntimeError, match="gate identity"):
         _require_gate(args, {"tier_fixtures": {"1000": []}})
+
+
+def test_5000_preflight_fails_if_cgroup_memory_is_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(supervisor, "_cgroup_memory", lambda: None)
+    caps = {
+        "address_space_bytes": 100_000_000,
+        "cpu_seconds": 10,
+        "file_bytes": 1_000_000,
+        "physical_bytes": 1_000_000,
+        "wall_seconds": 10,
+    }
+    with pytest.raises(RuntimeError, match="cgroup memory limit is not observable"):
+        supervisor.preflight(caps, tmp_path / "probe", require_cgroup_memory=True)
 
 
 def test_external_contract_and_registered_invented_1000_inputs():
