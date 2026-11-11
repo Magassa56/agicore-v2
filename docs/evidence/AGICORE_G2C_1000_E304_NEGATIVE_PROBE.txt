@@ -1,0 +1,60 @@
+from __future__ import annotations
+import json
+import shutil
+import sys
+from pathlib import Path
+from agicore.trading.ema_pullback_v2_storage_format import canonical, sha
+from tools.ema_pullback_v2_g2c_supervisor import run_worker, _physical_size
+root=Path('/workspace/scratch/e4e8c7742d99/agicore-g2c-synthetic-scaling')
+source=Path('/workspace/scratch/e4e8c7742d99/agicore-g2c-1000-e304')
+target=Path('/workspace/scratch/e4e8c7742d99/agicore-g2c-1000-negative-e304')
+if target.exists(): raise RuntimeError('output exists')
+target.mkdir()
+contract_sha='fce3f82e10b276fb58ba09ba19b03a78005bd299afc971632d883d951529896c'
+tier=json.loads((source/'tier_report.json').read_bytes())
+if tier['status']!='PASS' or tier['contract_sha256']!=contract_sha: raise RuntimeError('tier not PASS')
+caps=json.loads((source/'preflight.json').read_bytes())['limits']
+script="""
+import json,sys
+from pathlib import Path
+from agicore.trading.ema_pullback_v2_g2c_scaling import verify_bundle
+from agicore.trading.ema_pullback_v2_storage_format import StorageProofError
+p=json.loads(sys.argv[1])
+try:
+    r=verify_bundle(Path(p['bundle']),expected_contract_sha256=p['contract'],
+        expected_manifest_sha256=p['manifest'],expected_native_sha256=p['native'])
+except StorageProofError as e:
+    print(json.dumps({'status':'REJECTED','reason':str(e)},sort_keys=True))
+else:
+    print(json.dumps({'status':r['status']},sort_keys=True))
+"""
+results=[]
+for item in tier['fixtures']:
+    name=item['fixture']; production=item['production']
+    original=source/(name+'-1')/'bundle'
+    for damage in ('control','object','source','seal','native_hash','runner_identity'):
+        base=target/'copies'/(name+'-'+damage)
+        base.parent.mkdir(parents=True,exist_ok=True)
+        bundle=base/'bundle'
+        shutil.copytree(original,bundle)
+        manifest=production['manifest_sha256']; native=production['native_sha256']
+        if damage=='object':
+            p=next((bundle/'objects').rglob('*.blob')); raw=p.read_bytes(); p.write_bytes(bytes([raw[0]^1])+raw[1:])
+        elif damage=='source':
+            p=bundle/'source.synthetic.txt'; p.write_bytes(p.read_bytes()+b'X')
+        elif damage=='seal':
+            (bundle/'completion.json').unlink()
+        elif damage=='native_hash': native='0'*64
+        elif damage=='runner_identity':
+            p=bundle/'manifest.json'; m=json.loads(p.read_bytes()); m['runner_sha256']='0'*64
+            raw=canonical(m); p.write_bytes(raw); manifest=sha(raw)
+        param={'bundle':str(bundle),'contract':contract_sha,'manifest':manifest,'native':native}
+        metrics,value=run_worker([sys.executable,'-B','-c',script,json.dumps(param)],target/'runs'/(name+'-'+damage),caps,root=root)
+        expected='PASS' if damage=='control' else 'REJECTED'
+        results.append({'fixture':name,'case':damage,'expected':expected,'actual':value.get('status'),'worker':metrics,'reason':value.get('reason')})
+        if metrics['status']!='PASS' or value.get('status')!=expected:
+            out={'schema':'agicore:g2c-negative-checks:v1','status':'BLOCKED','results':results,'failure':name+':'+damage}
+            (target/'report.json').write_bytes(canonical(out)); print(json.dumps({'status':'BLOCKED','failure':out['failure']})); raise SystemExit(1)
+out={'schema':'agicore:g2c-negative-checks:v1','status':'PASS','contract_sha256':contract_sha,'tier_report_sha256':sha((source/'tier_report.json').read_bytes()),'test_script_sha256':sha(Path(__file__).read_bytes()),'results':results,'physical_bytes_before_report':_physical_size(target)}
+raw=canonical(out); (target/'report.json').write_bytes(raw)
+print(json.dumps({'status':'PASS','checks':len(results),'report_sha256':sha(raw),'physical_bytes_before_report':out['physical_bytes_before_report']}))
