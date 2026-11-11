@@ -1,12 +1,29 @@
 # AGIcore Trading V1 — Gate 1: replay MNQ multi-trades causal (plan technique)
 
-**Statut au 2026-11-11 : PLAN ONLY / NOT IMPLEMENTED / NO STRATEGY VERDICT.**
+**Statut : intégration synthétique native versionnée en cours de vérification / aucun verdict de stratégie.**
 Issue de suivi : [#328](https://github.com/Magassa56/agicore-v2/issues/328).
 Ce document prépare une implementation vérifiable ; sa présence ne constitue ni la validation de Gate 1, ni une autorisation de fusion, ni une démonstration de rentabilité.
 
-## État d'exécution : raccordement direct bloqué
+## Mission native versionnée : frontière actualisée
 
-Le cœur V2 possède déjà des positions successives ; le parcours multi-trades du Manager reste absent. L'initialisation de `begin_regime_gated_baseline_v2` appelle `begin_exit_policy_v2`, qui construit obligatoirement un `FeesAndSlippageBookV2`. Elle se heurte donc à la frontière sans comptabilité de Gate 1 avant même la première observation.
+La décision AGIcoreManager autorise désormais les appels comptables **internes** du moteur V2 uniquement pour la nouvelle mission synthétique `native_g1`. Les missions RC1 existantes conservent l'interdiction de comptabilité. Le nouveau contrat `agicore:mission:native-g1:v1`, les schémas de bundle et de reçus et les profils sont distincts de RC1.
+
+Le producteur et le vérificateur exécutent séparément `evaluate_synthetic_scenario_v2`, sans modifier ses fichiers gelés. Chacun construit une projection non financière : provenance des observations, événements, suppressions, positions, quantité approuvée, indices et types d'entrée/sortie. Aucun résultat comptable, somme de frais, valeur de PnL ou métrique de performance n'est sérialisé. Le vérificateur partage le moteur V2 natif et le générateur inventé, mais reconstruit lui-même la projection et compare les reçus.
+
+La mission est limitée à deux profils inventés de 64 observations, long ou short. Elle n'accepte ni fichier externe ni observation réelle. Exemple depuis un environnement installé, en choisissant un répertoire absolu **nouveau** :
+
+```bash
+python -m agicore.manager.mission_cycle_v2 --output-dir /tmp/agicore-g1-example --observations 64 --stage native_g1 --profile native-g1-long-v1
+python -m agicore.manager.mission_cycle_v2 --output-dir /tmp/agicore-g1-example --resume
+```
+
+Le Manager conserve son scellement des sources. Les nouveaux fichiers et adaptations changent l'empreinte des missions créées sous cette révision : une ancienne mission RC1 ne peut pas être supposée reprenable sous un arbre différent. Pour vérifier ou reproduire ses reçus, utiliser son commit historique et l'environnement correspondant ; ne pas réécrire ses preuves. Les nouvelles missions RC1 restent sur leur contrat `agicore:mission:v2`, sans comptabilité.
+
+La reprise ne redémarre qu'un rôle non commencé après vérification des reçus scellés. Une interruption pendant une tâche d'état ambigu échoue de manière fermée ; aucune reprise au milieu d'un replay n'est annoncée. Les deux processus utilisent le même moteur natif : la vérification n'est donc pas une implémentation mathématiquement indépendante de la stratégie. L'entrée entière est validée avant le replay ; une observation future invalide fait échouer la mission complète, sans publier de décision partielle.
+
+## Historique : raccordement direct sans comptabilité bloqué
+
+Au moment du blocage initial, le cœur V2 possédait déjà des positions successives et le parcours multi-trades du Manager était absent. L'initialisation de `begin_regime_gated_baseline_v2` appelle `begin_exit_policy_v2`, qui construit obligatoirement un `FeesAndSlippageBookV2`. Elle se heurte donc à la frontière sans comptabilité de RC1 avant même la première observation.
 
 Le test `tests/integration/test_gate1_frozen_accounting_boundary.py` bloque cette construction avant tout calcul financier et vérifie que l'initialisation native échoue sous ce garde. Les fonctions ultérieures de la baseline appellent également les fonctions comptables d'entrée et de sortie. Il n'existe pas de paramètre de sortie sans comptabilité dans leurs interfaces actuelles.
 
@@ -14,7 +31,7 @@ Les empreintes du manifeste figé incluent le code de la baseline et des politiq
 
 Un essai local sur deux positions inventées a pu composer les portes V2 avec une boucle de coordination distincte, mais cette boucle dupliquerait la séquence Open/Close native. Elle n'est pas livrée : le mandat interdit de reconstruire cette capacité. Aucune compatibilité multi-trades Manager n'est déclarée sur cette base.
 
-**Décision nécessaire :** définir une séparation versionnée et vérifiable entre transitions de stratégie et comptabilité, tout en préservant l'identité historique ; ou autoriser explicitement une autre interface d'intégration. Aucun changement de règles, de données ou de protections n'est impliqué par ce constat.
+La décision ultérieure a autorisé la frontière interne versionnée décrite ci-dessus ; elle ne modifie pas le constat ni la protection RC1.
 
 ## Baseline et autorisation Gate 0
 
@@ -31,7 +48,9 @@ Un essai local sur deux positions inventées a pu composer les portes V2 avec un
 
 **Ne pas** obtenir un pseudo-multi-trade en rappelant `replay_exit_native` sur un suffixe de RAW après sortie : cela redémarrerait potentiellement l'historique EMA, les contextes et les délais de confirmation, et risquerait de changer le résultat causal de la V2. Le nouveau parcours doit maintenir **une seule horloge/barre courante et le contexte gelé**.
 
-## Contrat de développement proposé (à prouver par tests)
+## Contrat de développement initial — historique
+
+Les points suivants conservent la proposition initiale pour traçabilité. La décision versionnée en début de document prévaut, notamment sur l'interdiction générale du point 11 : elle reste applicable à RC1, mais les appels internes natifs sont autorisés pour `native_g1`.
 
 1. Un nouveau **adaptateur de session V2** limité aux barres inventées et à une seule série MNQ ; pas de nouvel orchestrateur, pas de réécriture du Manager.
 2. Machine d'état explicite : `FLAT -> PENDING_CONFIRMATION -> PENDING_ENTRY -> OPEN -> FLAT`, avec chemins de refus/expiration et `OPEN_UNREALIZED` à la fin des données. Les noms exacts devront être alignés sur les enums V2 existantes.
@@ -60,7 +79,7 @@ Un essai local sur deux positions inventées a pu composer les portes V2 avec un
 - T11 : reprise sur état `running`, ambigu ou preuve altérée ; refus sécurisé.
 - T12 : falsification d'un reçu, identifiant, prix, index ou timestamp ; rejet du vérificateur.
 - T13 : tous profils RC1 39 barres identiques bit-à-bit au point de comparaison établi.
-- T14 : test d'interdiction d'appeler les primitives de comptabilité dans les missions synthétiques.
+- T14 : interdiction des primitives comptables dans RC1 ; pour `native_g1`, contrôle des appels internes autorisés et absence de résultat financier dans les projections.
 
 ## Conditions avant une PR prête à revue
 
@@ -75,4 +94,4 @@ Un essai local sur deux positions inventées a pu composer les portes V2 avec un
 - Aucun broker, NinjaTrader connecté, compte Apex, ordre réel, paper connecté, source payante ou publication de signaux.
 - Aucune optimisation ni mesure de rentabilité avant que Gate 1 soit prouvé et qu'un protocole scientifique distinct soit approuvé.
 
-**Verdict actuel : GATE0 PASS ; V2 MULTI-TRADE CORE EXISTING ; MANAGER MULTI-TRADE BLOCKED ; GATE1 NOT COMPLETE ; TRADING_EDGE UNKNOWN.**
+**Verdict :** le statut d'intégration et la CI sont à lire sur la PR #329 et son HEAD exact. Aucun résultat synthétique ne démontre un avantage de trading ou une rentabilité.

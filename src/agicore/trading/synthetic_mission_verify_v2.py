@@ -28,6 +28,7 @@ from . import ema_pullback_pending_opportunity_policy_v2 as pending_policy
 from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
+from . import synthetic_native_g1_v2 as native_g1
 from . import synthetic_pullback_replay_v2 as pullback
 from .ema20_pullback_v2 import EMA20PullbackBarV2
 from .ema_pullback_entry_execution_v2 import (
@@ -53,6 +54,7 @@ from .ema_pullback_risk_position_sizing_v2 import (
 from .ema_pullback_structural_stop_trigger_fill_v2 import (
     StructuralStopExecutionBookV2,
     StructuralStopExecutionStateV2,
+    StructuralStopFillRecordV2,
     observe_structural_stop_v2,
     register_structural_stop_execution_v2,
 )
@@ -892,6 +894,79 @@ def reconstruct_exit_native(raw: bytes) -> dict:
     }
 
 
+def reconstruct_native_g1(profile: str, raw: bytes) -> dict:
+    """Recompute the native V2 result and independently project nonfinancial evidence."""
+    expected = native_g1.generate_fixture(profile, native_g1.OBSERVATIONS)
+    if raw != expected:
+        raise ValueError("native G1 source does not match its invented fixture")
+    book = native_g1.evaluate_profile(profile)
+    positions = []
+    for position in book.policy.positions.positions:
+        entry = position.entry
+        quantities = [
+            item.quantity for item in book.policy.risks.filled_entries if item.execution == entry
+        ]
+        if len(quantities) != 1:
+            raise ValueError("native position lacks a unique approved quantity")
+        fill = position.exit
+        if fill is None:
+            exit_record = None
+        elif isinstance(fill, StructuralStopFillRecordV2):
+            exit_record = {
+                "kind": "STRUCTURAL_STOP",
+                "bar_index": fill.trigger_bar_index,
+                "timestamp": fill.trigger_bar_timestamp.isoformat().replace("+00:00", "Z"),
+                "signal_bar_index": None,
+                "phase": fill.trigger_phase.value,
+            }
+        elif isinstance(fill, EMA20ExitFillRecordV2):
+            exit_record = {
+                "kind": "EMA20",
+                "bar_index": fill.exit_execution_bar_index,
+                "timestamp": fill.exit_execution_timestamp.isoformat().replace("+00:00", "Z"),
+                "signal_bar_index": fill.signal.exit_signal_bar_index,
+                "phase": "OPEN",
+            }
+        else:
+            raise ValueError("unsupported independently reconstructed exit")
+        positions.append(
+            {
+                "source_bar_index": entry.source_regime_event_bar_index,
+                "pullback_bar_index": entry.pullback_bar_index,
+                "confirmation_bar_index": entry.confirmation_bar_index,
+                "entry_bar_index": entry.execution_bar_index,
+                "entry_timestamp": entry.execution_bar_timestamp.isoformat().replace("+00:00", "Z"),
+                "direction": entry.execution_side.value,
+                "approved_quantity": quantities[0],
+                "exit": exit_record,
+            }
+        )
+    admissions = []
+    for decision in book.policy.signal_decisions:
+        events = []
+        for event in decision.composition.events:
+            events.append(
+                {"kind": event.event_type.value, "direction": event.event_direction.value}
+            )
+        admissions.append(
+            {
+                "bar_index": decision.composition.closed_bar_index,
+                "status": decision.status.value,
+                "state": decision.state_at_signal_decision.value,
+                "events": events,
+            }
+        )
+    return {
+        "schema": native_g1.REPLAY_SCHEMA,
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "strategy_manifest_sha256": book.manifest.sha256,
+        "observations": len(book.closed_bars),
+        "positions": positions,
+        "admissions": admissions,
+        "end_state": book.exits.end_state.value,
+    }
+
+
 def read_regular(path: Path, limit: int) -> bytes:
     """Read one bounded regular file without following a symlink or hardlink."""
     flags = os.O_RDONLY
@@ -918,19 +993,40 @@ def verify(
     """Regenerate invented input, validate every chunk, and repeat the replay."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("invalid observation count")
-    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"):
+    if stage not in (
+        "events",
+        "pullback",
+        "confirmation",
+        "stop",
+        "risk",
+        "entry",
+        "exit",
+        native_g1.STAGE,
+    ):
         raise ValueError("unsupported replay stage")
-    if profile not in ("standard", *CONFIRMATION_PROFILES):
+    if profile not in ("standard", *CONFIRMATION_PROFILES, *native_g1.PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage not in ("confirmation", "stop", "risk", "entry", "exit"):
+    if profile in CONFIRMATION_PROFILES and stage not in (
+        "confirmation",
+        "stop",
+        "risk",
+        "entry",
+        "exit",
+    ):
         raise ValueError(
             "confirmation profiles require the confirmation, stop, risk, entry or exit stage"
         )
     if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
         raise ValueError(f"{stage} requires a fixed confirmation profile")
+    if (stage == native_g1.STAGE) != (profile in native_g1.PROFILES) or (
+        stage == native_g1.STAGE and observations != native_g1.OBSERVATIONS
+    ):
+        raise ValueError("native G1 requires a fixed invented 64-observation profile")
     expected_raw = (
         generate_observations(observations)
         if profile == "standard"
+        else native_g1.generate_fixture(profile, observations)
+        if profile in native_g1.PROFILES
         else generate_confirmation_fixture(profile, observations)
     )
     if bundle.is_symlink() or not bundle.is_dir():
@@ -961,7 +1057,14 @@ def verify(
         raise ValueError("invalid canonical bundle manifest")
     rows = expected_raw.splitlines(keepends=True)
     if (
-        manifest["schema"] != (SCHEMA if profile == "standard" else CONFIRMATION_BUNDLE_SCHEMA)
+        manifest["schema"]
+        != (
+            SCHEMA
+            if profile == "standard"
+            else native_g1.BUNDLE_SCHEMA
+            if profile in native_g1.PROFILES
+            else CONFIRMATION_BUNDLE_SCHEMA
+        )
         or (profile != "standard" and manifest["profile"] != profile)
         or manifest["domain"] != "INVENTED_GENERATOR_ONLY"
         or type(manifest["observations"]) is not int
@@ -1033,10 +1136,17 @@ def verify(
         repeated = reconstruct_risk_native(expected_raw)
     elif stage == "entry":
         repeated = reconstruct_entry_native(expected_raw)
-    else:
+    elif stage == "exit":
         repeated = reconstruct_exit_native(expected_raw)
+    else:
+        repeated = reconstruct_native_g1(profile, expected_raw)
     if (
-        worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
+        worker.get("schema")
+        != (
+            native_g1.WORKER_SCHEMA
+            if stage == native_g1.STAGE
+            else "agicore:invented-storage-replay-worker:v2"
+        )
         or worker.get("domain") != "SYNTHETIC_ONLY"
         or worker.get("stage", "events") != stage
         or worker.get("manifest_sha256") != sha(manifest_bytes)
@@ -1049,17 +1159,37 @@ def verify(
         )
         or type(worker.get("replay")) is not dict
         or canonical(worker["replay"]) != canonical(repeated)
+        or (
+            stage == native_g1.STAGE
+            and set(worker)
+            != {
+                "schema",
+                "domain",
+                "manifest_sha256",
+                "input_sha256",
+                "replay",
+                "stage",
+                "storage_wall_ns",
+                "replay_wall_ns",
+                "peak_rss_bytes",
+                "profile",
+            }
+        )
     ):
         raise ValueError("worker output does not match independent verification")
     receipt = {
-        "schema": "agicore:invented-storage-replay-verification:v2",
+        "schema": native_g1.VERIFICATION_SCHEMA
+        if stage == native_g1.STAGE
+        else "agicore:invented-storage-replay-verification:v2",
         "status": "PASS",
         "observations": observations,
         "stage": stage,
         "input_sha256": sha(expected_raw),
         "manifest_sha256": sha(manifest_bytes),
         "replay": repeated,
-        "scope": "INDEPENDENT_BUNDLE_AND_EVENT_PIPELINE_SHARED_FROZEN_PREDICATES",
+        "scope": "INDEPENDENT_BUNDLE_AND_PROJECTION_SHARED_NATIVE_V2"
+        if stage == native_g1.STAGE
+        else "INDEPENDENT_BUNDLE_AND_EVENT_PIPELINE_SHARED_FROZEN_PREDICATES",
     }
     if profile != "standard":
         receipt["profile"] = profile
@@ -1075,11 +1205,22 @@ def main() -> None:
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument(
         "--stage",
-        choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"),
+        choices=(
+            "events",
+            "pullback",
+            "confirmation",
+            "stop",
+            "risk",
+            "entry",
+            "exit",
+            native_g1.STAGE,
+        ),
         default="events",
     )
     parser.add_argument(
-        "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
+        "--profile",
+        choices=("standard", *CONFIRMATION_PROFILES, *native_g1.PROFILES),
+        default="standard",
     )
     args = parser.parse_args()
     verify(args.bundle, args.observations, stage=args.stage, profile=args.profile)
