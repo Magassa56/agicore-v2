@@ -1,0 +1,179 @@
+"""Mission lifecycle, bounded execution and failure behavior."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import subprocess
+import sys
+
+import pytest
+
+from agicore.manager import mission_cycle_v2 as manager
+
+
+def test_cli_writes_one_parseable_report(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agicore.manager.mission_cycle_v2",
+            "--output-dir",
+            str(tmp_path / "cli"),
+            "--observations",
+            "1",
+            "--stage",
+            "events",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    report = json.loads(result.stdout)
+    assert report["status"] == "PASS"
+    assert report["observations"] == 1
+    assert report["stage"] == "events"
+
+
+def test_end_to_end_mission_assigns_runs_verifies_and_reports(tmp_path):
+    directory = tmp_path / "mission"
+    report = manager.run_mission(directory, 64, timeout_seconds=20)
+    assert report["status"] == "PASS"
+    assert report["orchestrator"] == "AgentOrchestrator+Dispatcher"
+    assert report["stage"] == "pullback"
+    assert report["verification"]["observations"] == 64
+    assert report["steps"]["worker"]["exit_code"] == 0
+    assert report["steps"]["verifier"]["exit_code"] == 0
+    assert report["steps"]["worker"]["pid"] > 0
+    assert report["steps"]["verifier"]["pid"] > 0
+    assert json.loads((directory / "report.json").read_bytes()) == report
+    mission = json.loads((directory / "mission.json").read_bytes())
+    assert mission["retries"] == 0 and mission["network_or_model_calls"] is False
+    events = [json.loads(row) for row in (directory / "events.jsonl").read_bytes().splitlines()]
+    assert [(e["agent_id"], e["state"]) for e in events] == [
+        ("manager", "CREATED"),
+        ("worker", "ASSIGNED"),
+        ("worker", "STARTED"),
+        ("worker", "DISPATCHED"),
+        ("worker", "COMPLETED"),
+        ("verifier", "ASSIGNED"),
+        ("verifier", "STARTED"),
+        ("verifier", "DISPATCHED"),
+        ("verifier", "COMPLETED"),
+        ("manager", "PASS"),
+    ]
+    assert all(
+        e["task_id"] == report["task_id"] and e["timestamp_utc"].endswith("+00:00") for e in events
+    )
+    with sqlite3.connect(directory / "orchestrator.sqlite3") as db:
+        tasks = db.execute("select assigned_to, status from tasks order by assigned_to").fetchall()
+        dispatches = db.execute(
+            "select count(*) from events where event_type = 'task.dispatched'"
+        ).fetchone()[0]
+    assert tasks == [("verifier", "completed"), ("worker", "completed")]
+    assert dispatches == 2
+    assert mission["authorizations"]["real_data"] is False
+    assert mission["authorizations"]["orders"] is False
+
+
+def test_worker_failure_prevents_verification_and_is_reported(tmp_path, monkeypatch):
+    called = []
+
+    def fail_once(root, module, role, observations, timeout, stage):
+        called.append(role)
+        return {"exit_code": 1, "timeout": False, "stderr": "worker.stderr"}
+
+    monkeypatch.setattr(manager, "_run_process", fail_once)
+    report = manager.run_mission(tmp_path / "failed", 64)
+    assert report["status"] == "FAILED" and called == ["worker"]
+    assert "verifier" not in report["steps"]
+    assert json.loads((tmp_path / "failed" / "report.json").read_bytes())["error"]
+
+
+def test_zero_exit_without_receipts_never_passes(tmp_path, monkeypatch):
+    def fake_success(root, module, role, observations, timeout, stage):
+        return {"exit_code": 0, "timeout": False, "stderr": f"{role}.stderr"}
+
+    monkeypatch.setattr(manager, "_run_process", fake_success)
+    report = manager.run_mission(tmp_path / "no-receipts", 64)
+    assert report["status"] == "FAILED"
+    assert "invalid verification receipt" in report["error"]
+
+
+def test_event_only_mode_retains_the_existing_scope(tmp_path):
+    report = manager.run_mission(tmp_path / "events", 64, stage="events")
+    assert report["status"] == "PASS"
+    assert report["verification"]["stage"] == "events"
+    assert "pullbacks_evaluated" not in report["verification"]["replay"]["counts"]
+
+
+def test_unregistered_adapter_and_unapproved_stage_are_refused(tmp_path):
+    with pytest.raises(ValueError, match="unregistered mission adapter"):
+        manager._run_process(tmp_path, "arbitrary.external.command", "worker", 1, 2, "pullback")
+    with pytest.raises(ValueError, match="unsupported replay stage"):
+        manager.run_mission(tmp_path / "forbidden", 1, stage="trade")
+    assert not (tmp_path / "forbidden").exists()
+
+
+def test_failed_dispatch_audit_prevents_process_execution(tmp_path, monkeypatch):
+    original = manager._event
+    invoked = []
+
+    def fail_dispatch(root, task_id, agent_id, state, **details):
+        if state == "DISPATCHED":
+            raise OSError("synthetic audit failure")
+        return original(root, task_id, agent_id, state, **details)
+
+    def must_not_run(*args):
+        invoked.append(args)
+        raise AssertionError("process executed despite missing audit")
+
+    monkeypatch.setattr(manager, "_event", fail_dispatch)
+    monkeypatch.setattr(manager, "_run_process", must_not_run)
+    report = manager.run_mission(tmp_path / "audit-failure", 64)
+    assert report["status"] == "FAILED"
+    assert "audit projection failed" in report["error"]
+    assert not invoked
+
+
+def test_timeout_stops_without_starting_verifier(tmp_path, monkeypatch):
+    # A real deliberately stalled child makes the deadline deterministic without
+    # starting the representative-volume benchmark as a side effect of CI.
+    popen = manager.subprocess.Popen
+
+    def stalled_child(command, **kwargs):
+        assert command[3] == manager.WORKER
+        return popen([sys.executable, "-c", "import time; time.sleep(10)"], **kwargs)
+
+    monkeypatch.setattr(manager.subprocess, "Popen", stalled_child)
+    report = manager.run_mission(tmp_path / "timeout", 64, timeout_seconds=1)
+    assert report["status"] == "FAILED"
+    assert report["steps"]["worker"]["timeout"] is True
+    assert "verifier" not in report["steps"]
+
+
+def test_existing_directory_and_data_path_are_refused(tmp_path):
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    with pytest.raises(FileExistsError):
+        manager.run_mission(existing, 1)
+    data = tmp_path / "data"
+    with pytest.raises(ValueError, match="non-data"):
+        manager.run_mission(data / "forbidden", 1)
+    assert not data.exists()
+
+
+def test_symlink_parent_is_refused(tmp_path):
+    link = tmp_path / "alias"
+    link.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlinks"):
+        manager.run_mission(link / "mission", 1)
+
+
+@pytest.mark.parametrize("count,timeout", [(0, 1), (89_842, 1), (1, 0), (1, 301)])
+def test_invalid_limits_are_rejected_without_output(tmp_path, count, timeout):
+    directory = tmp_path / "invalid"
+    with pytest.raises(ValueError):
+        manager.run_mission(directory, count, timeout_seconds=timeout)
+    assert not directory.exists()

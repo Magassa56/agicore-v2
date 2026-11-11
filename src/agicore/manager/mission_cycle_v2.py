@@ -1,0 +1,1601 @@
+"""Minimal offline mission cycle with fixed worker and independent verifier.
+
+This first adapter pair consists of local Python processes, not model calls.
+It executes one allowlisted synthetic mission, with no automatic retries.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import ctypes
+import hashlib
+import json
+import os
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+try:
+    import resource
+except ImportError:
+    resource = None
+import signal
+import sqlite3
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import uuid
+import zlib
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from importlib.metadata import version
+from pathlib import Path
+
+from sqlalchemy import select
+
+from agicore.core.events import EventBus
+from agicore.core.retry import RetryPolicy
+from agicore.l2_memory.adapters.sqlalchemy_engine import SqlAlchemyEngine
+from agicore.l2_memory.migrations.init_schema import init_schema
+from agicore.l2_memory.models.task import Task
+from agicore.l2_memory.repositories.task_repository import TaskRepository
+from agicore.l2_memory.schemas.task import TaskCreate
+from agicore.l2_memory.services.memory_service import MemoryService
+from agicore.l4_planning.dispatcher import Dispatcher
+from agicore.l4_planning.handlers import HandlerRegistry
+from agicore.l4_planning.orchestrator import AgentOrchestrator
+from agicore.trading.synthetic_confirmation_fixture_v2 import (
+    OBSERVATIONS as FIXTURE_OBSERVATIONS,
+)
+from agicore.trading.synthetic_confirmation_fixture_v2 import PROFILES
+from agicore.trading.synthetic_confirmation_fixture_v2 import SCHEMA as FIXTURE_SCHEMA
+from agicore.trading.synthetic_confirmation_replay_v2 import SCHEMA as CONFIRMATION_SCHEMA
+from agicore.trading.synthetic_entry_replay_v2 import SCHEMA as ENTRY_SCHEMA
+from agicore.trading.synthetic_exit_replay_v2 import SCHEMA as EXIT_SCHEMA
+from agicore.trading.synthetic_mission_storage_v2 import MAX_OBSERVATIONS, canonical
+from agicore.trading.synthetic_risk_replay_v2 import SCHEMA as RISK_SCHEMA
+from agicore.trading.synthetic_stop_replay_v2 import SCHEMA as STOP_SCHEMA
+
+REPOSITORY = Path(__file__).resolve().parents[3]
+MAX_TIMEOUT_SECONDS = 300
+MEMORY_LIMIT_BYTES = 2 * 1024**3
+FILE_LIMIT_BYTES = 128 * 1024**2
+WORKER = "agicore.trading.synthetic_mission_storage_v2"
+VERIFIER = "agicore.trading.synthetic_mission_verify_v2"
+DEFAULT_OBSERVATIONS = 64
+
+
+class ResumeBlockedError(RuntimeError):
+    """Refuse to guess whether an interrupted operation was performed."""
+
+
+@contextmanager
+def _mission_lock(root: Path, *, create: bool = False):
+    """Hold a per-mission, nonblocking lock across normal execution and resume."""
+    flags = os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT | os.O_EXCL if create else 0)
+    try:
+        descriptor = os.open(root / ".mission.lock", flags, 0o600)
+    except OSError as exc:
+        raise ResumeBlockedError("missing or invalid mission lock") from exc
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ResumeBlockedError("invalid mission lock file")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ResumeBlockedError("mission is already active") from exc
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def _read_regular(path: Path, limit: int = 1_000_000) -> bytes:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
+            raise ResumeBlockedError("invalid evidence file")
+        raw = stream.read(limit + 1)
+        if len(raw) != info.st_size:
+            raise ResumeBlockedError("evidence changed while reading")
+        return raw
+
+
+def _hash_regular(path: Path, limit: int = FILE_LIMIT_BYTES) -> str:
+    """Hash one bounded regular file without following links or loading it all."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
+            raise ResumeBlockedError("invalid evidence file")
+        digest, count = hashlib.sha256(), 0
+        while chunk := stream.read(1024 * 1024):
+            count += len(chunk)
+            if count > limit:
+                raise ResumeBlockedError("evidence exceeds size limit")
+            digest.update(chunk)
+        if count != info.st_size:
+            raise ResumeBlockedError("evidence changed while reading")
+        return digest.hexdigest()
+
+
+def _event_prefix(root: Path, size: int | None = None) -> dict:
+    raw = _read_regular(root / "events.jsonl")
+    if size is None:
+        size = len(raw)
+    if type(size) is not int or not 0 < size <= len(raw) or raw[size - 1 : size] != b"\n":
+        raise ResumeBlockedError("invalid event checkpoint")
+    return {"bytes": size, "sha256": hashlib.sha256(raw[:size]).hexdigest()}
+
+
+def _json_evidence(path: Path) -> tuple[dict, str]:
+    raw = _read_regular(path)
+    try:
+        value = json.loads(raw)
+    except (UnicodeError, ValueError) as exc:
+        raise ResumeBlockedError("malformed evidence") from exc
+    if type(value) is not dict or canonical(value) != raw:
+        raise ResumeBlockedError("noncanonical evidence")
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None = None) -> dict:
+    """Hash persisted evidence; on verifier completion check every stored object."""
+    bundle = root / "bundle"
+    chunks = bundle / "chunks"
+    if bundle.is_symlink() or chunks.is_symlink() or not chunks.is_dir():
+        raise ResumeBlockedError("invalid bundle directory")
+    manifest, manifest_sha = _json_evidence(bundle / "manifest.json")
+    worker, worker_sha = _json_evidence(bundle / "worker.json")
+    profile = mission["profile"]
+    replay = worker.get("replay")
+    confirmation_replay = (
+        replay.get("confirmation_replay")
+        if mission["stage"] in ("stop", "risk", "entry", "exit") and type(replay) is dict
+        else replay
+    )
+    if (
+        mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit")
+        and type(confirmation_replay) is dict
+    ):
+        counts, processed, reason = (
+            confirmation_replay.get("counts"),
+            confirmation_replay.get("processed_observations"),
+            confirmation_replay.get("stop_reason"),
+        )
+        valid_replay = (
+            confirmation_replay.get("schema") == CONFIRMATION_SCHEMA
+            and type(confirmation_replay.get("input_observations")) is int
+            and confirmation_replay["input_observations"] == mission["observations"]
+            and type(processed) is int
+            and 1 <= processed <= mission["observations"]
+            and type(counts) is dict
+            and all(type(value) is int and value >= 0 for value in counts.values())
+            and type(counts.get("confirmations_qualified")) is int
+            and (
+                (reason == "CONFIRMED_BEFORE_RISK" and counts["confirmations_qualified"] == 1)
+                or (
+                    reason in ("END_OF_INPUT", "END_OF_INPUT_AWAITING_CONFIRMATION")
+                    and counts["confirmations_qualified"] == 0
+                    and processed == mission["observations"]
+                )
+            )
+        )
+        if mission["stage"] == "stop":
+            valid_replay = valid_replay and _valid_stop_replay(replay, worker)
+        elif mission["stage"] == "risk":
+            valid_replay = valid_replay and _valid_risk_replay(replay, worker)
+        elif mission["stage"] == "entry":
+            valid_replay = valid_replay and _valid_entry_replay(replay, worker)
+        elif mission["stage"] == "exit":
+            valid_replay = valid_replay and _valid_exit_replay(replay, worker)
+    elif mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit"):
+        valid_replay = False
+    else:
+        valid_replay = (
+            type(replay) is dict
+            and type(replay.get("observations")) is int
+            and replay["observations"] == mission["observations"]
+        )
+    if (
+        manifest.get("schema")
+        != ("agicore:invented-observation-bundle:v2" if profile == "standard" else FIXTURE_SCHEMA)
+        or manifest.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in manifest)
+        or manifest.get("domain") != "INVENTED_GENERATOR_ONLY"
+        or type(manifest.get("observations")) is not int
+        or manifest.get("observations") != mission["observations"]
+        or worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
+        or worker.get("domain") != "SYNTHETIC_ONLY"
+        or worker.get("stage") != mission["stage"]
+        or worker.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in worker)
+        or worker.get("manifest_sha256") != manifest_sha
+        or worker.get("input_sha256") != manifest.get("raw_sha256")
+        or not valid_replay
+    ):
+        raise ResumeBlockedError("worker evidence does not match mission")
+    if expected is not None and type(expected) is not dict:
+        raise ResumeBlockedError("invalid stored evidence")
+    checkpoint = None if expected is None else expected.get("event_prefix")
+    if checkpoint is not None and type(checkpoint) is not dict:
+        raise ResumeBlockedError("invalid stored event checkpoint")
+    result = {
+        "manifest_sha256": manifest_sha,
+        "worker_sha256": worker_sha,
+        "stdout_sha256": _hash_regular(root / f"{role}.stdout"),
+        "stderr_sha256": _hash_regular(root / f"{role}.stderr"),
+        "event_prefix": _event_prefix(
+            root, None if checkpoint is None else checkpoint.get("bytes")
+        ),
+    }
+    if role == "worker":
+        return result
+    if role != "verifier":
+        raise ResumeBlockedError("unknown evidence role")
+    receipt, receipt_sha = _json_evidence(bundle / "verification.json")
+    if (
+        receipt.get("schema") != "agicore:invented-storage-replay-verification:v2"
+        or receipt.get("status") != "PASS"
+        or receipt.get("stage") != mission["stage"]
+        or receipt.get("profile", "standard") != profile
+        or (profile == "standard" and "profile" in receipt)
+        or type(receipt.get("observations")) is not int
+        or receipt.get("observations") != mission["observations"]
+        or receipt.get("manifest_sha256") != manifest_sha
+        or receipt.get("input_sha256") != worker.get("input_sha256")
+        or canonical(receipt.get("replay")) != canonical(worker.get("replay"))
+    ):
+        raise ResumeBlockedError("independent verification receipt mismatch")
+    entries = manifest.get("chunks")
+    if type(entries) is not list or len(entries) != (mission["observations"] + 999) // 1000:
+        raise ResumeBlockedError("invalid chunk count")
+    if set(os.listdir(chunks)) != {f"{i:04d}.zlib" for i in range(len(entries))}:
+        raise ResumeBlockedError("unexpected chunk inventory")
+    for i, entry in enumerate(entries):
+        if type(entry) is not dict or entry.get("name") != f"{i:04d}.zlib":
+            raise ResumeBlockedError("invalid chunk identity")
+        raw = _read_regular(chunks / entry["name"], 129_024)
+        if (
+            type(entry.get("stored_bytes")) is not int
+            or len(raw) != entry["stored_bytes"]
+            or hashlib.sha256(raw).hexdigest() != entry.get("stored_sha256")
+        ):
+            raise ResumeBlockedError("stored chunk altered after verification")
+    result["verification_sha256"] = receipt_sha
+    return result
+
+
+def _same_integer(value: object, expected: int) -> bool:
+    """Do not treat JSON booleans or floats as integer evidence."""
+    return type(value) is int and value == expected
+
+
+def _valid_entry_replay(replay: object, worker: dict) -> bool:
+    """Check the entry envelope before trusting a separately verified receipt."""
+    if type(replay) is not dict:
+        return False
+    confirmation, window, stop, risk, entry, sized_entry = (
+        replay.get("confirmation"),
+        replay.get("window"),
+        replay.get("stop"),
+        replay.get("risk"),
+        replay.get("entry"),
+        replay.get("sized_entry"),
+    )
+    if (
+        type(confirmation) is not dict
+        or type(window) is not dict
+        or type(stop) is not dict
+        or type(risk) is not dict
+    ):
+        return False
+    record = stop.get("initial_stop_record")
+    if type(record) is not dict:
+        return False
+    k, q = window.get("first_bar_index"), window.get("last_bar_index")
+    digest = window.get("raw_rows_sha256")
+    summary = replay.get("confirmation_replay")
+    stop_reason = replay.get("stop_reason")
+    if stop_reason not in ("ENTRY_FILLED_BEFORE_EXIT", "ENTRY_REJECTED_BY_RISK"):
+        return False
+    base_valid = (
+        replay.get("schema") == ENTRY_SCHEMA
+        and replay.get("input_sha256") == worker.get("input_sha256")
+        and type(summary) is dict
+        and summary.get("stop_reason") == "CONFIRMED_BEFORE_RISK"
+        and type(k) is int
+        and type(q) is int
+        and 0 <= k < q
+        and q - k in (1, 2)
+        and _same_integer(summary.get("processed_observations"), q + 1)
+        and type(digest) is str
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and _same_integer(confirmation.get("pullback_bar_index"), k)
+        and _same_integer(confirmation.get("confirmation_bar_index"), q)
+        and stop.get("status") == "EVALUATED"
+        and canonical(stop.get("confirmation")) == canonical(confirmation)
+        and canonical(record.get("confirmation")) == canonical(confirmation)
+        and _same_integer(record.get("structural_window_first_bar"), k)
+        and _same_integer(record.get("structural_window_last_bar"), q)
+        and _same_integer(record.get("stop_known_at_bar_index"), q)
+        and canonical(risk.get("confirmation")) == canonical(confirmation)
+        and canonical(risk.get("initial_stop_record")) == canonical(record)
+        and _same_integer(risk.get("confirmation_bar_index"), q)
+        and _same_integer(risk.get("sizing_decision_known_at_bar"), q)
+    )
+    if not base_valid:
+        return False
+    decision = risk.get("decision")
+    if decision not in ("APPROVE", "REJECT"):
+        return False
+    if decision == "APPROVE":
+        if (
+            stop_reason != "ENTRY_FILLED_BEFORE_EXIT"
+            or type(risk.get("approved_quantity")) is not int
+            or not 1 <= risk["approved_quantity"] <= 2
+            or type(entry) is not dict
+            or type(sized_entry) is not dict
+            or stop.get("at_entry") is None
+        ):
+            return False
+        at_entry = stop["at_entry"]
+        if (
+            type(at_entry) is not dict
+            or not _same_integer(at_entry.get("entry_bar_index"), q + 1)
+            or at_entry.get("stop_state") not in ("ARMED", "BREACHED_AT_ENTRY_OPEN")
+            or type(at_entry.get("entry_price")) is not dict
+        ):
+            return False
+        if (
+            entry.get("execution_state") != "FILLED"
+            or entry.get("status") != "EVALUATED"
+            or type(entry.get("execution")) is not dict
+        ):
+            return False
+        execution = entry["execution"]
+        if (
+            not _same_integer(execution.get("execution_bar_index"), q + 1)
+            or execution.get("order_semantics") != "MARKET"
+            or execution.get("execution_action") not in ("BUY", "SELL_SHORT")
+            or execution.get("execution_side") != confirmation.get("source_regime_event_direction")
+            or canonical(execution.get("confirmation")) != canonical(confirmation)
+            or canonical(at_entry.get("execution")) != canonical(execution)
+        ):
+            return False
+        if canonical(sized_entry.get("risk_decision")) != canonical(risk) or canonical(
+            sized_entry.get("execution")
+        ) != canonical(execution):
+            return False
+    else:
+        if (
+            stop_reason != "ENTRY_REJECTED_BY_RISK"
+            or entry is not None
+            or sized_entry is not None
+            or stop.get("at_entry") is not None
+            or not _same_integer(risk.get("approved_quantity"), 0)
+        ):
+            return False
+    return True
+
+
+def _valid_exit_replay(replay: object, worker: dict) -> bool:
+    """Check the exit envelope before trusting a separately verified receipt."""
+    if type(replay) is not dict:
+        return False
+    confirmation, window, stop, risk, entry, sized_entry, exit_, end_state = (
+        replay.get("confirmation"),
+        replay.get("window"),
+        replay.get("stop"),
+        replay.get("risk"),
+        replay.get("entry"),
+        replay.get("sized_entry"),
+        replay.get("exit"),
+        replay.get("end_state"),
+    )
+    if (
+        type(confirmation) is not dict
+        or type(window) is not dict
+        or type(stop) is not dict
+        or type(risk) is not dict
+    ):
+        return False
+    record = stop.get("initial_stop_record")
+    if type(record) is not dict:
+        return False
+    k, q = window.get("first_bar_index"), window.get("last_bar_index")
+    digest = window.get("raw_rows_sha256")
+    summary = replay.get("confirmation_replay")
+    input_observations = summary.get("input_observations") if type(summary) is dict else None
+    stop_reason = replay.get("stop_reason")
+    if stop_reason not in (
+        "EXIT_STRUCTURAL_STOP_FILLED",
+        "EXIT_EMA20_FILLED",
+        "OPEN_UNREALIZED_END_OF_DATA",
+        "ENTRY_REJECTED_BY_RISK",
+    ):
+        return False
+    base_valid = (
+        replay.get("schema") == EXIT_SCHEMA
+        and replay.get("input_sha256") == worker.get("input_sha256")
+        and type(summary) is dict
+        and summary.get("stop_reason") == "CONFIRMED_BEFORE_RISK"
+        and type(k) is int
+        and type(q) is int
+        and 0 <= k < q
+        and q - k in (1, 2)
+        and type(input_observations) is int
+        and q < input_observations <= MAX_OBSERVATIONS
+        and _same_integer(summary.get("processed_observations"), q + 1)
+        and type(digest) is str
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and _same_integer(confirmation.get("pullback_bar_index"), k)
+        and _same_integer(confirmation.get("confirmation_bar_index"), q)
+        and stop.get("status") == "EVALUATED"
+        and canonical(stop.get("confirmation")) == canonical(confirmation)
+        and canonical(record.get("confirmation")) == canonical(confirmation)
+        and _same_integer(record.get("structural_window_first_bar"), k)
+        and _same_integer(record.get("structural_window_last_bar"), q)
+        and _same_integer(record.get("stop_known_at_bar_index"), q)
+        and canonical(risk.get("confirmation")) == canonical(confirmation)
+        and canonical(risk.get("initial_stop_record")) == canonical(record)
+        and _same_integer(risk.get("confirmation_bar_index"), q)
+        and _same_integer(risk.get("sizing_decision_known_at_bar"), q)
+    )
+    if not base_valid:
+        return False
+    decision = risk.get("decision")
+    if decision not in ("APPROVE", "REJECT"):
+        return False
+    if decision == "APPROVE":
+        if (
+            type(risk.get("approved_quantity")) is not int
+            or not 1 <= risk["approved_quantity"] <= 2
+            or q + 1 >= input_observations
+            or type(entry) is not dict
+            or type(sized_entry) is not dict
+            or stop.get("at_entry") is None
+        ):
+            return False
+        at_entry = stop["at_entry"]
+        if (
+            type(at_entry) is not dict
+            or not _same_integer(at_entry.get("entry_bar_index"), q + 1)
+            or at_entry.get("stop_state") not in ("ARMED", "BREACHED_AT_ENTRY_OPEN")
+            or type(at_entry.get("entry_price")) is not dict
+        ):
+            return False
+        if (
+            entry.get("execution_state") != "FILLED"
+            or entry.get("status") != "EVALUATED"
+            or type(entry.get("execution")) is not dict
+        ):
+            return False
+        execution = entry["execution"]
+        if (
+            not _same_integer(execution.get("execution_bar_index"), q + 1)
+            or execution.get("order_semantics") != "MARKET"
+            or execution.get("execution_action") not in ("BUY", "SELL_SHORT")
+            or execution.get("execution_side") != confirmation.get("source_regime_event_direction")
+            or canonical(execution.get("confirmation")) != canonical(confirmation)
+            or canonical(at_entry.get("execution")) != canonical(execution)
+        ):
+            return False
+        if canonical(sized_entry.get("risk_decision")) != canonical(risk) or canonical(
+            sized_entry.get("execution")
+        ) != canonical(execution):
+            return False
+        if stop_reason == "EXIT_STRUCTURAL_STOP_FILLED":
+            if type(exit_) is not dict or end_state != "FLAT":
+                return False
+            trigger_index = exit_.get("trigger_bar_index")
+            phase = exit_.get("trigger_phase")
+            if (
+                type(trigger_index) is not int
+                or not q + 1 <= trigger_index < input_observations
+                or not _same_integer(exit_.get("entry_bar_index"), q + 1)
+                or not _same_integer(exit_.get("confirmation_bar_index"), q)
+                or phase not in ("ENTRY_OPEN", "BAR_OPEN_GAP", "INTRABAR")
+                or (phase == "ENTRY_OPEN" and trigger_index != q + 1)
+                or (phase == "BAR_OPEN_GAP" and trigger_index <= q + 1)
+                or exit_.get("trigger_known_at")
+                != {
+                    "ENTRY_OPEN": "Open[e]",
+                    "BAR_OPEN_GAP": "Open[r]",
+                    "INTRABAR": "NO_LATER_THAN_CLOSE[r]",
+                }.get(phase)
+                or exit_.get("exact_intrabar_timestamp") is not None
+                or exit_.get("order_semantics") != "STOP_MARKET"
+                or canonical(exit_.get("initial_stop_at_entry")) != canonical(at_entry)
+            ):
+                return False
+        elif stop_reason == "EXIT_EMA20_FILLED":
+            if type(exit_) is not dict or end_state != "FLAT":
+                return False
+            signal_record = exit_.get("signal")
+            if type(signal_record) is not dict:
+                return False
+            signal_index = signal_record.get("exit_signal_bar_index")
+            execution_index = exit_.get("exit_execution_bar_index")
+            if (
+                exit_.get("exit_reason") != "EMA20_POSITION_EXIT"
+                or exit_.get("order_semantics") != "MARKET"
+                or type(signal_index) is not int
+                or not q + 1 <= signal_index < input_observations
+                or type(execution_index) is not int
+                or execution_index != signal_index + 1
+                or execution_index >= input_observations
+                or not _same_integer(signal_record.get("quantity"), risk["approved_quantity"])
+                or canonical(signal_record.get("initial_stop_at_entry")) != canonical(at_entry)
+            ):
+                return False
+        elif stop_reason == "OPEN_UNREALIZED_END_OF_DATA":
+            if exit_ is not None or end_state != "OPEN_UNREALIZED":
+                return False
+        else:
+            return False
+    else:
+        if (
+            stop_reason != "ENTRY_REJECTED_BY_RISK"
+            or entry is not None
+            or sized_entry is not None
+            or exit_ is not None
+            or end_state is not None
+            or stop.get("at_entry") is not None
+            or not _same_integer(risk.get("approved_quantity"), 0)
+        ):
+            return False
+    return True
+
+
+def _valid_risk_replay(replay: object, worker: dict) -> bool:
+    """Check the risk envelope before trusting a separately verified receipt."""
+    if type(replay) is not dict:
+        return False
+    confirmation, window, stop, risk = (
+        replay.get("confirmation"),
+        replay.get("window"),
+        replay.get("stop"),
+        replay.get("risk"),
+    )
+    if (
+        type(confirmation) is not dict
+        or type(window) is not dict
+        or type(stop) is not dict
+        or type(risk) is not dict
+    ):
+        return False
+    record = stop.get("initial_stop_record")
+    if type(record) is not dict:
+        return False
+    k, q = window.get("first_bar_index"), window.get("last_bar_index")
+    digest = window.get("raw_rows_sha256")
+    summary = replay.get("confirmation_replay")
+    stop_valid = (
+        replay.get("schema") == RISK_SCHEMA
+        and replay.get("input_sha256") == worker.get("input_sha256")
+        and replay.get("stop_reason") == "RISK_DECIDED_BEFORE_ENTRY"
+        and type(summary) is dict
+        and summary.get("stop_reason") == "CONFIRMED_BEFORE_RISK"
+        and type(k) is int
+        and type(q) is int
+        and 0 <= k < q
+        and q - k in (1, 2)
+        and _same_integer(summary.get("processed_observations"), q + 1)
+        and type(digest) is str
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and _same_integer(confirmation.get("pullback_bar_index"), k)
+        and _same_integer(confirmation.get("confirmation_bar_index"), q)
+        and stop.get("status") == "EVALUATED"
+        and stop.get("at_entry") is None
+        and canonical(stop.get("confirmation")) == canonical(confirmation)
+        and canonical(record.get("confirmation")) == canonical(confirmation)
+        and _same_integer(record.get("structural_window_first_bar"), k)
+        and _same_integer(record.get("structural_window_last_bar"), q)
+        and _same_integer(record.get("stop_known_at_bar_index"), q)
+    )
+    if not stop_valid:
+        return False
+    decision = risk.get("decision")
+    if decision not in ("APPROVE", "REJECT"):
+        return False
+    if decision == "APPROVE":
+        if (
+            risk.get("rejection_reason") is not None
+            or type(risk.get("approved_quantity")) is not int
+            or not 1 <= risk["approved_quantity"] <= 2
+            or type(risk.get("planned_total_risk_usd")) is not dict
+        ):
+            return False
+    else:
+        if (
+            type(risk.get("rejection_reason")) is not str
+            or not _same_integer(risk.get("approved_quantity"), 0)
+            or risk.get("planned_total_risk_usd") is not None
+        ):
+            return False
+    return (
+        canonical(risk.get("confirmation")) == canonical(confirmation)
+        and canonical(risk.get("initial_stop_record")) == canonical(record)
+        and _same_integer(risk.get("confirmation_bar_index"), q)
+        and _same_integer(risk.get("sizing_decision_known_at_bar"), q)
+    )
+
+
+def _valid_stop_replay(replay: object, worker: dict) -> bool:
+    """Check the stop envelope before trusting a separately verified receipt."""
+    if type(replay) is not dict:
+        return False
+    confirmation, window, stop = (
+        replay.get("confirmation"),
+        replay.get("window"),
+        replay.get("stop"),
+    )
+    if type(confirmation) is not dict or type(window) is not dict or type(stop) is not dict:
+        return False
+    record = stop.get("initial_stop_record")
+    if type(record) is not dict:
+        return False
+    k, q = window.get("first_bar_index"), window.get("last_bar_index")
+    digest = window.get("raw_rows_sha256")
+    summary = replay.get("confirmation_replay")
+    return (
+        replay.get("schema") == STOP_SCHEMA
+        and replay.get("input_sha256") == worker.get("input_sha256")
+        and replay.get("stop_reason") == "STOP_CAPTURED_BEFORE_RISK"
+        and type(summary) is dict
+        and summary.get("stop_reason") == "CONFIRMED_BEFORE_RISK"
+        and type(k) is int
+        and type(q) is int
+        and 0 <= k < q
+        and q - k in (1, 2)
+        and _same_integer(summary.get("processed_observations"), q + 1)
+        and type(digest) is str
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and type(confirmation.get("pullback_bar_index")) is int
+        and confirmation["pullback_bar_index"] == k
+        and type(confirmation.get("confirmation_bar_index")) is int
+        and confirmation["confirmation_bar_index"] == q
+        and stop.get("status") == "EVALUATED"
+        and stop.get("at_entry") is None
+        and canonical(stop.get("confirmation")) == canonical(confirmation)
+        and canonical(record.get("confirmation")) == canonical(confirmation)
+        and type(record.get("structural_window_first_bar")) is int
+        and record["structural_window_first_bar"] == k
+        and type(record.get("structural_window_last_bar")) is int
+        and record["structural_window_last_bar"] == q
+        and type(record.get("stop_known_at_bar_index")) is int
+        and record["stop_known_at_bar_index"] == q
+    )
+
+
+def _atomic_report(root: Path, report: dict) -> None:
+    """Publish a complete report once without overwriting existing evidence."""
+    fd, name = tempfile.mkstemp(prefix=".report-", dir=root)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(canonical(report))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(name, root / "report.json", follow_symlinks=False)
+        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        os.unlink(name)
+
+
+def _checkpoint(name: str) -> None:
+    """Fault-injection seam for interruption tests; production does nothing."""
+
+
+def _validate_mission(mission: dict) -> None:
+    """Reject altered, foreign or unsupported mission contracts before resume."""
+    expected_keys = {
+        "schema",
+        "task_id",
+        "kind",
+        "observations",
+        "stage",
+        "profile",
+        "worker",
+        "verifier",
+        "timeout_seconds_per_process",
+        "memory_limit_bytes_per_process",
+        "retries",
+        "network_or_model_calls",
+        "authorizations",
+        "source_sha256",
+        "python",
+        "zlib_runtime",
+        "runtime_packages",
+    }
+    if set(mission) != expected_keys:
+        raise ResumeBlockedError("unsupported historical or altered mission contract")
+    try:
+        mission_id = str(uuid.UUID(mission["task_id"]))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ResumeBlockedError("invalid mission identity") from exc
+    stage = mission["stage"]
+    expected_auth = {
+        "synthetic_generation": True,
+        "synthetic_storage": True,
+        "event_replay": True,
+        "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry", "exit"),
+        "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit"),
+        "real_data": False,
+        "broker": False,
+        "orders": False,
+        "profitability": False,
+        "network": False,
+        "merge": False,
+    }
+    if stage in ("stop", "risk", "entry", "exit"):
+        expected_auth["initial_stop"] = True
+    if stage in ("risk", "entry", "exit"):
+        expected_auth["risk_decision"] = True
+    if stage in ("entry", "exit"):
+        expected_auth["entry_execution"] = True
+    if stage == "exit":
+        expected_auth["exit_execution"] = True
+    auth = mission["authorizations"]
+    if (
+        mission_id != mission["task_id"]
+        or mission["schema"] != "agicore:mission:v2"
+        or mission["kind"] != "INVENTED_STORAGE_AND_REPLAY"
+        or type(mission["observations"]) is not int
+        or not 1 <= mission["observations"] <= MAX_OBSERVATIONS
+        or stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit")
+        or mission["profile"] not in ("standard", *PROFILES)
+        or (
+            mission["profile"] != "standard"
+            and (
+                stage not in ("confirmation", "stop", "risk", "entry", "exit")
+                or mission["observations"] != FIXTURE_OBSERVATIONS
+            )
+        )
+        or (stage in ("stop", "risk", "entry", "exit") and mission["profile"] == "standard")
+        or mission["worker"] != "local_python_worker"
+        or mission["verifier"] != "local_python_independent_verifier"
+        or type(mission["timeout_seconds_per_process"]) is not int
+        or not 1 <= mission["timeout_seconds_per_process"] <= MAX_TIMEOUT_SECONDS
+        or type(mission["memory_limit_bytes_per_process"]) is not int
+        or mission["memory_limit_bytes_per_process"] != MEMORY_LIMIT_BYTES
+        or type(mission["retries"]) is not int
+        or mission["retries"] != 0
+        or mission["network_or_model_calls"] is not False
+        or type(auth) is not dict
+        or set(auth) != set(expected_auth)
+        or any(type(v) is not bool for v in auth.values())
+        or auth != expected_auth
+        or mission["source_sha256"] != _source_hashes()
+        or mission["python"] != sys.version.split()[0]
+        or mission["zlib_runtime"] != zlib.ZLIB_RUNTIME_VERSION
+        or mission["runtime_packages"] != _runtime_versions()
+    ):
+        raise ResumeBlockedError("mission contract, sources or runtime changed")
+
+
+def _existing_directory(path: Path) -> Path:
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or "data" in path.parts
+        or any(x in str(path) for x in "?#")
+        or path.is_symlink()
+        or any(parent.is_symlink() for parent in path.parents)
+        or not path.is_dir()
+    ):
+        raise ResumeBlockedError("invalid existing mission directory")
+    return path
+
+
+def _bound_database(root: Path, task_id: str, contract_sha: str) -> None:
+    """Check an existing DB and its durable mission seal without creating files."""
+    path = root / "orchestrator.sqlite3"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ResumeBlockedError("invalid orchestration database")
+        finally:
+            os.close(descriptor)
+        with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+            rows = db.execute(
+                "select mission_id, contract_sha256 from mission_contract_binding"
+            ).fetchall()
+            if rows != [(task_id, contract_sha)]:
+                raise ResumeBlockedError("mission database binding mismatch")
+    except (OSError, sqlite3.Error) as exc:
+        raise ResumeBlockedError("missing or unsealed orchestration database") from exc
+
+
+def _validate_lifecycle(
+    root: Path, engine: SqlAlchemyEngine, task, mission_id: str, role: str
+) -> None:
+    """Reject partial task/audit transitions instead of silently repairing them."""
+    expected = {
+        "pending": (["task.created"], ["ASSIGNED"]),
+        "completed": (
+            ["task.created", "task.started", "task.dispatched", "task.completed"],
+            ["ASSIGNED", "STARTED", "DISPATCHED", "COMPLETED"],
+        ),
+    }
+    if task.status not in expected:
+        raise ResumeBlockedError("task state is running, failed or otherwise ambiguous")
+    with engine.engine.connect() as connection:
+        kinds = list(
+            connection.exec_driver_sql(
+                "SELECT event_type FROM events WHERE task_id = ? ORDER BY id", (task.id,)
+            ).scalars()
+        )
+    try:
+        raw = _read_regular(root / "events.jsonl", 1_000_000)
+        rows = raw.splitlines(keepends=True)
+        parsed = [json.loads(row) for row in rows]
+        if any(type(item) is not dict or canonical(item) != row for item, row in zip(parsed, rows)):
+            raise ValueError("noncanonical event")
+        relevant = [item for item in parsed if item.get("orchestrator_task_id") == task.id]
+    except (OSError, ValueError, TypeError) as exc:
+        raise ResumeBlockedError("mission event lifecycle is missing or invalid") from exc
+    if (
+        kinds != expected[task.status][0]
+        or [item.get("state") for item in relevant] != expected[task.status][1]
+        or any(
+            item.get("task_id") != mission_id or item.get("agent_id") != role for item in relevant
+        )
+    ):
+        raise ResumeBlockedError("persisted task lifecycle and audit do not agree")
+
+
+def _source_python_files(root: Path, *, recursive: bool) -> list[Path]:
+    """List source files without opening or inspecting any entry named data."""
+    files: list[Path] = []
+    pending = [root]
+    try:
+        while pending:
+            directory = pending.pop()
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    # Check the name before asking the OS for target metadata.
+                    if entry.name == "data":
+                        continue
+                    if entry.is_symlink():
+                        raise ResumeBlockedError("symlink in source snapshot")
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name.endswith(".py"):
+                            raise ResumeBlockedError("invalid source snapshot path")
+                        if recursive:
+                            pending.append(Path(entry.path))
+                    elif entry.name.endswith(".py"):
+                        if not entry.is_file(follow_symlinks=False):
+                            raise ResumeBlockedError("invalid source snapshot path")
+                        files.append(Path(entry.path))
+    except OSError as error:
+        raise ResumeBlockedError("cannot traverse source snapshot") from error
+    return files
+
+
+def _source_hashes() -> dict[str, str]:
+    # A conservative source snapshot covers imported internal modules, not
+    # third-party wheel bytes or the operating system. Never traverse data/.
+    roots = ("core", "l2_memory", "l4_planning", "manager", "trading")
+    files = [REPOSITORY / "src/agicore/__init__.py"]
+    package = REPOSITORY / "src/agicore"
+    source_roots = [package / root for root in roots]
+    if "data" in REPOSITORY.parts:
+        raise ResumeBlockedError("invalid source snapshot root")
+    for directory in (REPOSITORY, REPOSITORY / "src", package, REPOSITORY / "tools", *source_roots):
+        if directory.is_symlink() or not directory.is_dir():
+            raise ResumeBlockedError("invalid source snapshot root")
+    for root in source_roots:
+        files.extend(_source_python_files(root, recursive=True))
+    files.extend(_source_python_files(REPOSITORY / "tools", recursive=False))
+    result = {}
+    for path in sorted(files):
+        relative = path.relative_to(REPOSITORY)
+        if "data" in relative.parts or path.is_symlink() or not path.is_file():
+            raise ResumeBlockedError("invalid source snapshot path")
+        with path.open("rb") as source:
+            result[str(relative)] = hashlib.file_digest(source, "sha256").hexdigest()
+    return result
+
+
+def _runtime_versions() -> dict[str, str]:
+    return {name: version(name) for name in ("SQLAlchemy", "pydantic", "structlog")}
+
+
+def _event(root: Path, task_id: str, agent_id: str, state: str, **details: object) -> None:
+    record = {
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "state": state,
+        **details,
+    }
+    fd = os.open(
+        root / "events.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600
+    )
+    with os.fdopen(fd, "ab") as output:
+        info = os.fstat(output.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ResumeBlockedError("invalid mission event file")
+        output.write(canonical(record))
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _final_event(root: Path, task_id: str, status: str, error: str | None, *, create: bool) -> bool:
+    """Record or validate one terminal manager event, including after a crash."""
+    try:
+        raw = _read_regular(root / "events.jsonl")
+        lines = raw.splitlines(keepends=True)
+        rows = [json.loads(line) for line in lines]
+        if any(type(row) is not dict or canonical(row) != line for row, line in zip(rows, lines)):
+            raise ValueError("noncanonical event")
+    except (OSError, ValueError, TypeError) as exc:
+        raise ResumeBlockedError("invalid terminal event log") from exc
+    outcomes = [
+        row
+        for row in rows
+        if row.get("agent_id") == "manager"
+        and row.get("task_id") == task_id
+        and row.get("state") in ("PASS", "FAILED")
+    ]
+    if outcomes:
+        if (
+            len(outcomes) != 1
+            or outcomes[0].get("state") != status
+            or outcomes[0].get("error") != error
+        ):
+            raise ResumeBlockedError("contradictory terminal events")
+    elif create:
+        _event(root, task_id, "manager", status, error=error)
+        return True
+    else:
+        raise ResumeBlockedError("terminal manager event is missing")
+    return False
+
+
+def _bind_event_checkpoint(root: Path, role: str, *, create: bool) -> dict:
+    """Anchor event bytes in SQLite at each durable completed-task checkpoint."""
+    database = root / "orchestrator.sqlite3"
+    if database.is_symlink() or not database.is_file():
+        raise ResumeBlockedError("invalid orchestration database")
+    with sqlite3.connect(database.as_uri() + "?mode=rw", uri=True) as connection:
+        if create:
+            checkpoint = _event_prefix(root)
+            connection.execute(
+                "INSERT INTO mission_event_binding VALUES (?, ?, ?)",
+                (role, checkpoint["bytes"], checkpoint["sha256"]),
+            )
+        else:
+            row = connection.execute(
+                "SELECT byte_count, sha256 FROM mission_event_binding WHERE role = ?", (role,)
+            ).fetchone()
+            if row is None:
+                raise ResumeBlockedError("missing durable event checkpoint")
+            checkpoint = _event_prefix(root, row[0])
+            if checkpoint["sha256"] != row[1]:
+                raise ResumeBlockedError("event log changed after checkpoint")
+            if role == "manager_final" and checkpoint != _event_prefix(root):
+                raise ResumeBlockedError("event log changed after final checkpoint")
+    return checkpoint
+
+
+def _store_outcome(root: Path, role: str, outcome: dict) -> None:
+    """Write the subprocess result separately before the task can complete."""
+    with (root / f"{role}.outcome.json").open("xb") as stream:
+        stream.write(canonical(outcome))
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _new_directory(path: Path) -> Path:
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or "data" in path.parts
+        or any(x in str(path) for x in "?#")
+    ):
+        raise ValueError("an absolute non-data mission directory is required")
+    if path.exists() or path.is_symlink():
+        raise FileExistsError("mission directory already exists")
+    if any(parent.is_symlink() for parent in path.parents) or not path.parent.is_dir():
+        raise ValueError("mission parent must exist and contain no symlinks")
+    path.mkdir(mode=0o700)
+    return path
+
+
+def _run_process(
+    root: Path,
+    module: str,
+    role: str,
+    observations: int,
+    timeout: int,
+    stage: str,
+    profile: str = "standard",
+) -> dict:
+    """Run one allowlisted process and collect its own wait4 resource usage."""
+    if module not in (WORKER, VERIFIER):
+        raise ValueError("unregistered mission adapter")
+    if threading.active_count() != 1:
+        raise RuntimeError("the supervisor must be single-threaded while launching an adapter")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "PYTHONPATH": f"{REPOSITORY / 'src'}:{REPOSITORY}",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "LC_ALL": "C.UTF-8",
+    }
+    command = [
+        sys.executable,
+        "-B",
+        "-m",
+        module,
+        "--bundle",
+        str(root / "bundle"),
+        "--observations",
+        str(observations),
+        "--stage",
+        stage,
+    ]
+    if profile != "standard":
+        command.extend(("--profile", profile))
+
+    supervisor_pid = os.getpid()
+    parent_signal_mask = None
+
+    def limits() -> None:
+        # Linux sends SIGKILL to this direct child if its supervisor dies.
+        # Check the race where the parent exited before prctl was installed.
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+            raise OSError(ctypes.get_errno(), "cannot bind child lifetime to supervisor")
+        if os.getppid() != supervisor_pid:
+            os.kill(os.getpid(), signal.SIGKILL)
+        resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_LIMIT_BYTES, FILE_LIMIT_BYTES))
+        resource.setrlimit(resource.RLIMIT_CPU, (timeout + 5, timeout + 5))
+        # Popen temporarily defers termination signals in the single-threaded
+        # supervisor. The child must not inherit that temporary mask.
+        signal.pthread_sigmask(signal.SIG_SETMASK, parent_signal_mask)
+
+    start = time.perf_counter_ns()
+    timed_out = False
+    with (
+        (root / f"{role}.stdout").open("xb") as stdout,
+        (root / f"{role}.stderr").open("xb") as stderr,
+    ):
+        child = None
+        try:
+            # A handled signal during Popen could otherwise interrupt Python
+            # after the OS child exists but before its object is assigned.
+            parent_signal_mask = signal.pthread_sigmask(
+                signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT}
+            )
+            try:
+                child = subprocess.Popen(
+                    command,
+                    cwd=REPOSITORY,
+                    env=env,
+                    stdout=stdout,
+                    stderr=stderr,
+                    start_new_session=True,
+                    preexec_fn=limits,  # noqa: PLW1509 - guarded single-threaded supervisor
+                )
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, parent_signal_mask)
+            while True:
+                pid, status, usage = os.wait4(child.pid, os.WNOHANG)
+                if pid:
+                    break
+                if time.perf_counter_ns() - start >= timeout * 1_000_000_000:
+                    timed_out = True
+                    try:
+                        os.killpg(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    pid, status, usage = os.wait4(child.pid, 0)
+                    break
+                time.sleep(0.05)
+            code = os.waitstatus_to_exitcode(status)
+            child.returncode = code
+        except BaseException as original_error:
+            # The parent can survive an interruption (e.g. an embedded caller
+            # catches KeyboardInterrupt), so PDEATHSIG alone is insufficient.
+            # Check that the PID is still our waitable child before signalling.
+            # This assumes no other child reaper (including a signal handler):
+            # waitid and killpg are not atomic against an asynchronous reap.
+            if child is None:
+                raise
+            try:
+                while True:
+                    try:
+                        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                        break
+                    except InterruptedError:
+                        continue
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except OSError:
+                    # The group may have disappeared while the child remains.
+                    try:
+                        os.kill(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                while True:
+                    try:
+                        _, child_status, _ = os.wait4(child.pid, 0)
+                        child.returncode = os.waitstatus_to_exitcode(child_status)
+                        break
+                    except InterruptedError:
+                        continue
+            except ChildProcessError:
+                # A signal handler may already have reaped the child.
+                pass
+            except BaseException as cleanup_error:  # noqa: BLE001 - keep the triggering error
+                # Keep the triggering exception visible, with a cleanup warning.
+                original_error.add_note(f"child cleanup failed: {type(cleanup_error).__name__}")
+            raise
+        finally:
+            if parent_signal_mask is not None:
+                active_error = sys.exception()
+                try:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, parent_signal_mask)
+                except BaseException as mask_error:
+                    if active_error is None:
+                        raise
+                    active_error.add_note(
+                        f"signal mask restore failed: {type(mask_error).__name__}"
+                    )
+    return {
+        "pid": child.pid,
+        "exit_code": code,
+        "timeout": timed_out,
+        "wall_ns": time.perf_counter_ns() - start,
+        "peak_rss_bytes": usage.ru_maxrss * 1024,
+        "user_cpu_seconds": usage.ru_utime,
+        "system_cpu_seconds": usage.ru_stime,
+        "stderr": f"{role}.stderr",
+    }
+
+
+def run_mission(
+    output_dir: Path,
+    observations: int,
+    *,
+    timeout_seconds: int = MAX_TIMEOUT_SECONDS,
+    stage: str = "pullback",
+    profile: str = "standard",
+) -> dict:
+    """Assign one synthetic mission, execute, independently verify, and report.
+
+    The output directory must not exist. Processes are bounded but are not an
+    operating-system sandbox for untrusted adapters; only fixed local code runs.
+    """
+    if sys.platform != "linux":
+        raise RuntimeError("the bounded subprocess implementation requires Linux")
+    if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
+        raise ValueError("invalid synthetic observation count")
+    if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
+        raise ValueError("invalid timeout")
+    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"):
+        raise ValueError("unsupported replay stage")
+    if profile not in ("standard", *PROFILES):
+        raise ValueError("unsupported invented profile")
+    if profile != "standard" and (
+        stage not in ("confirmation", "stop", "risk", "entry", "exit")
+        or observations != FIXTURE_OBSERVATIONS
+    ):
+        raise ValueError("confirmation profiles require confirmation or stop and 39 observations")
+    if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
+        raise ValueError(f"{stage} requires a fixed confirmation profile")
+    sources = _source_hashes()
+    root = _new_directory(output_dir)
+    task_id = str(uuid.uuid4())
+    mission = {
+        "schema": "agicore:mission:v2",
+        "task_id": task_id,
+        "kind": "INVENTED_STORAGE_AND_REPLAY",
+        "observations": observations,
+        "stage": stage,
+        "profile": profile,
+        "worker": "local_python_worker",
+        "verifier": "local_python_independent_verifier",
+        "timeout_seconds_per_process": timeout_seconds,
+        "memory_limit_bytes_per_process": MEMORY_LIMIT_BYTES,
+        "retries": 0,
+        "network_or_model_calls": False,
+        "authorizations": {
+            "synthetic_generation": True,
+            "synthetic_storage": True,
+            "event_replay": True,
+            "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry", "exit"),
+            "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit"),
+            "real_data": False,
+            "broker": False,
+            "orders": False,
+            "profitability": False,
+            "network": False,
+            "merge": False,
+        },
+        "source_sha256": sources,
+        "python": sys.version.split()[0],
+        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        "runtime_packages": _runtime_versions(),
+    }
+    if stage in ("stop", "risk", "entry", "exit"):
+        mission["authorizations"]["initial_stop"] = True
+    if stage in ("risk", "entry", "exit"):
+        mission["authorizations"]["risk_decision"] = True
+    if stage in ("entry", "exit"):
+        mission["authorizations"]["entry_execution"] = True
+    if stage == "exit":
+        mission["authorizations"]["exit_execution"] = True
+    _validate_mission(mission)
+    with _mission_lock(root, create=True):
+        with (root / "mission.json").open("xb") as stream:
+            stream.write(canonical(mission))
+            stream.flush()
+            os.fsync(stream.fileno())
+        _event(root, task_id, "manager", "CREATED")
+        return _execute_mission(root, mission, resume=False)
+
+
+def resume_mission(output_dir: Path) -> dict:
+    """Resume only from durable completed/pending checkpoints; never guess."""
+    if sys.platform != "linux":
+        raise RuntimeError("the bounded subprocess implementation requires Linux")
+    root = _existing_directory(output_dir)
+    with _mission_lock(root):
+        try:
+            mission, _ = _json_evidence(root / "mission.json")
+        except OSError as exc:
+            raise ResumeBlockedError("missing or inaccessible mission contract") from exc
+        _validate_mission(mission)
+        return _execute_mission(root, mission, resume=True)
+
+
+def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
+    task_id = mission["task_id"]
+    observations = mission["observations"]
+    stage = mission["stage"]
+    profile = mission["profile"]
+    timeout_seconds = mission["timeout_seconds_per_process"]
+    sources = mission["source_sha256"]
+    contract_sha = hashlib.sha256(canonical(mission)).hexdigest()
+    steps = {}
+    tasks = {}
+    status = "FAILED"
+    error = None
+    engine = None
+    if resume:
+        _bound_database(root, task_id, contract_sha)
+    try:
+        engine = SqlAlchemyEngine(f"sqlite:///{root / 'orchestrator.sqlite3'}")
+        if not resume:
+            init_schema(engine)
+            with engine.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE TABLE mission_contract_binding "
+                    "(mission_id TEXT PRIMARY KEY, contract_sha256 TEXT NOT NULL)"
+                )
+                connection.exec_driver_sql(
+                    "INSERT INTO mission_contract_binding VALUES (?, ?)", (task_id, contract_sha)
+                )
+                connection.exec_driver_sql(
+                    "CREATE TABLE mission_event_binding "
+                    "(role TEXT PRIMARY KEY, byte_count INTEGER NOT NULL, sha256 TEXT NOT NULL)"
+                )
+            _checkpoint("contract_bound")
+        memory, bus, registry = MemoryService(engine), EventBus(), HandlerRegistry()
+        orchestrator = AgentOrchestrator(
+            memory=memory,
+            engine=engine,
+            dispatcher=Dispatcher(registry, bus),
+            event_bus=bus,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+        roles = {
+            f"{task_id}-worker": ("worker", WORKER),
+            f"{task_id}-verifier": ("verifier", VERIFIER),
+        }
+        trace_errors = []
+
+        def trace(event):
+            states = {
+                "task.created": "ASSIGNED",
+                "task.started": "STARTED",
+                "task.dispatched": "DISPATCHED",
+                "task.completed": "COMPLETED",
+                "task.failed": "FAILED",
+            }
+            tid = event.payload.get("task_id")
+            if tid not in roles or event.event_type not in states:
+                return
+            role, module = roles[tid]
+            details = {"orchestrator_task_id": tid}
+            if event.event_type == "task.created":
+                details["adapter"] = module
+            if event.event_type == "task.dispatched":
+                try:
+                    memory.create_event(
+                        "task.dispatched",
+                        task_id=tid,
+                        agent_id=role,
+                        payload={"task_type": event.payload.get("task_type")},
+                    )
+                except Exception as exc:  # noqa: BLE001 - fail closed on any audit failure
+                    trace_errors.append(str(exc))
+            try:
+                _event(root, task_id, role, states[event.event_type], **details)
+            except (OSError, ResumeBlockedError) as exc:
+                trace_errors.append(str(exc))
+
+        bus.subscribe("*", trace)
+        payload = {
+            "mission_id": task_id,
+            "observations": observations,
+            "stage": stage,
+            "profile": profile,
+            "timeout_seconds": timeout_seconds,
+            "contract_sha256": contract_sha,
+        }
+
+        def register(role, module):
+            task_type = f"agicore.synthetic.{role}.v2"
+            expected_id = f"{task_id}-{role}"
+
+            def execute(task):
+                if trace_errors:
+                    raise RuntimeError("task audit projection failed before execution")
+                if (
+                    task.id != expected_id
+                    or task.assigned_to != role
+                    or task.task_type != task_type
+                    or type(task.payload) is not dict
+                    or canonical(task.payload) != canonical(payload)
+                ):
+                    raise PermissionError("task exceeds the synthetic mission contract")
+                if profile == "standard":
+                    outcome = _run_process(root, module, role, observations, timeout_seconds, stage)
+                else:
+                    outcome = _run_process(
+                        root, module, role, observations, timeout_seconds, stage, profile
+                    )
+                steps[role] = outcome
+                if (
+                    type(outcome.get("exit_code")) is not int
+                    or outcome["exit_code"] != 0
+                    or outcome.get("timeout") is not False
+                ):
+                    raise RuntimeError(f"{role} failed; inspect {outcome['stderr']}")
+                outcome["contract_sha256"] = contract_sha
+                try:
+                    outcome["evidence"] = _seal_evidence(root, role, mission)
+                    _store_outcome(root, role, outcome)
+                except (OSError, ValueError, AttributeError, ResumeBlockedError) as exc:
+                    raise RuntimeError(f"invalid verification receipt: {exc}") from exc
+                return outcome
+
+            registry.register(task_type, execute)
+            return task_type, expected_id
+
+        with engine.session() as session:
+            present_ids = set(session.execute(select(Task.id)).scalars().all())
+        if not present_ids <= set(roles):
+            raise ResumeBlockedError("unexpected tasks in mission database")
+        with engine.session() as session:
+            existing = {tid: TaskRepository(session).get(tid) for tid in present_ids}
+        worker_id, verifier_id = f"{task_id}-worker", f"{task_id}-verifier"
+        report_path = root / "report.json"
+        if (
+            resume
+            and (report_path.exists() or report_path.is_symlink())
+            and (
+                set(existing) != set(roles)
+                or any(task.status != "completed" for task in existing.values())
+            )
+        ):
+            raise ResumeBlockedError("existing report conflicts with noncompleted tasks")
+        if verifier_id in existing and (
+            worker_id not in existing or existing[worker_id].status != "completed"
+        ):
+            raise ResumeBlockedError("verifier exists before completed worker")
+
+        for role, module in (("worker", WORKER), ("verifier", VERIFIER)):
+            task_type, tid = register(role, module)
+            previous = existing.get(tid)
+            if previous is not None and (
+                previous.task_type != task_type
+                or previous.assigned_to != role
+                or type(previous.payload) is not dict
+                or canonical(previous.payload) != canonical(payload)
+            ):
+                raise ResumeBlockedError("persisted task does not match the mission contract")
+            if resume and previous is not None:
+                _validate_lifecycle(root, engine, previous, task_id, role)
+            if previous is not None and previous.status == "completed":
+                outcome = previous.result
+                _bind_event_checkpoint(root, role, create=False)
+                stored_outcome, _ = _json_evidence(root / f"{role}.outcome.json")
+                if (
+                    type(outcome) is not dict
+                    or canonical(outcome) != canonical(stored_outcome)
+                    or type(outcome.get("exit_code")) is not int
+                    or outcome.get("exit_code") != 0
+                    or outcome.get("timeout") is not False
+                    or outcome.get("contract_sha256") != contract_sha
+                    or canonical(outcome.get("evidence"))
+                    != canonical(_seal_evidence(root, role, mission, outcome.get("evidence")))
+                ):
+                    raise ResumeBlockedError("completed task evidence or binding changed")
+                steps[role] = outcome
+                finished = previous
+            else:
+                if previous is not None and previous.status != "pending":
+                    raise ResumeBlockedError("task state is running, failed or otherwise ambiguous")
+                reserved = [
+                    root / f"{role}.stdout",
+                    root / f"{role}.stderr",
+                    root / f"{role}.outcome.json",
+                ]
+                reserved.append(
+                    root / "bundle" if role == "worker" else root / "bundle" / "verification.json"
+                )
+                if any(path.exists() or path.is_symlink() for path in reserved):
+                    raise ResumeBlockedError("unstarted task has ambiguous existing output")
+                if previous is None:
+                    orchestrator.submit_task(
+                        TaskCreate(
+                            id=tid, task_type=task_type, assigned_to=role, payload=dict(payload)
+                        )
+                    )
+                    _checkpoint(f"{role}_submitted")
+                if trace_errors:
+                    raise RuntimeError("task audit projection failed")
+                finished = orchestrator.execute_one(tid)
+                if finished.status == "completed":
+                    _bind_event_checkpoint(root, role, create=True)
+                _checkpoint(f"{role}_completed")
+            tasks[role] = {
+                "id": tid,
+                "task_type": task_type,
+                "assigned_to": finished.assigned_to,
+                "status": finished.status,
+                "error": finished.error,
+            }
+            if trace_errors:
+                raise RuntimeError("task audit projection failed")
+            if finished.status != "completed":
+                error = f"{role} failed: {finished.error}"
+                break
+        else:
+            try:
+                worker = json.loads((root / "bundle" / "worker.json").read_bytes())
+                verification = json.loads((root / "bundle" / "verification.json").read_bytes())
+            except (OSError, ValueError) as exc:
+                raise ValueError(
+                    "invalid verification receipt: missing or malformed evidence"
+                ) from exc
+            if (
+                verification.get("schema") != "agicore:invented-storage-replay-verification:v2"
+                or verification.get("status") != "PASS"
+                or type(verification.get("observations")) is not int
+                or verification.get("observations") != observations
+                or verification.get("stage") != stage
+                or worker.get("stage") != stage
+                or verification.get("profile", "standard") != profile
+                or worker.get("profile", "standard") != profile
+                or verification.get("manifest_sha256") != worker.get("manifest_sha256")
+                or verification.get("input_sha256") != worker.get("input_sha256")
+                or canonical(verification.get("replay")) != canonical(worker.get("replay"))
+            ):
+                raise ValueError("invalid verification receipt")
+            if _source_hashes() != sources:
+                raise ValueError("mission sources changed during execution")
+            status = "PASS"
+    except ResumeBlockedError:
+        raise
+    except Exception as exc:
+        if resume:
+            raise ResumeBlockedError(f"resume failed safely: {type(exc).__name__}: {exc}") from exc
+        error = f"mission failed: {type(exc).__name__}: {exc}"
+    finally:
+        if engine is not None:
+            engine.dispose()
+    report = {
+        "schema": "agicore:mission-report:v2",
+        "task_id": task_id,
+        "status": status,
+        "observations": observations,
+        "stage": stage,
+        "profile": profile,
+        "orchestrator": "AgentOrchestrator+Dispatcher",
+        "tasks": tasks,
+        "task_history": "orchestrator.sqlite3",
+        "steps": steps,
+        "error": error,
+        "source_sha256": sources,
+        "limitations": [
+            "Local deterministic adapters, not Terra or Codex model calls.",
+            "Independent storage and event-pipeline verification uses the same frozen V2 predicates.",
+            "No full strategy replay, historical storage certification, or profitability.",
+            "Local hashes and runtime versions are not signatures or an operating-system sandbox.",
+            "Child lifetime protection covers direct Linux children, not arbitrary descendants.",
+            "The synchronous Linux supervisor must not start other threads while launching children.",
+        ],
+    }
+    if status == "PASS":
+        report["verification"] = verification
+    report_path = root / "report.json"
+    if report_path.exists() or report_path.is_symlink():
+        if not resume:
+            raise ResumeBlockedError("mission report already exists")
+        _final_event(root, task_id, status, error, create=False)
+        report["event_checkpoint"] = _bind_event_checkpoint(root, "manager_final", create=False)
+        saved, _ = _json_evidence(report_path)
+        if status != "PASS" or canonical(saved) != canonical(report):
+            raise ResumeBlockedError("existing mission report does not match sealed evidence")
+        return saved
+    _checkpoint("before_report")
+    created_final_event = _final_event(root, task_id, status, error, create=True)
+    report["event_checkpoint"] = _bind_event_checkpoint(
+        root, "manager_final", create=created_final_event
+    )
+    _checkpoint("after_report_event")
+    _atomic_report(root, report)
+    return report
+
+
+def main() -> None:
+    """Execute one local synthetic mission and print its report."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--observations", type=int)
+    parser.add_argument("--timeout-seconds", type=int)
+    parser.add_argument(
+        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit")
+    )
+    parser.add_argument("--profile", choices=("standard", *PROFILES))
+    args = parser.parse_args()
+    if args.resume and any(
+        value is not None
+        for value in (args.observations, args.timeout_seconds, args.stage, args.profile)
+    ):
+        parser.error("resume uses the sealed mission contract and accepts no overrides")
+    with contextlib.redirect_stdout(sys.stderr):
+        if args.resume:
+            report = resume_mission(args.output_dir)
+        else:
+            report = run_mission(
+                args.output_dir,
+                DEFAULT_OBSERVATIONS if args.observations is None else args.observations,
+                timeout_seconds=MAX_TIMEOUT_SECONDS
+                if args.timeout_seconds is None
+                else args.timeout_seconds,
+                stage="pullback" if args.stage is None else args.stage,
+                profile="standard" if args.profile is None else args.profile,
+            )
+    sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if report["status"] != "PASS":
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,6 @@
+/tools/ema_pullback_v2_portable_verifier_v2.py text eol=lf
+/tests/unit/test_ema_pullback_v2_portable_verifier_v2.py text eol=lf
+/tests/integration/test_ema_pullback_v2_portable_verifier_v2.py text eol=lf
+/docs/evidence/EMA_PULLBACK_V2_PORTABLE_VERIFIER_P01_CORRECTION_PLAN_V2.json text eol=lf
+/tests/fixtures/ema_pullback_v2_portable_synthetic_v1.zip -text
+/docs/evidence/EMA_PULLBACK_V2_PORTABLE_VERIFIER_REPRODUCIBILITY_V9.md text eol=lf
