@@ -4,6 +4,18 @@
 Issue de suivi : [#328](https://github.com/Magassa56/agicore-v2/issues/328).
 Ce document prépare une implementation vérifiable ; sa présence ne constitue ni la validation de Gate 1, ni une autorisation de fusion, ni une démonstration de rentabilité.
 
+## État d'exécution : raccordement direct bloqué
+
+Le cœur V2 possède déjà des positions successives ; le parcours multi-trades du Manager reste absent. L'initialisation de `begin_regime_gated_baseline_v2` appelle `begin_exit_policy_v2`, qui construit obligatoirement un `FeesAndSlippageBookV2`. Elle se heurte donc à la frontière sans comptabilité de Gate 1 avant même la première observation.
+
+Le test `tests/integration/test_gate1_frozen_accounting_boundary.py` bloque cette construction avant tout calcul financier et vérifie que l'initialisation native échoue sous ce garde. Les fonctions ultérieures de la baseline appellent également les fonctions comptables d'entrée et de sortie. Il n'existe pas de paramètre de sortie sans comptabilité dans leurs interfaces actuelles.
+
+Les empreintes du manifeste figé incluent le code de la baseline et des politiques. Les modifier en place changerait cette identité et ferait échouer le contrôle historique `test_manifest_is_new_canonical_snapshot_of_every_frozen_component`. Le présent changement ne modifie ni ces modules ni leurs preuves.
+
+Un essai local sur deux positions inventées a pu composer les portes V2 avec une boucle de coordination distincte, mais cette boucle dupliquerait la séquence Open/Close native. Elle n'est pas livrée : le mandat interdit de reconstruire cette capacité. Aucune compatibilité multi-trades Manager n'est déclarée sur cette base.
+
+**Décision nécessaire :** définir une séparation versionnée et vérifiable entre transitions de stratégie et comptabilité, tout en préservant l'identité historique ; ou autoriser explicitement une autre interface d'intégration. Aucun changement de règles, de données ou de protections n'est impliqué par ce constat.
+
 ## Baseline et autorisation Gate 0
 
 - PR #327 fusionnée par commit de merge `d321b34a4f39ee62e91400eb830c3384e21ec28a`, les 32 commits précédents restent ancestraux.
@@ -63,4 +75,4 @@ Ce document prépare une implementation vérifiable ; sa présence ne constitue 
 - Aucun broker, NinjaTrader connecté, compte Apex, ordre réel, paper connecté, source payante ou publication de signaux.
 - Aucune optimisation ni mesure de rentabilité avant que Gate 1 soit prouvé et qu'un protocole scientifique distinct soit approuvé.
 
-**Verdict actuel : GATE0 PASS ; GATE1 PLAN_ONLY ; MULTI_TRADES NOT IMPLEMENTED ; TRADING_EDGE UNKNOWN.**
+**Verdict actuel : GATE0 PASS ; V2 MULTI-TRADE CORE EXISTING ; MANAGER MULTI-TRADE BLOCKED ; GATE1 NOT COMPLETE ; TRADING_EDGE UNKNOWN.**
