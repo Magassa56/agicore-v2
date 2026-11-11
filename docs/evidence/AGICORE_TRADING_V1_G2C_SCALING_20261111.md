@@ -53,10 +53,61 @@ Le rapport est `AGICORE_G2C_1000_F3F4_TIER_REPORT_20261111.json`, SHA-256
 Le contrat V3 ajoute deux vérifications : refuser les appartenances cgroup
 imbriquées ou ambiguës plutôt que d'utiliser par erreur la limite du groupe
 racine, et vérifier la marge disque par rapport au budget total du palier. Les
-registrations V1 et V2 restent inchangées. Aucun replay 5 000 n'a été lancé
-pendant le premier préflight.
+registrations V1 et V2 restent inchangées. Le contrat V3 a été préengagé au
+commit `9e6eadcd81c2aec152872aa7783b5374e9731568` avec le SHA-256
+`5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663`.
 
 La surveillance de l'occupation physique est périodique, avec vérification
 finale ; elle n'est pas un quota disque instantané. Les temps et mémoires de ces
 fixtures ne démontrent pas la capacité à 89 841 observations ni une performance
-sur le marché. Les replays 1 000 de V3 restent à exécuter après préengagement.
+sur le marché.
+
+## Résultat 1 000 sous le contrat V3
+
+Les six fixtures ont chacune réussi deux productions et deux vérifications en
+processus séparés, puis la comparaison complète avec la référence. La référence
+et le runner optimisé gardent leurs propres identités ; leurs octets ne sont pas
+identiques avant projection temporaire dans le test. Les résultats et témoins
+stockés ont été reconstruits à l'identique, et les six bundles archivés ont été
+revérifiés après extraction. Trente falsifications ont été rejetées ; six copies
+intactes ont été acceptées.
+
+| Fixture | Entrées | Fermées | Natif, octets | Temps maximal, s | CPU maximal, s | RSS maximale, octets |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Constante | 0 | 0 | 220 983 | 2,911 | 2,832 | 73 945 088 |
+| Dense | 13 | 13 | 6 771 181 | 9,142 | 9,093 | 81 584 128 |
+| Suppression en position | 1 | 0 | 267 874 | 6,829 | 6,727 | 74 973 184 |
+| Expiration | 0 | 0 | 221 884 | 3,113 | 3,066 | 73 662 464 |
+| Stop sur gap | 1 | 1 | 281 179 | 3,522 | 3,445 | 70 012 928 |
+| Refus de risque | 0 | 0 | 235 558 | 3,212 | 3,174 | 74 248 192 |
+
+Ces maximums sont ceux des processus producteur, vérificateur ou comparaison
+de chaque fixture, et non le temps de la campagne entière. Le dossier du palier,
+rapports et journaux compris, occupait physiquement 4 096 000 octets après
+exécution. Les plafonds étaient de 90 s murales, 60 s CPU, 1 Gio d'espace
+d'adressage par processus, 64 Mio par fichier et 512 Mio pour le palier. Les
+contrôles négatifs, leurs copies et journaux occupaient 11 718 656 octets.
+
+Le rapport V3 est `AGICORE_G2C_1000_9E6E_TIER_REPORT_20261111.json`, SHA-256
+`c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555`. L'archive
+complète des six bundles est `AGICORE_G2C_1000_9E6E_BUNDLES_20261111.zip`,
+SHA-256 `8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7`.
+Les contrôles négatifs, le contrôle de l'archive et les mesures physiques sont
+conservés séparément sous le préfixe `AGICORE_G2C_1000_9E6E_`. L'archive inclut
+un bundle par fixture et les reçus et journaux des deux exécutions ; son
+vérificateur est le code du commit `9e6eadcd81c2aec152872aa7783b5374e9731568`.
+Le profil de codec lie notamment la version de Python et le binaire zlib : une
+reconstruction sur un autre environnement exige de vérifier cette compatibilité.
+
+## Arrêt avant 5 000
+
+Après le PASS 1 000 et les tests négatifs, le préflight V3 a constaté que
+`/sys/fs/cgroup/memory.max` et `memory.current` n'étaient pas visibles. Le
+contrôle est donc `BLOCKED` et aucun replay 5 000 n'a démarré. Le verdict est
+`AGICORE_G2C_5000_9E6E_PREFLIGHT_20261111.json`, SHA-256
+`c33f30bf6399efb0f5b96a96e365013be974d7d221f035d4e4019540eaca0c4b`.
+Pour reprendre, utiliser un hôte Linux dont le cgroup mémoire effectif est
+observable au niveau racine du processus, vérifier une marge mémoire d'au moins
+deux fois le plafond de 2 Gio et une marge disque d'au moins deux fois le budget
+du palier de 1 Gio, puis relancer le préflight et le contrôle d'arrêt du groupe.
+Une appartenance cgroup imbriquée est refusée par cette version du superviseur.
