@@ -208,9 +208,11 @@ jobs:
 
       - name: Run full regression suite
         run: |
+          # Capture historical test stdout, which may contain synthetic financial
+          # figures; keep failure tracebacks without publishing captured output.
           env -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN \
             -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
-            python -m pytest -q
+            python -m pytest -q -o addopts= --show-capture=no
 
       - name: Check diff whitespace
         run: git diff --check

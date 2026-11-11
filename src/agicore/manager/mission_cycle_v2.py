@@ -49,6 +49,7 @@ from agicore.l2_memory.services.memory_service import MemoryService
 from agicore.l4_planning.dispatcher import Dispatcher
 from agicore.l4_planning.handlers import HandlerRegistry
 from agicore.l4_planning.orchestrator import AgentOrchestrator
+from agicore.trading import synthetic_native_g1_v2 as native_g1
 from agicore.trading.synthetic_confirmation_fixture_v2 import (
     OBSERVATIONS as FIXTURE_OBSERVATIONS,
 )
@@ -145,6 +146,138 @@ def _json_evidence(path: Path) -> tuple[dict, str]:
     return value, hashlib.sha256(raw).hexdigest()
 
 
+def _valid_native_g1_replay(replay: object, worker: dict, mission: dict) -> bool:
+    """Reject noncausal, foreign or financial fields in the versioned G1 projection."""
+    if type(replay) is not dict or set(replay) != {
+        "schema",
+        "source_sha256",
+        "strategy_manifest_sha256",
+        "observations",
+        "positions",
+        "admissions",
+        "end_state",
+    }:
+        return False
+    profile = mission["profile"]
+    raw = native_g1.generate_fixture(profile, native_g1.OBSERVATIONS)
+    source_sha = hashlib.sha256(raw).hexdigest()
+    positions, admissions = replay["positions"], replay["admissions"]
+    if (
+        replay["schema"] != native_g1.REPLAY_SCHEMA
+        or replay["source_sha256"] != source_sha
+        or worker.get("input_sha256") != source_sha
+        or replay["strategy_manifest_sha256"] != native_g1.STRATEGY_MANIFEST_SHA256
+        or type(replay["observations"]) is not int
+        or replay["observations"] != native_g1.OBSERVATIONS
+        or type(positions) is not list
+        or len(positions) != 2
+        or type(admissions) is not list
+        or len(admissions) != native_g1.OBSERVATIONS
+        or replay["end_state"] != "FLAT"
+    ):
+        return False
+    timestamps = [
+        datetime.strptime(line.split(b";")[0].decode("ascii"), "%Y%m%d %H%M%S")
+        .replace(tzinfo=UTC)
+        .isoformat()
+        .replace("+00:00", "Z")
+        for line in raw.splitlines()
+    ]
+    direction = "LONG" if profile == "native-g1-long-v1" else "SHORT"
+    intervals = []
+    for item in positions:
+        if type(item) is not dict or set(item) != {
+            "source_bar_index",
+            "pullback_bar_index",
+            "confirmation_bar_index",
+            "entry_bar_index",
+            "entry_timestamp",
+            "direction",
+            "approved_quantity",
+            "exit",
+        }:
+            return False
+        source, pullback, confirmation, entry = (
+            item["source_bar_index"],
+            item["pullback_bar_index"],
+            item["confirmation_bar_index"],
+            item["entry_bar_index"],
+        )
+        if (
+            any(type(value) is not int for value in (source, pullback, confirmation, entry))
+            or not 0 <= source < pullback < confirmation < entry < len(timestamps)
+            or entry != confirmation + 1
+            or item["entry_timestamp"] != timestamps[entry]
+            or item["direction"] != direction
+            or type(item["approved_quantity"]) is not int
+            or item["approved_quantity"] not in (1, 2)
+        ):
+            return False
+        exit_record = item["exit"]
+        if type(exit_record) is not dict or set(exit_record) != {
+            "kind",
+            "bar_index",
+            "timestamp",
+            "signal_bar_index",
+            "phase",
+        }:
+            return False
+        end, signal = exit_record["bar_index"], exit_record["signal_bar_index"]
+        if (
+            type(end) is not int
+            or not entry <= end < len(timestamps)
+            or exit_record["timestamp"] != timestamps[end]
+        ):
+            return False
+        if exit_record["kind"] == "EMA20":
+            if type(signal) is not int or signal + 1 != end or exit_record["phase"] != "OPEN":
+                return False
+        elif exit_record["kind"] == "STRUCTURAL_STOP":
+            if signal is not None or exit_record["phase"] not in (
+                "ENTRY_OPEN",
+                "BAR_OPEN_GAP",
+                "INTRABAR",
+            ):
+                return False
+        else:
+            return False
+        intervals.append((source, entry, end))
+    if intervals[1][1] <= intervals[0][2] or intervals[1][0] < intervals[0][2]:
+        return False
+    for index, item in enumerate(admissions):
+        if type(item) is not dict or set(item) != {"bar_index", "status", "state", "events"}:
+            return False
+        active = any(entry <= index < end for _, entry, end in intervals)
+        if (
+            type(item["bar_index"]) is not int
+            or item["bar_index"] != index
+            or type(item["events"]) is not list
+            or item["state"]
+            not in ("IDLE", "AWAITING_CONFIRMATION", "PENDING_ENTRY_EXECUTION", "POSITION_OWNED")
+            or item["status"]
+            not in (
+                "ADMITTED",
+                "NO_REGIME_EVENT",
+                "AMBIGUOUS",
+                "SUPPRESSED_PENDING_OPPORTUNITY",
+                "SUPPRESSED_POSITION_OPEN",
+            )
+            or (item["state"] == "POSITION_OWNED") != active
+            or (item["status"] == "SUPPRESSED_POSITION_OPEN" and (not active or not item["events"]))
+            or (active and item["events"] and item["status"] != "SUPPRESSED_POSITION_OPEN")
+        ):
+            return False
+        for event in item["events"]:
+            if (
+                type(event) is not dict
+                or set(event) != {"kind", "direction"}
+                or event["kind"] not in ("DIRECTIONAL_IMPULSE_EVENT", "REVERSAL_TRANSITION_EVENT")
+                or event["direction"] not in ("LONG", "SHORT")
+            ):
+                return False
+    return all(admissions[source]["status"] == "ADMITTED" for source, _, _ in intervals)
+
+
 def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None = None) -> dict:
     """Hash persisted evidence; on verifier completion check every stored object."""
     bundle = root / "bundle"
@@ -160,7 +293,9 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
         if mission["stage"] in ("stop", "risk", "entry", "exit") and type(replay) is dict
         else replay
     )
-    if (
+    if mission["stage"] == native_g1.STAGE:
+        valid_replay = _valid_native_g1_replay(replay, worker, mission)
+    elif (
         mission["stage"] in ("confirmation", "stop", "risk", "entry", "exit")
         and type(confirmation_replay) is dict
     ):
@@ -205,13 +340,24 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
         )
     if (
         manifest.get("schema")
-        != ("agicore:invented-observation-bundle:v2" if profile == "standard" else FIXTURE_SCHEMA)
+        != (
+            "agicore:invented-observation-bundle:v2"
+            if profile == "standard"
+            else native_g1.BUNDLE_SCHEMA
+            if profile in native_g1.PROFILES
+            else FIXTURE_SCHEMA
+        )
         or manifest.get("profile", "standard") != profile
         or (profile == "standard" and "profile" in manifest)
         or manifest.get("domain") != "INVENTED_GENERATOR_ONLY"
         or type(manifest.get("observations")) is not int
         or manifest.get("observations") != mission["observations"]
-        or worker.get("schema") != "agicore:invented-storage-replay-worker:v2"
+        or worker.get("schema")
+        != (
+            native_g1.WORKER_SCHEMA
+            if mission["stage"] == native_g1.STAGE
+            else "agicore:invented-storage-replay-worker:v2"
+        )
         or worker.get("domain") != "SYNTHETIC_ONLY"
         or worker.get("stage") != mission["stage"]
         or worker.get("profile", "standard") != profile
@@ -219,6 +365,38 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
         or worker.get("manifest_sha256") != manifest_sha
         or worker.get("input_sha256") != manifest.get("raw_sha256")
         or not valid_replay
+        or (
+            mission["stage"] == native_g1.STAGE
+            and set(manifest)
+            != {
+                "schema",
+                "domain",
+                "observations",
+                "raw_bytes",
+                "raw_sha256",
+                "rows_per_chunk",
+                "codec",
+                "zlib_runtime",
+                "chunks",
+                "profile",
+            }
+        )
+        or (
+            mission["stage"] == native_g1.STAGE
+            and set(worker)
+            != {
+                "schema",
+                "domain",
+                "manifest_sha256",
+                "input_sha256",
+                "replay",
+                "stage",
+                "storage_wall_ns",
+                "replay_wall_ns",
+                "peak_rss_bytes",
+                "profile",
+            }
+        )
     ):
         raise ResumeBlockedError("worker evidence does not match mission")
     if expected is not None and type(expected) is not dict:
@@ -241,7 +419,12 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
         raise ResumeBlockedError("unknown evidence role")
     receipt, receipt_sha = _json_evidence(bundle / "verification.json")
     if (
-        receipt.get("schema") != "agicore:invented-storage-replay-verification:v2"
+        receipt.get("schema")
+        != (
+            native_g1.VERIFICATION_SCHEMA
+            if mission["stage"] == native_g1.STAGE
+            else "agicore:invented-storage-replay-verification:v2"
+        )
         or receipt.get("status") != "PASS"
         or receipt.get("stage") != mission["stage"]
         or receipt.get("profile", "standard") != profile
@@ -251,6 +434,24 @@ def _seal_evidence(root: Path, role: str, mission: dict, expected: dict | None =
         or receipt.get("manifest_sha256") != manifest_sha
         or receipt.get("input_sha256") != worker.get("input_sha256")
         or canonical(receipt.get("replay")) != canonical(worker.get("replay"))
+        or (
+            mission["stage"] == native_g1.STAGE
+            and (
+                set(receipt)
+                != {
+                    "schema",
+                    "status",
+                    "observations",
+                    "stage",
+                    "input_sha256",
+                    "manifest_sha256",
+                    "replay",
+                    "scope",
+                    "profile",
+                }
+                or receipt.get("scope") != "INDEPENDENT_BUNDLE_AND_PROJECTION_SHARED_NATIVE_V2"
+            )
+        )
     ):
         raise ResumeBlockedError("independent verification receipt mismatch")
     entries = manifest.get("chunks")
@@ -733,8 +934,9 @@ def _validate_mission(mission: dict) -> None:
         "synthetic_generation": True,
         "synthetic_storage": True,
         "event_replay": True,
-        "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry", "exit"),
-        "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit"),
+        "pullback": stage
+        in ("pullback", "confirmation", "stop", "risk", "entry", "exit", native_g1.STAGE),
+        "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit", native_g1.STAGE),
         "real_data": False,
         "broker": False,
         "orders": False,
@@ -742,30 +944,46 @@ def _validate_mission(mission: dict) -> None:
         "network": False,
         "merge": False,
     }
-    if stage in ("stop", "risk", "entry", "exit"):
+    if stage in ("stop", "risk", "entry", "exit", native_g1.STAGE):
         expected_auth["initial_stop"] = True
-    if stage in ("risk", "entry", "exit"):
+    if stage in ("risk", "entry", "exit", native_g1.STAGE):
         expected_auth["risk_decision"] = True
-    if stage in ("entry", "exit"):
+    if stage in ("entry", "exit", native_g1.STAGE):
         expected_auth["entry_execution"] = True
-    if stage == "exit":
+    if stage in ("exit", native_g1.STAGE):
         expected_auth["exit_execution"] = True
+    if stage == native_g1.STAGE:
+        expected_auth.update(native_v2=True, internal_accounting=True, financial_output=False)
     auth = mission["authorizations"]
     if (
         mission_id != mission["task_id"]
-        or mission["schema"] != "agicore:mission:v2"
-        or mission["kind"] != "INVENTED_STORAGE_AND_REPLAY"
+        or mission["schema"]
+        != (native_g1.MISSION_SCHEMA if stage == native_g1.STAGE else "agicore:mission:v2")
+        or mission["kind"]
+        != ("INVENTED_NATIVE_V2_G1" if stage == native_g1.STAGE else "INVENTED_STORAGE_AND_REPLAY")
         or type(mission["observations"]) is not int
         or not 1 <= mission["observations"] <= MAX_OBSERVATIONS
-        or stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit")
-        or mission["profile"] not in ("standard", *PROFILES)
+        or stage
+        not in (
+            "events",
+            "pullback",
+            "confirmation",
+            "stop",
+            "risk",
+            "entry",
+            "exit",
+            native_g1.STAGE,
+        )
+        or mission["profile"] not in ("standard", *PROFILES, *native_g1.PROFILES)
         or (
-            mission["profile"] != "standard"
+            mission["profile"] in PROFILES
             and (
                 stage not in ("confirmation", "stop", "risk", "entry", "exit")
                 or mission["observations"] != FIXTURE_OBSERVATIONS
             )
         )
+        or ((stage == native_g1.STAGE) != (mission["profile"] in native_g1.PROFILES))
+        or (stage == native_g1.STAGE and mission["observations"] != native_g1.OBSERVATIONS)
         or (stage in ("stop", "risk", "entry", "exit") and mission["profile"] == "standard")
         or mission["worker"] != "local_python_worker"
         or mission["verifier"] != "local_python_independent_verifier"
@@ -1193,24 +1411,39 @@ def run_mission(
         raise ValueError("invalid synthetic observation count")
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError("invalid timeout")
-    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"):
+    if stage not in (
+        "events",
+        "pullback",
+        "confirmation",
+        "stop",
+        "risk",
+        "entry",
+        "exit",
+        native_g1.STAGE,
+    ):
         raise ValueError("unsupported replay stage")
-    if profile not in ("standard", *PROFILES):
+    if profile not in ("standard", *PROFILES, *native_g1.PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and (
+    if profile in PROFILES and (
         stage not in ("confirmation", "stop", "risk", "entry", "exit")
         or observations != FIXTURE_OBSERVATIONS
     ):
         raise ValueError("confirmation profiles require confirmation or stop and 39 observations")
     if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
         raise ValueError(f"{stage} requires a fixed confirmation profile")
+    if (stage == native_g1.STAGE) != (profile in native_g1.PROFILES) or (
+        stage == native_g1.STAGE and observations != native_g1.OBSERVATIONS
+    ):
+        raise ValueError("native G1 requires a fixed invented 64-observation profile")
     sources = _source_hashes()
     root = _new_directory(output_dir)
     task_id = str(uuid.uuid4())
     mission = {
-        "schema": "agicore:mission:v2",
+        "schema": native_g1.MISSION_SCHEMA if stage == native_g1.STAGE else "agicore:mission:v2",
         "task_id": task_id,
-        "kind": "INVENTED_STORAGE_AND_REPLAY",
+        "kind": "INVENTED_NATIVE_V2_G1"
+        if stage == native_g1.STAGE
+        else "INVENTED_STORAGE_AND_REPLAY",
         "observations": observations,
         "stage": stage,
         "profile": profile,
@@ -1224,8 +1457,10 @@ def run_mission(
             "synthetic_generation": True,
             "synthetic_storage": True,
             "event_replay": True,
-            "pullback": stage in ("pullback", "confirmation", "stop", "risk", "entry", "exit"),
-            "confirmation": stage in ("confirmation", "stop", "risk", "entry", "exit"),
+            "pullback": stage
+            in ("pullback", "confirmation", "stop", "risk", "entry", "exit", native_g1.STAGE),
+            "confirmation": stage
+            in ("confirmation", "stop", "risk", "entry", "exit", native_g1.STAGE),
             "real_data": False,
             "broker": False,
             "orders": False,
@@ -1238,14 +1473,18 @@ def run_mission(
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
         "runtime_packages": _runtime_versions(),
     }
-    if stage in ("stop", "risk", "entry", "exit"):
+    if stage in ("stop", "risk", "entry", "exit", native_g1.STAGE):
         mission["authorizations"]["initial_stop"] = True
-    if stage in ("risk", "entry", "exit"):
+    if stage in ("risk", "entry", "exit", native_g1.STAGE):
         mission["authorizations"]["risk_decision"] = True
-    if stage in ("entry", "exit"):
+    if stage in ("entry", "exit", native_g1.STAGE):
         mission["authorizations"]["entry_execution"] = True
-    if stage == "exit":
+    if stage in ("exit", native_g1.STAGE):
         mission["authorizations"]["exit_execution"] = True
+    if stage == native_g1.STAGE:
+        mission["authorizations"].update(
+            native_v2=True, internal_accounting=True, financial_output=False
+        )
     _validate_mission(mission)
     with _mission_lock(root, create=True):
         with (root / "mission.json").open("xb") as stream:
@@ -1493,7 +1732,12 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
                     "invalid verification receipt: missing or malformed evidence"
                 ) from exc
             if (
-                verification.get("schema") != "agicore:invented-storage-replay-verification:v2"
+                verification.get("schema")
+                != (
+                    native_g1.VERIFICATION_SCHEMA
+                    if stage == native_g1.STAGE
+                    else "agicore:invented-storage-replay-verification:v2"
+                )
                 or verification.get("status") != "PASS"
                 or type(verification.get("observations")) is not int
                 or verification.get("observations") != observations
@@ -1519,7 +1763,9 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
         if engine is not None:
             engine.dispose()
     report = {
-        "schema": "agicore:mission-report:v2",
+        "schema": native_g1.REPORT_SCHEMA
+        if stage == native_g1.STAGE
+        else "agicore:mission-report:v2",
         "task_id": task_id,
         "status": status,
         "observations": observations,
@@ -1534,7 +1780,12 @@ def _execute_mission(root: Path, mission: dict, *, resume: bool) -> dict:
         "limitations": [
             "Local deterministic adapters, not Terra or Codex model calls.",
             "Independent storage and event-pipeline verification uses the same frozen V2 predicates.",
-            "No full strategy replay, historical storage certification, or profitability.",
+            (
+                "Native V2 internally accounts invented fills; output excludes financial results. "
+                "Only fixed 64-observation synthetic profiles are covered."
+                if stage == native_g1.STAGE
+                else "No full strategy replay, historical storage certification, or profitability."
+            ),
             "Local hashes and runtime versions are not signatures or an operating-system sandbox.",
             "Child lifetime protection covers direct Linux children, not arbitrary descendants.",
             "The synchronous Linux supervisor must not start other threads while launching children.",
@@ -1570,9 +1821,19 @@ def main() -> None:
     parser.add_argument("--observations", type=int)
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument(
-        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit")
+        "--stage",
+        choices=(
+            "events",
+            "pullback",
+            "confirmation",
+            "stop",
+            "risk",
+            "entry",
+            "exit",
+            native_g1.STAGE,
+        ),
     )
-    parser.add_argument("--profile", choices=("standard", *PROFILES))
+    parser.add_argument("--profile", choices=("standard", *PROFILES, *native_g1.PROFILES))
     args = parser.parse_args()
     if args.resume and any(
         value is not None

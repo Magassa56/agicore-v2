@@ -25,6 +25,7 @@ from . import ema20_pullback_v2 as ema20
 from . import ema_pullback_v2_development_replay as replay
 from . import regime_context_v2 as regime
 from . import reversal_transition_v2 as reversal
+from . import synthetic_native_g1_v2 as native_g1
 from . import synthetic_pullback_replay_v2 as pullback
 from .synthetic_confirmation_fixture_v2 import (
     PROFILES as CONFIRMATION_PROFILES,
@@ -209,18 +210,41 @@ def produce(
     """Write one new synthetic bundle, then replay its event/context stages."""
     if type(observations) is not int or not 1 <= observations <= MAX_OBSERVATIONS:
         raise ValueError("observation count outside invented mission bounds")
-    if stage not in ("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"):
+    if stage not in (
+        "events",
+        "pullback",
+        "confirmation",
+        "stop",
+        "risk",
+        "entry",
+        "exit",
+        native_g1.STAGE,
+    ):
         raise ValueError("unsupported replay stage")
-    if profile not in ("standard", *CONFIRMATION_PROFILES):
+    if profile not in ("standard", *CONFIRMATION_PROFILES, *native_g1.PROFILES):
         raise ValueError("unsupported invented profile")
-    if profile != "standard" and stage not in ("confirmation", "stop", "risk", "entry", "exit"):
-        raise ValueError("confirmation profiles require the confirmation, stop, risk, entry or exit stage")
+    if profile in CONFIRMATION_PROFILES and stage not in (
+        "confirmation",
+        "stop",
+        "risk",
+        "entry",
+        "exit",
+    ):
+        raise ValueError(
+            "confirmation profiles require the confirmation, stop, risk, entry or exit stage"
+        )
     if stage in ("stop", "risk", "entry", "exit") and profile == "standard":
         raise ValueError(f"{stage} requires a fixed confirmation profile")
+    if (stage == native_g1.STAGE) != (profile in native_g1.PROFILES) or (
+        stage == native_g1.STAGE and observations != native_g1.OBSERVATIONS
+    ):
+        raise ValueError("native G1 requires a fixed invented 64-observation profile")
     start = time.perf_counter_ns()
     raw = (
         generate_observations(observations)
         if profile == "standard"
+        else native_g1.generate_fixture(profile, observations)
+        if profile in native_g1.PROFILES
         else generate_confirmation_fixture(profile, observations)
     )
     if sha(raw) == replay.CANONICAL_DATASET_RAW_SHA256:
@@ -253,7 +277,11 @@ def produce(
             }
         )
     manifest = {
-        "schema": SCHEMA if profile == "standard" else CONFIRMATION_BUNDLE_SCHEMA,
+        "schema": SCHEMA
+        if profile == "standard"
+        else native_g1.BUNDLE_SCHEMA
+        if profile in native_g1.PROFILES
+        else CONFIRMATION_BUNDLE_SCHEMA,
         "domain": "INVENTED_GENERATOR_ONLY",
         "observations": observations,
         "raw_bytes": len(raw),
@@ -281,15 +309,17 @@ def produce(
         replay_result = replay_risk_native(raw)
     elif stage == "entry":
         replay_result = replay_entry_native(raw)
-    else:
+    elif stage == "exit":
         replay_result = replay_exit_native(raw)
+    else:
+        replay_result = native_g1.project_worker(native_g1.evaluate_profile(profile), raw)
     peak_rss = (
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
-        if resource is not None
-        else 0
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024 if resource is not None else 0
     )
     result = {
-        "schema": "agicore:invented-storage-replay-worker:v2",
+        "schema": native_g1.WORKER_SCHEMA
+        if stage == native_g1.STAGE
+        else "agicore:invented-storage-replay-worker:v2",
         "domain": "SYNTHETIC_ONLY",
         "manifest_sha256": sha(manifest_bytes),
         "input_sha256": sha(raw),
@@ -312,10 +342,23 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--observations", type=int, required=True)
     parser.add_argument(
-        "--stage", choices=("events", "pullback", "confirmation", "stop", "risk", "entry", "exit"), default="events"
+        "--stage",
+        choices=(
+            "events",
+            "pullback",
+            "confirmation",
+            "stop",
+            "risk",
+            "entry",
+            "exit",
+            native_g1.STAGE,
+        ),
+        default="events",
     )
     parser.add_argument(
-        "--profile", choices=("standard", *CONFIRMATION_PROFILES), default="standard"
+        "--profile",
+        choices=("standard", *CONFIRMATION_PROFILES, *native_g1.PROFILES),
+        default="standard",
     )
     args = parser.parse_args()
     produce(args.bundle, args.observations, stage=args.stage, profile=args.profile)
