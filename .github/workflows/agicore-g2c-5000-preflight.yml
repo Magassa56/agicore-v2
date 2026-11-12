@@ -105,6 +105,12 @@ jobs:
                       'minimum_finite_headroom_bytes': min(finite) if finite else None,
                       'scope': 'visible cgroup namespace; diagnostic only, V3 guard unchanged'}
 
+          def optional_readlink(path):
+              try:
+                  return {'status': 'OBSERVED', 'value': os.readlink(path)}
+              except OSError as error:
+                  return {'status': 'UNAVAILABLE', 'reason': str(error)}
+
           contract_sha = '5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663'
           gate_sha = 'c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555'
           negative_sha = 'ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4'
@@ -144,8 +150,8 @@ jobs:
                             cgroup_hierarchy_diagnostic=inspect_cgroup(
                                 Path('/proc/self/cgroup').read_text(),
                                 Path('/proc/self/mountinfo').read_text(), Path('/sys/fs/cgroup')),
-                            cgroup_namespace={'self': os.readlink('/proc/self/ns/cgroup'),
-                                              'pid1': os.readlink('/proc/1/ns/cgroup'),
+                            cgroup_namespace={'self': optional_readlink('/proc/self/ns/cgroup'),
+                                              'pid1': optional_readlink('/proc/1/ns/cgroup'),
                                               'pid1_comm': Path('/proc/1/comm').read_text().strip(),
                                               'root_controllers': (Path('/sys/fs/cgroup/cgroup.controllers').read_text().strip()
                                                                    if Path('/sys/fs/cgroup/cgroup.controllers').is_file() else None)},
