@@ -1,0 +1,106 @@
+{
+  "archive_sha256": "8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7",
+  "cgroup_hierarchy_diagnostic": {
+    "mounts": [],
+    "reason": "cgroup-v2 root mount not fully visible",
+    "status": "UNKNOWN"
+  },
+  "cgroup_membership": "0::/",
+  "cgroup_memory": null,
+  "codec_profile": {
+    "algorithm": "RAW_DEFLATE",
+    "chunk_size": 1048576,
+    "fallback": "IDENTITY_IF_COMPRESSED_LENGTH_GREATER_THAN_OR_EQUAL_TO_UNCOMPRESSED_LENGTH",
+    "level": 9,
+    "memory_level": 8,
+    "profile_id": "EXACT_NATIVE_BYTE_SHARDS_DEFLATE_V1",
+    "python_executable_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+    "python_implementation": "CPython",
+    "python_version": "3.12.14",
+    "strategy": "Z_DEFAULT_STRATEGY",
+    "window_bits": -15,
+    "zlib_binary_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+    "zlib_compile_version": "1.3.2",
+    "zlib_module_origin": "built-in",
+    "zlib_runtime_version": "1.3.2"
+  },
+  "contract_sha256": "5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663",
+  "cpu_seconds": null,
+  "descendant_selfcheck": {
+    "elapsed_wall_ns": 2008471289,
+    "status": "PASS",
+    "worker_and_descendant_stopped": true
+  },
+  "disk_free_bytes": 62364983296,
+  "error_type": "RuntimeError",
+  "gate_sha256": "c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555",
+  "inherited_limits": {
+    "address_space": [
+      -1,
+      -1
+    ],
+    "cpu": [
+      -1,
+      -1
+    ],
+    "file": [
+      -1,
+      -1
+    ]
+  },
+  "limit_selfcheck": {
+    "measurement": {
+      "address_space_limit_bytes": 2147483648,
+      "cpu_limit_seconds": 150,
+      "cpu_ns": 18135000,
+      "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+      "exit_code": 0,
+      "file_limit_bytes": 67108864,
+      "peak_rss_bytes": 48832512,
+      "physical_bytes": 4096,
+      "physical_limit_bytes": 268435456,
+      "reason": null,
+      "status": "PASS",
+      "wall_limit_seconds": 240,
+      "wall_ns": 100835640
+    },
+    "observed": {
+      "as": [
+        2147483648,
+        2147483648
+      ],
+      "cpu": [
+        150,
+        150
+      ],
+      "file": [
+        67108864,
+        67108864
+      ],
+      "group_leader": true
+    },
+    "status": "PASS"
+  },
+  "memory_available_bytes": 8989376512,
+  "negative_sha256": "ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4",
+  "oos_accessed": false,
+  "previous_1000_gate": "PASS",
+  "previous_negative_checks": "PASS",
+  "real_data_accessed": false,
+  "reason": "effective cgroup memory limit is not observable",
+  "replay_1000": "NOT_EXECUTED",
+  "replay_5000": "NOT_EXECUTED",
+  "resource_caps": {
+    "address_space_bytes": 2147483648,
+    "cpu_seconds": 150,
+    "file_bytes": 67108864,
+    "logical_bytes": 268435456,
+    "physical_bytes": 268435456,
+    "tier_physical_bytes": 1073741824,
+    "wall_seconds": 240
+  },
+  "schema": "agicore:g2c-host-preflight-only:v1",
+  "status": "BLOCKED",
+  "utc": "2026-11-12T00:38:54.816326Z",
+  "wall_seconds": null
+}

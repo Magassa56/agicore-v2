@@ -33,6 +33,7 @@ jobs:
             -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
             python3 -B - <<'PY'
           import json
+          import re
           import resource
           import shutil
           import sys
@@ -51,6 +52,48 @@ jobs:
               run_worker,
               supervision_selfcheck,
           )
+
+          def inspect_cgroup(membership_text, mountinfo_text, cgroup_root):
+              """Read the process group and every visible ancestor, without changing limits."""
+              lines = membership_text.splitlines()
+              if len(lines) != 1 or not lines[0].startswith('0::/'):
+                  return {'status': 'UNKNOWN', 'reason': 'ambiguous cgroup-v2 membership'}
+              relative = Path(lines[0][4:])
+              if relative.is_absolute() or any(x in ('.', '..') for x in relative.parts):
+                  return {'status': 'UNKNOWN', 'reason': 'invalid cgroup path'}
+              mounts = []
+              for line in mountinfo_text.splitlines():
+                  parts = line.split(' - ', 1)
+                  if len(parts) == 2 and parts[1].split()[0] == 'cgroup2':
+                      fields = parts[0].split()
+                      unescape = lambda v: re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), v)
+                      mounts.append((unescape(fields[3]), unescape(fields[4])))
+              if mounts != [('/', '/sys/fs/cgroup')]:
+                  return {'status': 'UNKNOWN', 'reason': 'cgroup-v2 root mount not fully visible',
+                          'mounts': mounts}
+              node = cgroup_root / relative
+              parents = [node, *node.parents]
+              if cgroup_root not in parents:
+                  return {'status': 'UNKNOWN', 'reason': 'cgroup escapes mount'}
+              ancestors = []
+              try:
+                  for directory in parents[:parents.index(cgroup_root) + 1]:
+                      if directory.is_symlink():
+                          raise RuntimeError('symlink cgroup path')
+                      maximum = (directory / 'memory.max').read_text().strip()
+                      current = int((directory / 'memory.current').read_text().strip())
+                      limit = None if maximum == 'max' else int(maximum)
+                      if current < 0 or (limit is not None and limit < 0):
+                          raise ValueError('negative cgroup limit')
+                      ancestors.append({'group': '/' + str(directory.relative_to(cgroup_root)),
+                                        'limit_bytes': limit, 'current_bytes': current,
+                                        'headroom_bytes': None if limit is None else max(0, limit-current)})
+              except (OSError, ValueError, RuntimeError) as error:
+                  return {'status': 'UNKNOWN', 'reason': str(error), 'ancestors': ancestors}
+              finite = [x['headroom_bytes'] for x in ancestors if x['headroom_bytes'] is not None]
+              return {'status': 'OBSERVED', 'mount_root': '/', 'ancestors': ancestors,
+                      'minimum_finite_headroom_bytes': min(finite) if finite else None,
+                      'scope': 'visible cgroup namespace; diagnostic only, V3 guard unchanged'}
 
           contract_sha = '5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663'
           gate_sha = 'c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555'
@@ -88,6 +131,9 @@ jobs:
               result.update(memory_available_bytes=_memory_available(),
                             disk_free_bytes=shutil.disk_usage(root).free,
                             cgroup_membership=Path('/proc/self/cgroup').read_text().strip(),
+                            cgroup_hierarchy_diagnostic=inspect_cgroup(
+                                Path('/proc/self/cgroup').read_text(),
+                                Path('/proc/self/mountinfo').read_text(), Path('/sys/fs/cgroup')),
                             cgroup_memory=_cgroup_memory(), codec_profile=profile,
                             inherited_limits={'address_space': list(resource.getrlimit(resource.RLIMIT_AS)),
                                               'cpu': list(resource.getrlimit(resource.RLIMIT_CPU)),
