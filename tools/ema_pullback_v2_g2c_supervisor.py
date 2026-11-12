@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import resource
 import shutil
 import signal
@@ -19,7 +20,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agicore.trading.ema_pullback_v2_g2c_scaling import load_contract
-from agicore.trading.ema_pullback_v2_storage_format import canonical, immutable_write, sha
+from agicore.trading.ema_pullback_v2_storage_format import (
+    canonical,
+    immutable_write,
+    regular_read,
+    sha,
+)
 
 
 def _utc() -> str:
@@ -197,13 +203,110 @@ def _cgroup_memory(
         return None
 
 
-def preflight(caps: dict, destination: Path, *, require_cgroup_memory: bool = False) -> dict:
+def _cgroup_memory_v4(
+    *,
+    membership_path: Path = Path("/proc/self/cgroup"),
+    namespace_path: Path = Path("/proc/self/ns/cgroup"),
+    mountinfo_path: Path = Path("/proc/self/mountinfo"),
+    root: Path = Path("/sys/fs/cgroup"),
+) -> dict | None:
+    """Fail closed unless the entire initial cgroup-v2 hierarchy is visible.
+
+    Linux exposes memory.max/current only on non-root cgroups. Both hard and
+    high limits on every ancestor contribute to the conservative headroom.
+    """
+    try:
+        if os.readlink(namespace_path) != "cgroup:[4026531835]":
+            return None
+        lines = membership_path.read_text().splitlines()
+        if len(lines) != 1 or not lines[0].startswith("0::/"):
+            return None
+        parts = lines[0][4:].split("/") if lines[0] != "0::/" else []
+        if any(part in ("", ".", "..") for part in parts):
+            return None
+        mounts = []
+        for line in mountinfo_path.read_text().splitlines():
+            fields = line.split(" - ", 1)
+            if len(fields) != 2 or fields[1].split()[0] != "cgroup2":
+                continue
+            before = fields[0].split()
+            unescape = lambda value: re.sub(  # noqa: E731
+                r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), value
+            )
+            if len(before) < 5:
+                return None
+            mountpoint = unescape(before[4])
+            if mountpoint == str(root):
+                mounts.append(unescape(before[3]))
+        if mounts != ["/"] or "memory" not in (root / "cgroup.controllers").read_text().split():
+            return None
+        if root.is_symlink() or (root / "memory.max").exists():
+            return None
+        node = root
+        directories = []
+        for part in parts:
+            node = node / part
+            if node.is_symlink() or not node.is_dir():
+                return None
+            directories.append(node)
+        ancestors = []
+        finite = []
+        cpus = []
+        for directory in reversed(directories):
+            current = int((directory / "memory.current").read_text().strip())
+            if current < 0:
+                return None
+            values = {}
+            for name in ("memory.max", "memory.high"):
+                value = (directory / name).read_text().strip()
+                limit = None if value == "max" else int(value)
+                if limit is not None:
+                    if limit < 0:
+                        return None
+                    finite.append((max(0, limit - current), limit, current))
+                values[name] = limit
+            cpu = (directory / "cpu.max").read_text().split()
+            if len(cpu) != 2 or int(cpu[1]) <= 0:
+                return None
+            quota = None if cpu[0] == "max" else int(cpu[0])
+            if quota is not None and quota <= 0:
+                return None
+            cpus.append({"quota": quota, "period": int(cpu[1])})
+            ancestors.append(
+                {
+                    "group": "/" + str(directory.relative_to(root)),
+                    "current_bytes": current,
+                    "memory_max_bytes": values["memory.max"],
+                    "memory_high_bytes": values["memory.high"],
+                    "cpu_quota": quota,
+                    "cpu_period": int(cpu[1]),
+                }
+            )
+        _, limit, current = min(finite) if finite else (None, None, 0)
+        return {
+            "limit_bytes": limit,
+            "current_bytes": current,
+            "ancestors": ancestors,
+            "root": "INITIAL_NAMESPACE_ROOT_NO_MEMORY_MAX",
+            "cpu_limits": cpus,
+        }
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def preflight(
+    caps: dict,
+    destination: Path,
+    *,
+    require_cgroup_memory: bool = False,
+    cgroup_v4: bool = False,
+) -> dict:
     """Check observed host headroom and inherited Linux limits before a tier."""
     if sys.platform != "linux" or not Path("/proc/meminfo").is_file():
         raise RuntimeError("Linux resource supervision unavailable")
     memory = _memory_available()
     disk = shutil.disk_usage(destination.parent).free
-    group = _cgroup_memory()
+    group = _cgroup_memory_v4() if cgroup_v4 else _cgroup_memory()
     if require_cgroup_memory and group is None:
         raise RuntimeError("effective cgroup memory limit is not observable")
     available = memory
@@ -212,6 +315,16 @@ def preflight(caps: dict, destination: Path, *, require_cgroup_memory: bool = Fa
     disk_budget = max(caps["physical_bytes"], caps.get("tier_physical_bytes", 0))
     if available < caps["address_space_bytes"] * 2 or disk < disk_budget * 2:
         raise RuntimeError("insufficient observed memory or storage headroom")
+    if (
+        cgroup_v4
+        and group is not None
+        and any(
+            item["quota"] is not None
+            and item["quota"] * caps["wall_seconds"] < item["period"] * caps["cpu_seconds"]
+            for item in group["cpu_limits"]
+        )
+    ):
+        raise RuntimeError("cgroup CPU quota cannot support the committed CPU/wall budget")
     for key, requested in (
         (resource.RLIMIT_AS, caps["address_space_bytes"]),
         (resource.RLIMIT_CPU, caps["cpu_seconds"]),
@@ -289,11 +402,36 @@ def _require_gate(args, contract: dict) -> None:
     raw = path.read_bytes()
     gate = json.loads(raw)
     items = gate.get("fixtures", [])
+    expected_contract = args.contract_sha256
+    if contract.get("schema") == "agicore:g2c-invented-scaling-contract:v4":
+        predecessor = contract["predecessor"]
+        expected_contract = predecessor["contract_sha256"]
+        evidence = Path(__file__).resolve().parents[1] / "docs/evidence"
+        negative = regular_read(
+            evidence / "AGICORE_G2C_1000_9E6E_NEGATIVE_20261111.json", limit=2_097_152
+        )
+        bundles = regular_read(
+            evidence / "AGICORE_G2C_1000_9E6E_BUNDLES_20261111.zip", limit=16_777_216
+        )
+        checks = json.loads(negative)
+        cases = checks.get("results", [])
+        if (
+            args.gate_sha256 != predecessor["gate_report_sha256"]
+            or sha(negative) != predecessor["negative_report_sha256"]
+            or sha(bundles) != predecessor["bundles_sha256"]
+            or checks.get("status") != "PASS"
+            or checks.get("contract_sha256") != expected_contract
+            or checks.get("tier_report_sha256") != args.gate_sha256
+            or len(cases) != 36
+            or sum(item.get("actual") == "PASS" for item in cases) != 6
+            or sum(item.get("actual") == "REJECTED" for item in cases) != 30
+        ):
+            raise RuntimeError("historical 1000 negative evidence identity/status mismatch")
     if (
         sha(raw) != args.gate_sha256
         or gate.get("status") != "PASS"
         or gate.get("tier") != 1000
-        or gate.get("contract_sha256") != args.contract_sha256
+        or gate.get("contract_sha256") != expected_contract
         or [item["fixture"] for item in items] != contract["tier_fixtures"]["1000"]
         or any(
             item.get("parity", {}).get("status") != "PASS"
@@ -321,7 +459,12 @@ def _worker(args) -> None:
     caps = contract["tiers"][str(tier)]
     if tier == 5000:
         _require_gate(args, contract)
-        preflight(caps, Path.cwd() / "g2c-worker-resource-check", require_cgroup_memory=True)
+        preflight(
+            caps,
+            Path.cwd() / "g2c-worker-resource-check",
+            require_cgroup_memory=True,
+            cgroup_v4=contract["schema"].endswith(":v4"),
+        )
     for key, expected in (
         (resource.RLIMIT_AS, caps["address_space_bytes"]),
         (resource.RLIMIT_CPU, caps["cpu_seconds"]),
@@ -374,7 +517,12 @@ def run_tier(args) -> int:
     ):
         raise RuntimeError("invalid or existing output path")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    ready = preflight(caps, destination, require_cgroup_memory=args.tier == 5000)
+    ready = preflight(
+        caps,
+        destination,
+        require_cgroup_memory=args.tier == 5000,
+        cgroup_v4=contract["schema"].endswith(":v4"),
+    )
     destination.mkdir()
     root = Path(__file__).resolve().parents[1]
     ready["process_group_selfcheck"] = supervision_selfcheck(

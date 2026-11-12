@@ -1,0 +1,227 @@
+{
+  "github_run_url": "https://github.com/Magassa56/agicore-v2/actions/runs/43130776914",
+  "head_sha": "87d9fa662898eda534aadad5189b17c0c1038fb3",
+  "observed": {
+    "archive_sha256": "8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7",
+    "cgroup_hierarchy_diagnostic": {
+      "ancestors": [
+        {
+          "cpu_max": "max 100000",
+          "current_bytes": 397402112,
+          "group": "/system.slice/hosted-compute-agent.service",
+          "headroom_bytes": null,
+          "high_headroom_bytes": null,
+          "limit_bytes": null,
+          "memory_high_bytes": null
+        },
+        {
+          "cpu_max": "max 100000",
+          "current_bytes": 1225355264,
+          "group": "/system.slice",
+          "headroom_bytes": null,
+          "high_headroom_bytes": null,
+          "limit_bytes": null,
+          "memory_high_bytes": null
+        },
+        {
+          "group": "/",
+          "type": "ROOT_NO_MEMORY_MAX_FILE"
+        }
+      ],
+      "minimum_finite_headroom_bytes": null,
+      "mount_root": "/",
+      "scope": "visible cgroup namespace; additional diagnostic only",
+      "status": "OBSERVED"
+    },
+    "cgroup_membership": "0::/system.slice/hosted-compute-agent.service",
+    "cgroup_memory": {
+      "ancestors": [
+        {
+          "cpu_period": 100000,
+          "cpu_quota": null,
+          "current_bytes": 397402112,
+          "group": "/system.slice/hosted-compute-agent.service",
+          "memory_high_bytes": null,
+          "memory_max_bytes": null
+        },
+        {
+          "cpu_period": 100000,
+          "cpu_quota": null,
+          "current_bytes": 1225355264,
+          "group": "/system.slice",
+          "memory_high_bytes": null,
+          "memory_max_bytes": null
+        }
+      ],
+      "cpu_limits": [
+        {
+          "period": 100000,
+          "quota": null
+        },
+        {
+          "period": 100000,
+          "quota": null
+        }
+      ],
+      "current_bytes": 0,
+      "limit_bytes": null,
+      "root": "INITIAL_NAMESPACE_ROOT_NO_MEMORY_MAX"
+    },
+    "cgroup_namespace": {
+      "pid1": {
+        "reason": "[Errno 13] Permission denied: '/proc/1/ns/cgroup'",
+        "status": "UNAVAILABLE"
+      },
+      "pid1_comm": "systemd",
+      "root_controllers": "cpuset cpu io memory hugetlb pids rdma misc dmem",
+      "self": {
+        "status": "OBSERVED",
+        "value": "cgroup:[4026531835]"
+      }
+    },
+    "codec_profile": {
+      "algorithm": "RAW_DEFLATE",
+      "chunk_size": 1048576,
+      "fallback": "IDENTITY_IF_COMPRESSED_LENGTH_GREATER_THAN_OR_EQUAL_TO_UNCOMPRESSED_LENGTH",
+      "level": 9,
+      "memory_level": 8,
+      "profile_id": "EXACT_NATIVE_BYTE_SHARDS_DEFLATE_V1",
+      "python_executable_sha256": "b41931ede07c48874a96d435155f3c1691cc5bf6e0d1104370c28ad8eb3f8532",
+      "python_implementation": "CPython",
+      "python_version": "3.12.16",
+      "strategy": "Z_DEFAULT_STRATEGY",
+      "window_bits": -15,
+      "zlib_binary_sha256": "a1113eae44d89b07c59d7cc96f7e96696e35b2b79693b0532cad923838a6642a",
+      "zlib_compile_version": "1.3.1",
+      "zlib_module_origin": "/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/lib-dynload/zlib.cpython-312-x86_64-linux-gnu.so",
+      "zlib_runtime_version": "1.3.1"
+    },
+    "contract_sha256": "e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f",
+    "cpu_seconds": null,
+    "descendant_selfcheck": {
+      "elapsed_wall_ns": 2006711744,
+      "status": "PASS",
+      "worker_and_descendant_stopped": true
+    },
+    "disk_free_bytes": 94199496704,
+    "gate_sha256": "c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555",
+    "inherited_limits": {
+      "address_space": [
+        -1,
+        -1
+      ],
+      "cpu": [
+        -1,
+        -1
+      ],
+      "file": [
+        -1,
+        -1
+      ]
+    },
+    "limit_selfcheck": {
+      "measurement": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 20986000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 26513408,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 101035656
+      },
+      "observed": {
+        "as": [
+          2147483648,
+          2147483648
+        ],
+        "cpu": [
+          150,
+          150
+        ],
+        "file": [
+          67108864,
+          67108864
+        ],
+        "group_leader": true
+      },
+      "status": "PASS"
+    },
+    "memory_available_bytes": 15763251200,
+    "negative_sha256": "ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4",
+    "oos_accessed": false,
+    "preflight": {
+      "available_effective_memory_bytes": 15766024192,
+      "available_memory_bytes": 15766024192,
+      "cgroup_memory": {
+        "ancestors": [
+          {
+            "cpu_period": 100000,
+            "cpu_quota": null,
+            "current_bytes": 400211968,
+            "group": "/system.slice/hosted-compute-agent.service",
+            "memory_high_bytes": null,
+            "memory_max_bytes": null
+          },
+          {
+            "cpu_period": 100000,
+            "cpu_quota": null,
+            "current_bytes": 1228361728,
+            "group": "/system.slice",
+            "memory_high_bytes": null,
+            "memory_max_bytes": null
+          }
+        ],
+        "cpu_limits": [
+          {
+            "period": 100000,
+            "quota": null
+          },
+          {
+            "period": 100000,
+            "quota": null
+          }
+        ],
+        "current_bytes": 0,
+        "limit_bytes": null,
+        "root": "INITIAL_NAMESPACE_ROOT_NO_MEMORY_MAX"
+      },
+      "cgroup_memory_limit_note": "NOT_VERIFIED_IF_NOT_VISIBLE",
+      "free_disk_bytes": 94199480320,
+      "limits": {
+        "address_space_bytes": 2147483648,
+        "cpu_seconds": 150,
+        "file_bytes": 67108864,
+        "logical_bytes": 268435456,
+        "physical_bytes": 268435456,
+        "tier_physical_bytes": 1073741824,
+        "wall_seconds": 240
+      },
+      "status": "PASS",
+      "utc": "2026-11-12T00:55:04.789860Z"
+    },
+    "previous_1000_gate": "PASS",
+    "previous_negative_checks": "PASS",
+    "real_data_accessed": false,
+    "replay_1000": "NOT_EXECUTED",
+    "replay_5000": "NOT_EXECUTED",
+    "resource_caps": {
+      "address_space_bytes": 2147483648,
+      "cpu_seconds": 150,
+      "file_bytes": 67108864,
+      "logical_bytes": 268435456,
+      "physical_bytes": 268435456,
+      "tier_physical_bytes": 1073741824,
+      "wall_seconds": 240
+    },
+    "schema": "agicore:g2c-host-preflight-only:v1",
+    "status": "PASS_PREFLIGHT_ONLY",
+    "utc": "2026-11-12T00:55:02.639364Z",
+    "wall_seconds": null
+  }
+}

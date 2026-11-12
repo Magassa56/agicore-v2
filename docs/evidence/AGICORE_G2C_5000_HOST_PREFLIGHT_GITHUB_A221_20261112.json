@@ -1,0 +1,22 @@
+{
+  "github_run_id": 43129271726,
+  "github_job_id": 130889075432,
+  "head_sha": "a2216277e2e003c003f594c74df6e1d0e6674559",
+  "result": {
+    "archive_sha256": "8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7",
+    "contract_sha256": "5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663",
+    "cpu_seconds": null,
+    "error_type": "PermissionError",
+    "gate_sha256": "c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555",
+    "negative_sha256": "ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4",
+    "oos_accessed": false,
+    "real_data_accessed": false,
+    "reason": "[Errno 13] Permission denied: '/proc/1/ns/cgroup'",
+    "replay_1000": "NOT_EXECUTED",
+    "replay_5000": "NOT_EXECUTED",
+    "schema": "agicore:g2c-host-preflight-only:v1",
+    "status": "BLOCKED",
+    "utc": "2026-11-12T00:42:48.879868Z",
+    "wall_seconds": null
+  }
+}

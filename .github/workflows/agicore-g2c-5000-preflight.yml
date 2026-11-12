@@ -1,0 +1,197 @@
+name: AGIcore G2C 5000 host preflight
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/agicore-g2c-5000-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    if: >-
+      github.event.pull_request.head.repo.full_name == 'Magassa56/agicore-v2' &&
+      github.event.pull_request.head.ref == 'feature/agicore-g2c-5000-preflight-20261112'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact preflight branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Select the validated Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify existing 1000 gate and host limits only
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONNOUSERSITE: '1'
+          PYTHONPATH: src:.
+        run: |
+          env -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN \
+            -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+            python3 -B - <<'PY'
+          import json
+          import os
+          import re
+          import resource
+          import shutil
+          import sys
+          import tempfile
+          from datetime import UTC, datetime
+          from pathlib import Path
+          from types import SimpleNamespace
+
+          from agicore.trading.ema_pullback_v2_g2c_scaling import load_contract
+          from agicore.trading.ema_pullback_v2_storage_format import codec_profile, sha
+          from tools.ema_pullback_v2_g2c_supervisor import (
+              _cgroup_memory_v4,
+              _memory_available,
+              _require_gate,
+              preflight,
+              run_worker,
+              supervision_selfcheck,
+          )
+
+          def inspect_cgroup(membership_text, mountinfo_text, cgroup_root):
+              """Read the process group and every visible ancestor, without changing limits."""
+              lines = membership_text.splitlines()
+              if len(lines) != 1 or not lines[0].startswith('0::/'):
+                  return {'status': 'UNKNOWN', 'reason': 'ambiguous cgroup-v2 membership'}
+              relative = Path(lines[0][4:])
+              if relative.is_absolute() or any(x in ('.', '..') for x in relative.parts):
+                  return {'status': 'UNKNOWN', 'reason': 'invalid cgroup path'}
+              mounts = []
+              for line in mountinfo_text.splitlines():
+                  parts = line.split(' - ', 1)
+                  if len(parts) == 2 and parts[1].split()[0] == 'cgroup2':
+                      fields = parts[0].split()
+                      unescape = lambda v: re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), v)
+                      mounts.append((unescape(fields[3]), unescape(fields[4])))
+              if mounts != [('/', '/sys/fs/cgroup')]:
+                  return {'status': 'UNKNOWN', 'reason': 'cgroup-v2 root mount not fully visible',
+                          'mounts': mounts}
+              node = cgroup_root / relative
+              parents = [node, *node.parents]
+              if cgroup_root not in parents:
+                  return {'status': 'UNKNOWN', 'reason': 'cgroup escapes mount'}
+              ancestors = []
+              try:
+                  for directory in parents[:parents.index(cgroup_root) + 1]:
+                      if directory.is_symlink():
+                          raise RuntimeError('symlink cgroup path')
+                      if directory == cgroup_root and not (directory / 'memory.max').exists():
+                          ancestors.append({'group': '/', 'type': 'ROOT_NO_MEMORY_MAX_FILE'})
+                          continue
+                      maximum = (directory / 'memory.max').read_text().strip()
+                      high_text = (directory / 'memory.high').read_text().strip()
+                      current = int((directory / 'memory.current').read_text().strip())
+                      limit = None if maximum == 'max' else int(maximum)
+                      high = None if high_text == 'max' else int(high_text)
+                      if current < 0 or (limit is not None and limit < 0) or (high is not None and high < 0):
+                          raise ValueError('negative cgroup limit')
+                      cpu = (directory / 'cpu.max').read_text().strip() if (directory / 'cpu.max').is_file() else None
+                      ancestors.append({'group': '/' + str(directory.relative_to(cgroup_root)),
+                                        'limit_bytes': limit, 'current_bytes': current,
+                                        'memory_high_bytes': high, 'cpu_max': cpu,
+                                        'high_headroom_bytes': None if high is None else max(0, high-current),
+                                        'headroom_bytes': None if limit is None else max(0, limit-current)})
+              except (OSError, ValueError, RuntimeError) as error:
+                  return {'status': 'UNKNOWN', 'reason': str(error), 'ancestors': ancestors}
+              finite = [x[k] for x in ancestors for k in ('headroom_bytes', 'high_headroom_bytes')
+                        if x.get(k) is not None]
+              return {'status': 'OBSERVED', 'mount_root': '/', 'ancestors': ancestors,
+                      'minimum_finite_headroom_bytes': min(finite) if finite else None,
+                      'scope': 'visible cgroup namespace; additional diagnostic only'}
+
+          def optional_readlink(path):
+              try:
+                  return {'status': 'OBSERVED', 'value': os.readlink(path)}
+              except OSError as error:
+                  return {'status': 'UNAVAILABLE', 'reason': str(error)}
+
+          contract_sha = 'e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f'
+          gate_sha = 'c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555'
+          negative_sha = 'ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4'
+          archive_sha = '8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7'
+          root = Path.cwd()
+          gate_path = root / 'docs/evidence/AGICORE_G2C_1000_9E6E_TIER_REPORT_20261111.json'
+          negative_path = root / 'docs/evidence/AGICORE_G2C_1000_9E6E_NEGATIVE_20261111.json'
+          archive_path = root / 'docs/evidence/AGICORE_G2C_1000_9E6E_BUNDLES_20261111.zip'
+          result = {'schema': 'agicore:g2c-host-preflight-only:v1',
+                    'utc': datetime.now(UTC).isoformat().replace('+00:00', 'Z'),
+                    'status': 'BLOCKED', 'contract_sha256': contract_sha,
+                    'gate_sha256': gate_sha, 'negative_sha256': negative_sha,
+                    'archive_sha256': archive_sha, 'replay_1000': 'NOT_EXECUTED',
+                    'replay_5000': 'NOT_EXECUTED', 'real_data_accessed': False,
+                    'oos_accessed': False, 'cpu_seconds': None, 'wall_seconds': None}
+          try:
+              contract = load_contract(contract_sha)
+              caps = contract['tiers']['5000']
+              _require_gate(SimpleNamespace(gate_report=gate_path, gate_sha256=gate_sha,
+                                            contract_sha256=contract_sha), contract)
+              negative_bytes = negative_path.read_bytes()
+              if sha(negative_bytes) != negative_sha or sha(archive_path.read_bytes()) != archive_sha:
+                  raise RuntimeError('previous independent evidence identity mismatch')
+              negative = json.loads(negative_bytes)
+              cases = negative['results']
+              if (negative['status'] != 'PASS' or negative['tier_report_sha256'] != gate_sha
+                      or negative['contract_sha256'] != contract['predecessor']['contract_sha256']
+                      or len(cases) != 36
+                      or sum(x['actual'] == 'PASS' for x in cases) != 6
+                      or sum(x['actual'] == 'REJECTED' for x in cases) != 30):
+                  raise RuntimeError('previous negative checks are incomplete')
+              profile = codec_profile()
+              if any(profile[k] != v for k, v in contract['codec'].items()):
+                  raise RuntimeError('codec specification differs from the contract')
+              result.update(memory_available_bytes=_memory_available(),
+                            disk_free_bytes=shutil.disk_usage(root).free,
+                            cgroup_membership=Path('/proc/self/cgroup').read_text().strip(),
+                            cgroup_hierarchy_diagnostic=inspect_cgroup(
+                                Path('/proc/self/cgroup').read_text(),
+                                Path('/proc/self/mountinfo').read_text(), Path('/sys/fs/cgroup')),
+                            cgroup_namespace={'self': optional_readlink('/proc/self/ns/cgroup'),
+                                              'pid1': optional_readlink('/proc/1/ns/cgroup'),
+                                              'pid1_comm': Path('/proc/1/comm').read_text().strip(),
+                                              'root_controllers': (Path('/sys/fs/cgroup/cgroup.controllers').read_text().strip()
+                                                                   if Path('/sys/fs/cgroup/cgroup.controllers').is_file() else None)},
+                            cgroup_memory=_cgroup_memory_v4(), codec_profile=profile,
+                            inherited_limits={'address_space': list(resource.getrlimit(resource.RLIMIT_AS)),
+                                              'cpu': list(resource.getrlimit(resource.RLIMIT_CPU)),
+                                              'file': list(resource.getrlimit(resource.RLIMIT_FSIZE))},
+                            resource_caps=caps, previous_1000_gate='PASS',
+                            previous_negative_checks='PASS')
+              with tempfile.TemporaryDirectory(prefix='agicore-g2c-host-') as temporary:
+                  directory = Path(temporary)
+                  result['descendant_selfcheck'] = supervision_selfcheck(
+                      directory / 'descendants', caps, root=root)
+                  code = ('import json,os,resource;print(json.dumps({'
+                          '"as":resource.getrlimit(resource.RLIMIT_AS),'
+                          '"cpu":resource.getrlimit(resource.RLIMIT_CPU),'
+                          '"file":resource.getrlimit(resource.RLIMIT_FSIZE),'
+                          '"group_leader":os.getsid(0)==os.getpid()}))')
+                  measured, observed = run_worker([sys.executable, '-B', '-c', code],
+                                                  directory / 'limits', caps, root=root)
+                  expected = {'as': [caps['address_space_bytes']] * 2,
+                              'cpu': [caps['cpu_seconds']] * 2,
+                              'file': [caps['file_bytes']] * 2, 'group_leader': True}
+                  if measured['status'] != 'PASS' or observed != expected:
+                      raise RuntimeError('precommitted process limits did not take effect')
+                  result['limit_selfcheck'] = {'status': 'PASS', 'observed': observed,
+                                               'measurement': measured}
+                  result['preflight'] = preflight(caps, directory / 'prospective-run',
+                                                  require_cgroup_memory=True, cgroup_v4=True)
+              result['status'] = 'PASS_PREFLIGHT_ONLY'
+          except Exception as error:
+              result['error_type'] = type(error).__name__
+              result['reason'] = str(error)
+          print('G2C_PREFLIGHT_RESULT=' + json.dumps(result, sort_keys=True, separators=(',', ':')))
+          if result['status'] != 'PASS_PREFLIGHT_ONLY':
+              raise SystemExit(1)
+          PY
