@@ -7,10 +7,8 @@ There is no replay entry point in this module.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
-import os
 import sys
 import re
 from decimal import Decimal
@@ -37,7 +35,9 @@ from .ema_pullback_v2_storage_format import (
 )
 
 V4_SHA = "e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f"
-REGISTRATION = ROOT / "docs/evidence/EMA_PULLBACK_V2_G2C_VERIFIER_V5.json"
+PREDECESSOR = "95e836f3897a973d08e8a38e3845bc4e15d53e67996f03f718dc6f9f05445a35"
+REGISTRATION = ROOT / "docs/evidence/EMA_PULLBACK_V2_G2C_VERIFIER_V5_1.json"
+WORKER = "tools/ema_pullback_v2_g2c_verifier_worker_v5.py"
 MODULE = "src/agicore/trading/ema_pullback_v2_g2c_verifier_v5.py"
 INTEGER = re.compile(r"-?(?:0|[1-9][0-9]*)")
 
@@ -107,11 +107,18 @@ def load_registration(expected_sha256: str) -> dict:
     """Authenticate the additive verifier and the complete original V4 source closure."""
     raw = regular_read(REGISTRATION, limit=4096)
     require(sha(raw) == expected_sha256, "external V5 verifier identity")
+    require(
+        sha(regular_read(REGISTRATION.with_name("EMA_PULLBACK_V2_G2C_VERIFIER_V5.json"), 4096))
+        == PREDECESSOR,
+        "V5 predecessor identity",
+    )
     contract = v4.load_contract(V4_SHA)
     require(
         parse_canonical([raw])
         == {
-            "schema": "agicore:g2c-independent-verifier-registration:v5",
+            "schema": "agicore:g2c-independent-verifier-registration:v5.1",
+            "predecessor_sha256": PREDECESSOR,
+            "worker": {"path": WORKER, "sha256": sha(regular_read(ROOT / WORKER))},
             "producer_contract_sha256": V4_SHA,
             "producer_source_closure_sha256": contract["source_closure_sha256"],
             "verifier": {"path": MODULE, "sha256": sha(regular_read(ROOT / MODULE))},
@@ -294,35 +301,9 @@ def verify_bundle(
         raise StorageProofError("invalid G2C V5 bundle: FAIL_CLOSED") from exc
 
 
-def _worker_limits(args, contract):
-    """Use the V4 supervisor gates and require its exact process limits, before opening a bundle."""
-    import resource
-    from tools.ema_pullback_v2_g2c_supervisor import _require_gate, preflight
-
-    require(args.fixture in contract["fixtures"], "unregistered worker fixture")
-    tier = contract["fixtures"][args.fixture]["observations"]
-    caps = contract["tiers"][str(tier)]
-    require(os.getsid(0) == os.getpid(), "supervised verifier process group")
-    for key, cap in (
-        (resource.RLIMIT_AS, "address_space_bytes"),
-        (resource.RLIMIT_CPU, "cpu_seconds"),
-        (resource.RLIMIT_FSIZE, "file_bytes"),
-    ):
-        require(resource.getrlimit(key) == (caps[cap], caps[cap]), "supervised verifier limits")
-    if tier == 5000:
-        args.contract_sha256 = V4_SHA
-        _require_gate(args, contract)
-        preflight(
-            caps,
-            Path.cwd() / "g2c-worker-resource-check",
-            require_cgroup_memory=True,
-            cgroup_v4=True,
-        )
-
-
 def _loaded_sources(contract):
     """Check the actual verification imports before emitting a supervised receipt."""
-    allowed = {e["path"] for e in contract["source_closure"]} | {MODULE}
+    allowed = {e["path"] for e in contract["source_closure"]} | {MODULE, WORKER}
     for module in list(sys.modules.values()):
         name = getattr(module, "__file__", None)
         if name:
@@ -331,36 +312,3 @@ def _loaded_sources(contract):
                 require(
                     path.relative_to(ROOT).as_posix() in allowed, "unregistered verifier source"
                 )
-
-
-def main() -> None:
-    """Verify only; V5 sealing is explicit, exclusive and never runs a strategy."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundle", type=Path, required=True)
-    parser.add_argument("--verifier-sha256", required=True)
-    parser.add_argument("--manifest-sha256", required=True)
-    parser.add_argument("--native-sha256", required=True)
-    parser.add_argument("--fixture", required=True)
-    parser.add_argument("--gate-report", type=Path)
-    parser.add_argument("--gate-sha256")
-    parser.add_argument("--seal", action="store_true")
-    args = parser.parse_args()
-    contract = load_registration(args.verifier_sha256)
-    _worker_limits(args, contract)
-    print(
-        canonical(
-            verify_bundle(
-                args.bundle,
-                expected_verifier_sha256=args.verifier_sha256,
-                expected_manifest_sha256=args.manifest_sha256,
-                expected_native_sha256=args.native_sha256,
-                seal=args.seal,
-                expected_fixture=args.fixture,
-            )
-        ).decode(),
-        end="",
-    )
-
-
-if __name__ == "__main__":
-    main()

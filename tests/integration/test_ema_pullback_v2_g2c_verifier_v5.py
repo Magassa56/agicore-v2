@@ -22,7 +22,7 @@ from agicore.trading.ema_pullback_v2_storage_format import (
     sha,
 )
 
-REGISTRATION = "95e836f3897a973d08e8a38e3845bc4e15d53e67996f03f718dc6f9f05445a35"
+REGISTRATION = "9dc2cfcaf37909004d084456dadbc6c896699033b5e3428d62ae56ece7e87bf6"
 
 
 def test_external_verifier_binding_and_historical_contract(tmp_path, monkeypatch):
@@ -32,6 +32,9 @@ def test_external_verifier_binding_and_historical_contract(tmp_path, monkeypatch
         v5.load_registration(v5.V4_SHA)
     raw = json.loads(v5.REGISTRATION.read_bytes())
     raw["verifier"]["sha256"] = "0" * 64
+    (tmp_path / "EMA_PULLBACK_V2_G2C_VERIFIER_V5.json").write_bytes(
+        v5.REGISTRATION.with_name("EMA_PULLBACK_V2_G2C_VERIFIER_V5.json").read_bytes()
+    )
     path = tmp_path / "forged"
     path.write_bytes(canonical(raw))
     monkeypatch.setattr(v5, "REGISTRATION", path)
@@ -206,10 +209,12 @@ def test_rejects_tampering_even_after_rehash(miniature, damage):
 
 @pytest.mark.skipif(os.name != "posix", reason="Linux verifier process limits")
 def test_worker_denies_an_unsupervised_process(monkeypatch):
+    from tools import ema_pullback_v2_g2c_verifier_worker_v5 as worker
+
     monkeypatch.setattr(os, "getsid", lambda _: os.getpid() + 1)
     contract = v5.load_registration(REGISTRATION)
     with pytest.raises(StorageProofError, match="process group"):
-        v5._worker_limits(SimpleNamespace(fixture="dense-5000"), contract)
+        worker._worker_limits(SimpleNamespace(fixture="dense-5000"), contract)
 
 
 def test_verified_sources_in_fresh_process_without_strategy_or_producer():
@@ -249,3 +254,40 @@ def test_microprofile_refuses_tier_sizes_without_reading_or_writing(tmp_path, fo
     )
     assert result.returncode == 2 and b"invalid choice" in result.stderr
     assert list(tmp_path.iterdir()) == []
+
+
+def test_worker_stdout_is_the_exact_binary_receipt(monkeypatch, capsysbinary, tmp_path):
+    from tools import ema_pullback_v2_g2c_verifier_worker_v5 as worker
+
+    receipt = {"status": "test-é", "value": 10**60}
+    args_seen = []
+    monkeypatch.setattr(worker, "load_registration", lambda _: {})
+    monkeypatch.setattr(worker, "_worker_limits", lambda *args: args_seen.append("limits"))
+
+    def verified(path, **kw):
+        assert path == tmp_path and kw["expected_fixture"] == "mini" and kw["seal"]
+        assert args_seen == ["limits"]
+        return receipt
+
+    monkeypatch.setattr(worker, "verify_bundle", verified)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "worker",
+            "--bundle",
+            str(tmp_path),
+            "--fixture",
+            "mini",
+            "--manifest-sha256",
+            "m",
+            "--native-sha256",
+            "n",
+            "--verifier-sha256",
+            "v",
+            "--seal",
+        ],
+    )
+    worker.main()
+    captured = capsysbinary.readouterr()
+    assert captured.out == canonical(receipt) and captured.err == b""
