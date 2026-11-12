@@ -28,3 +28,10 @@ The free-disk and memory readings are snapshots, and disk checks remain sampled
 plus final rather than a real-time filesystem quota. The 5,000 replay requires
 a separate successful preflight on its actual runner. No real DEVELOPMENT/OOS
 data, 89,841-observation replay, broker, or real order is authorized.
+
+The first replay workflow registration at commit `4f932f134c406c21aef35f4bde0b66d7160c2702`
+was rejected before job creation because `runner.temp` was used in a job-level
+environment expression. GitHub reported the error at line 30 in
+https://github.com/Magassa56/agicore-v2/actions/runs/43131410993. No replay was
+run by that invalid workflow. The following commit uses a fixed temporary path
+on the fresh hosted runner and retains all preflight and process controls.

@@ -18,7 +18,7 @@ jobs:
     # This exact transition starts one attempt. Later documentation commits do
     # not automatically rerun a measured 5000-observation replay.
     if: >-
-      github.event.before == '87d9fa662898eda534aadad5189b17c0c1038fb3' &&
+      github.event.before == '4f932f134c406c21aef35f4bde0b66d7160c2702' &&
       github.event.pull_request.head.repo.full_name == 'Magassa56/agicore-v2' &&
       github.event.pull_request.head.ref == 'feature/agicore-g2c-5000-preflight-20261112'
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONNOUSERSITE: '1'
       PYTHONPATH: src:.
-      G2C_OUTPUT: ${{ runner.temp }}/agicore-g2c-5000
+      G2C_OUTPUT: /tmp/agicore-g2c-5000
     steps:
       - name: Checkout the exact branch commit
         uses: actions/checkout@v4
