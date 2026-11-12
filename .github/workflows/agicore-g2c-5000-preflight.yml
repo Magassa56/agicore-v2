@@ -23,6 +23,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      - name: Select the validated Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Verify existing 1000 gate and host limits only
         env:
           PYTHONDONTWRITEBYTECODE: '1'
@@ -46,7 +51,7 @@ jobs:
           from agicore.trading.ema_pullback_v2_g2c_scaling import load_contract
           from agicore.trading.ema_pullback_v2_storage_format import codec_profile, sha
           from tools.ema_pullback_v2_g2c_supervisor import (
-              _cgroup_memory,
+              _cgroup_memory_v4,
               _memory_available,
               _require_gate,
               preflight,
@@ -103,7 +108,7 @@ jobs:
                         if x.get(k) is not None]
               return {'status': 'OBSERVED', 'mount_root': '/', 'ancestors': ancestors,
                       'minimum_finite_headroom_bytes': min(finite) if finite else None,
-                      'scope': 'visible cgroup namespace; diagnostic only, V3 guard unchanged'}
+                      'scope': 'visible cgroup namespace; additional diagnostic only'}
 
           def optional_readlink(path):
               try:
@@ -111,7 +116,7 @@ jobs:
               except OSError as error:
                   return {'status': 'UNAVAILABLE', 'reason': str(error)}
 
-          contract_sha = '5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663'
+          contract_sha = 'e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f'
           gate_sha = 'c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555'
           negative_sha = 'ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4'
           archive_sha = '8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7'
@@ -137,7 +142,8 @@ jobs:
               negative = json.loads(negative_bytes)
               cases = negative['results']
               if (negative['status'] != 'PASS' or negative['tier_report_sha256'] != gate_sha
-                      or negative['contract_sha256'] != contract_sha or len(cases) != 36
+                      or negative['contract_sha256'] != contract['predecessor']['contract_sha256']
+                      or len(cases) != 36
                       or sum(x['actual'] == 'PASS' for x in cases) != 6
                       or sum(x['actual'] == 'REJECTED' for x in cases) != 30):
                   raise RuntimeError('previous negative checks are incomplete')
@@ -155,7 +161,7 @@ jobs:
                                               'pid1_comm': Path('/proc/1/comm').read_text().strip(),
                                               'root_controllers': (Path('/sys/fs/cgroup/cgroup.controllers').read_text().strip()
                                                                    if Path('/sys/fs/cgroup/cgroup.controllers').is_file() else None)},
-                            cgroup_memory=_cgroup_memory(), codec_profile=profile,
+                            cgroup_memory=_cgroup_memory_v4(), codec_profile=profile,
                             inherited_limits={'address_space': list(resource.getrlimit(resource.RLIMIT_AS)),
                                               'cpu': list(resource.getrlimit(resource.RLIMIT_CPU)),
                                               'file': list(resource.getrlimit(resource.RLIMIT_FSIZE))},
@@ -180,7 +186,7 @@ jobs:
                   result['limit_selfcheck'] = {'status': 'PASS', 'observed': observed,
                                                'measurement': measured}
                   result['preflight'] = preflight(caps, directory / 'prospective-run',
-                                                  require_cgroup_memory=True)
+                                                  require_cgroup_memory=True, cgroup_v4=True)
               result['status'] = 'PASS_PREFLIGHT_ONLY'
           except Exception as error:
               result['error_type'] = type(error).__name__
