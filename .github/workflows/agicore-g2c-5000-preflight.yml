@@ -33,6 +33,7 @@ jobs:
             -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
             python3 -B - <<'PY'
           import json
+          import os
           import re
           import resource
           import shutil
@@ -80,17 +81,26 @@ jobs:
                   for directory in parents[:parents.index(cgroup_root) + 1]:
                       if directory.is_symlink():
                           raise RuntimeError('symlink cgroup path')
+                      if directory == cgroup_root and not (directory / 'memory.max').exists():
+                          ancestors.append({'group': '/', 'type': 'ROOT_NO_MEMORY_MAX_FILE'})
+                          continue
                       maximum = (directory / 'memory.max').read_text().strip()
+                      high_text = (directory / 'memory.high').read_text().strip()
                       current = int((directory / 'memory.current').read_text().strip())
                       limit = None if maximum == 'max' else int(maximum)
-                      if current < 0 or (limit is not None and limit < 0):
+                      high = None if high_text == 'max' else int(high_text)
+                      if current < 0 or (limit is not None and limit < 0) or (high is not None and high < 0):
                           raise ValueError('negative cgroup limit')
+                      cpu = (directory / 'cpu.max').read_text().strip() if (directory / 'cpu.max').is_file() else None
                       ancestors.append({'group': '/' + str(directory.relative_to(cgroup_root)),
                                         'limit_bytes': limit, 'current_bytes': current,
+                                        'memory_high_bytes': high, 'cpu_max': cpu,
+                                        'high_headroom_bytes': None if high is None else max(0, high-current),
                                         'headroom_bytes': None if limit is None else max(0, limit-current)})
               except (OSError, ValueError, RuntimeError) as error:
                   return {'status': 'UNKNOWN', 'reason': str(error), 'ancestors': ancestors}
-              finite = [x['headroom_bytes'] for x in ancestors if x['headroom_bytes'] is not None]
+              finite = [x[k] for x in ancestors for k in ('headroom_bytes', 'high_headroom_bytes')
+                        if x.get(k) is not None]
               return {'status': 'OBSERVED', 'mount_root': '/', 'ancestors': ancestors,
                       'minimum_finite_headroom_bytes': min(finite) if finite else None,
                       'scope': 'visible cgroup namespace; diagnostic only, V3 guard unchanged'}
@@ -134,6 +144,11 @@ jobs:
                             cgroup_hierarchy_diagnostic=inspect_cgroup(
                                 Path('/proc/self/cgroup').read_text(),
                                 Path('/proc/self/mountinfo').read_text(), Path('/sys/fs/cgroup')),
+                            cgroup_namespace={'self': os.readlink('/proc/self/ns/cgroup'),
+                                              'pid1': os.readlink('/proc/1/ns/cgroup'),
+                                              'pid1_comm': Path('/proc/1/comm').read_text().strip(),
+                                              'root_controllers': (Path('/sys/fs/cgroup/cgroup.controllers').read_text().strip()
+                                                                   if Path('/sys/fs/cgroup/cgroup.controllers').is_file() else None)},
                             cgroup_memory=_cgroup_memory(), codec_profile=profile,
                             inherited_limits={'address_space': list(resource.getrlimit(resource.RLIMIT_AS)),
                                               'cpu': list(resource.getrlimit(resource.RLIMIT_CPU)),
