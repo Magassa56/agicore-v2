@@ -1,0 +1,161 @@
+name: AGIcore G2C 5000 bounded synthetic replay
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - .github/workflows/agicore-g2c-5000-replay.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g2c-5000-${{ github.event.pull_request.number }}-${{ github.event.after }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    # This exact transition starts one attempt. Later documentation commits do
+    # not automatically rerun a measured 5000-observation replay.
+    if: >-
+      github.event.before == '87d9fa662898eda534aadad5189b17c0c1038fb3' &&
+      github.event.pull_request.head.repo.full_name == 'Magassa56/agicore-v2' &&
+      github.event.pull_request.head.ref == 'feature/agicore-g2c-5000-preflight-20261112'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTHONPATH: src:.
+      G2C_OUTPUT: ${{ runner.temp }}/agicore-g2c-5000
+    steps:
+      - name: Checkout the exact branch commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Select Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install reviewed fixture dependency
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          "iniconfig==2.3.0" "packaging==26.2" "pluggy==1.6.0"
+          "pygments==2.20.0" "pytest==9.0.3"
+
+      - name: Verify all gates on the execution host
+        run: |
+          env -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN \
+            -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+            python -B - <<'PY'
+          import json
+          import sys
+          import tempfile
+          from pathlib import Path
+          from types import SimpleNamespace
+          from agicore.trading.ema_pullback_v2_g2c_scaling import load_contract
+          from agicore.trading.ema_pullback_v2_storage_format import codec_profile
+          from tools.ema_pullback_v2_g2c_supervisor import (
+              _require_gate, preflight, run_worker, supervision_selfcheck,
+          )
+          digest = 'e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f'
+          contract = load_contract(digest)
+          prior = contract['predecessor']
+          gate = Path('docs/evidence/AGICORE_G2C_1000_9E6E_TIER_REPORT_20261111.json')
+          _require_gate(SimpleNamespace(gate_report=gate, gate_sha256=prior['gate_report_sha256'],
+                                        contract_sha256=digest), contract)
+          profile = codec_profile()
+          if any(profile[k] != value for k, value in contract['codec'].items()):
+              raise RuntimeError('unapproved codec')
+          caps = contract['tiers']['5000']
+          with tempfile.TemporaryDirectory(prefix='agicore-g2c-5000-gate-') as tmp:
+              folder = Path(tmp)
+              measured = preflight(caps, folder / 'prospective',
+                                   require_cgroup_memory=True, cgroup_v4=True)
+              killed = supervision_selfcheck(folder / 'descendants', caps, root=Path.cwd())
+              code = ('import json,os,resource;print(json.dumps({'
+                      '"as":resource.getrlimit(resource.RLIMIT_AS),'
+                      '"cpu":resource.getrlimit(resource.RLIMIT_CPU),'
+                      '"file":resource.getrlimit(resource.RLIMIT_FSIZE),'
+                      '"group_leader":os.getsid(0)==os.getpid()}))')
+              observation, values = run_worker([sys.executable, '-B', '-c', code],
+                                               folder / 'limits', caps, root=Path.cwd())
+              expected = {'as': [caps['address_space_bytes']] * 2,
+                          'cpu': [caps['cpu_seconds']] * 2,
+                          'file': [caps['file_bytes']] * 2, 'group_leader': True}
+              if observation['status'] != 'PASS' or values != expected:
+                  raise RuntimeError('process limit check failed')
+              print('G2C_EXECUTION_PREFLIGHT=' + json.dumps(
+                  {'status': 'PASS', 'resources': measured, 'descendants': killed,
+                   'limit_measurement': observation, 'observed_limits': values,
+                   'predecessor_1000': 'PASS', 'contract_sha256': digest},
+                  sort_keys=True, separators=(',', ':')))
+          PY
+
+      - name: Run the two registered invented 5000 fixtures
+        run: |
+          env -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN \
+            -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+            python -B tools/ema_pullback_v2_g2c_supervisor.py \
+              --tier 5000 \
+              --contract-sha256 e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f \
+              --gate-report docs/evidence/AGICORE_G2C_1000_9E6E_TIER_REPORT_20261111.json \
+              --gate-sha256 c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555 \
+              --output "$G2C_OUTPUT"
+
+      - name: Preserve the report and bounded invented evidence in logs
+        if: always()
+        run: |
+          python -B - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import resource
+          import zipfile
+          from pathlib import Path
+
+          root = Path(os.environ['G2C_OUTPUT'])
+          for name in ('preflight.json', 'tier_report.json'):
+              file = root / name
+              if file.is_file() and not file.is_symlink():
+                  print('G2C_FILE_' + name.replace('.', '_').upper() + '=' + file.read_text().strip())
+          if not root.is_dir() or root.is_symlink():
+              print('G2C_ARCHIVE_STATUS=NO_OUTPUT')
+              raise SystemExit(0)
+          archive = root.parent / 'agicore-g2c-5000-evidence.zip'
+          resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
+          resource.setrlimit(resource.RLIMIT_AS, (536870912, 536870912))
+          resource.setrlimit(resource.RLIMIT_FSIZE, (33554432, 33554432))
+          with zipfile.ZipFile(archive, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as out:
+              for file in sorted(root.rglob('*')):
+                  relative = file.relative_to(root)
+                  if file.is_symlink():
+                      raise RuntimeError('symlink in retained evidence')
+                  # Keep the first independently verified bundle for each
+                  # fixture and all small reports from both repetitions.
+                  if not file.is_file() or ('bundle' in relative.parts and
+                                            relative.parts[0].endswith('-2')):
+                      continue
+                  out.write(file, relative.as_posix())
+          size = archive.stat().st_size
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          physical = sum(file.stat().st_blocks * 512 for file in root.rglob('*')
+                         if file.is_file() and not file.is_symlink())
+          physical += archive.stat().st_blocks * 512
+          print('G2C_ARCHIVE_INFO=' + json.dumps(
+              {'bytes': size, 'sha256': digest, 'aggregate_physical_bytes': physical}, sort_keys=True))
+          if physical > 1073741824:
+              print('G2C_ARCHIVE_STATUS=TIER_PHYSICAL_LIMIT_EXCEEDED')
+              raise SystemExit(1)
+          if size > 10485760:
+              print('G2C_ARCHIVE_STATUS=TOO_LARGE_FOR_LOG_RETENTION')
+              raise SystemExit(0)
+          encoded = base64.b64encode(archive.read_bytes()).decode('ascii')
+          for i in range(0, len(encoded), 6000):
+              print('G2C_ARCHIVE_PART=' + encoded[i:i + 6000])
+          print('G2C_ARCHIVE_STATUS=EXPORTED_TO_LOG')
+          PY
