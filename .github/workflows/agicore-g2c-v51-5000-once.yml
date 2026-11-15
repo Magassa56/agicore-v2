@@ -1,0 +1,219 @@
+name: G2C V5.1 single synthetic 5000 execution
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - .github/workflows/agicore-g2c-v51-5000-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  campaign:
+    name: One V5.1 campaign on the verified main commit
+    if: >-
+      github.repository == 'Magassa56/agicore-v2' &&
+      github.event.pull_request.number == 336 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/agicore-g2c-v51-5000-once' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.base.sha == '58aa8bc6295cbf00bbe2a8c42e9c66f194b0b083' &&
+      github.event.before == '0370d2ce006e94c6f03332db1d355c22f559ce60' &&
+      github.event.after == github.event.pull_request.head.sha &&
+      github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    concurrency:
+      group: agicore-g2c-v51-5000-one-attempt-336
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: engine
+    env:
+      BASE_SHA: 58aa8bc6295cbf00bbe2a8c42e9c66f194b0b083
+      ANCHOR_SHA: 0370d2ce006e94c6f03332db1d355c22f559ce60
+      PLAN_SHA: 1d61eb19a074877006a742a46e757e82695906d69f87ea22def9dbd2ac76c4ac
+      BINDING_SHA: d7b6179c5815286a52479eecf48528f03a32c08ceb1515774395df6854bf2006
+    steps:
+      - name: Check out only permitted code and documentary metadata at the validated base
+        uses: actions/checkout@v4
+        with:
+          ref: 58aa8bc6295cbf00bbe2a8c42e9c66f194b0b083
+          path: engine
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /src/
+            /tools/
+            /tests/
+            /docs/evidence/EMA_PULLBACK_V2_*.json
+            /docs/evidence/AGICORE_G2C_1000_9E6E_NEGATIVE_20261111.json
+            /docs/evidence/AGICORE_G2C_1000_9E6E_TIER_REPORT_20261111.json
+            /docs/evidence/AGICORE_G2C_1000_9E6E_BUNDLES_20261111.zip
+
+      - name: Retrieve independent plan bytes from the immutable pre-execution commit
+        uses: actions/checkout@v4
+        with:
+          ref: 0370d2ce006e94c6f03332db1d355c22f559ce60
+          path: registration
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: /docs/evidence/AGICORE_G2C_V51_5000_REGISTERED_PLAN.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the existing fixture dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          iniconfig==2.3.0 packaging==26.2 pluggy==1.6.0 pygments==2.20.0 pytest==9.0.3
+
+      - name: Select a fresh destination and verify the exact bases
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C ../registration rev-parse HEAD)" = "$ANCHOR_SHA"
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          dest="$(mktemp -d "$RUNNER_TEMP/agicore-g2c-v51.XXXXXXXX")"
+          mkdir -m 700 "$dest/evidence" "$dest/home"
+          echo "G2C_ROOT=$dest" >> "$GITHUB_ENV"
+          echo "Execution sources: $BASE_SHA; external plan commit: $ANCHOR_SHA"
+          git log -1 --format='engine SHA %H tree %T'
+
+      - name: Refuse any plan, fixture, gate, cgroup, quota or process supervision mismatch
+        run: |
+          set -euo pipefail
+          safe=(env -i PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" HOME="$G2C_ROOT/home" LANG=C.UTF-8 TZ=UTC PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=src:.)
+          expected=../registration/docs/evidence/AGICORE_G2C_V51_5000_REGISTERED_PLAN.json
+          "${safe[@]}" python -B -m tools.ema_pullback_v2_g2c_supervised_v51 --tier 5000 --binding-sha256 "$BINDING_SHA" > "$G2C_ROOT/evidence/plan.json"
+          cmp "$expected" "$G2C_ROOT/evidence/plan.json"
+          "${safe[@]}" prlimit --cpu=30 --as=536870912 --fsize=16777216 -- python -B - "$G2C_ROOT" "$PLAN_SHA" "$BINDING_SHA" <<'PY'
+          import hashlib, json, os, sys, tempfile
+          from pathlib import Path
+          from types import SimpleNamespace
+          from agicore.trading.ema_pullback_v2_g2c_scaling import invented_fixture, load_contract
+          from agicore.trading.ema_pullback_v2_development_replay import read_frozen_replay_bindings_v2
+          from agicore.trading.ema_pullback_v2_storage_format import canonical, codec_profile, contracts
+          from tools.ema_pullback_v2_g2c_supervised_v51 import GATE, V4, V51
+          from tools.ema_pullback_v2_g2c_supervisor import _require_gate
+          root, wanted, binding = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+          doc = json.loads((root / "evidence/plan.json").read_bytes())
+          p = doc["plan"]
+          def check(ok, reason):
+              if not ok:
+                  raise RuntimeError(reason)
+          check(doc["plan_sha256"] == wanted == hashlib.sha256(canonical(p)).hexdigest(), "plan SHA")
+          check((p["binding_sha256"], p["producer_contract_sha256"], p["verifier_registration_sha256"]) == (binding, V4, V51), "registered roles")
+          check(p["tier"] == 5000 and p["fixtures"] == ["constant-5000", "dense-5000"] and p["roles"] == ["producer", "verifier", "producer", "verifier", "parity"], "campaign scope")
+          c = load_contract(V4)
+          _require_gate(SimpleNamespace(gate_report=GATE, gate_sha256=p["historical_gate_sha256"], contract_sha256=V4), c)
+          read_frozen_replay_bindings_v2()
+          contracts()
+          codec = codec_profile()
+          check(all(codec[k] == v for k, v in c["codec"].items()), "codec")
+          fixtures = {}
+          for name in p["fixtures"]:
+              raw = invented_fixture(c, name)
+              digest = hashlib.sha256(raw).hexdigest()
+              check(len(raw.splitlines()) == 5000 and digest == c["fixtures"][name]["input_sha256"], "fixture identity")
+              fixtures[name] = digest
+          result = {"plan_sha256": wanted, "binding_sha256": binding, "producer_contract_sha256": V4, "verifier_registration_sha256": V51, "runner_sha256": c["runner_sha256"], "source_closure_sha256": c["source_closure_sha256"], "strategy_sha256": c["strategy_manifest_sha256"], "protocol_sha256": c["development_protocol_sha256"], "gate_sha256": p["historical_gate_sha256"], "codec": codec, "input_sha256": fixtures}
+          (root / "evidence/identities.json").write_bytes(canonical(result))
+          print("G2C_IDENTITIES=" + json.dumps(result, separators=(",", ":"), sort_keys=True))
+          PY
+          # The host probe must inherit the runner's actual hard limits. The probe
+          # below checks the exact child limits; the replay supervisor repeats its gates.
+          "${safe[@]}" python -B - "$G2C_ROOT" <<'PY'
+          import json, sys, tempfile
+          from pathlib import Path
+          from agicore.trading.ema_pullback_v2_storage_format import canonical
+          from tools.ema_pullback_v2_g2c_supervisor import preflight, run_worker, supervision_selfcheck
+          root = Path(sys.argv[1])
+          limits = json.loads((root / "evidence/plan.json").read_bytes())["plan"]["limits"]
+          result = {"status": "FAIL"}
+          try:
+              ready = preflight(limits, root / "tier", require_cgroup_memory=True, cgroup_v4=True)
+              result["resources"] = ready
+              if ready["available_effective_memory_bytes"] < 4 * 2**30 or ready["free_disk_bytes"] < 2 * 2**30:
+                  raise RuntimeError("insufficient headroom")
+              with tempfile.TemporaryDirectory(dir=root) as tmp:
+                  test = Path(tmp)
+                  result["descendants"] = supervision_selfcheck(test / "group", limits, root=Path.cwd())
+                  code = 'import json,os,resource as r;print(json.dumps([os.getsid(0)==os.getpid(),*[r.getrlimit(k) for k in (r.RLIMIT_CPU,r.RLIMIT_AS,r.RLIMIT_FSIZE)]]))'
+                  measured, values = run_worker([sys.executable, "-B", "-c", code], test / "limits", limits, root=Path.cwd())
+                  result.update(probe=measured, observed=values)
+                  if measured["status"] != "PASS" or values != [True, [150]*2, [2147483648]*2, [67108864]*2]:
+                      raise RuntimeError("process limit or session mismatch")
+              result["status"] = "PASS"
+          except Exception as exc:
+              result["failure"] = f"{type(exc).__name__}: {exc}"
+              raise
+          finally:
+              (root / "evidence/host.json").write_bytes(canonical(result))
+              print("G2C_HOST=" + json.dumps(result, separators=(",", ":"), sort_keys=True))
+          PY
+
+      - name: Execute the registered plan once and stop at the first failure
+        run: |
+          set -euo pipefail
+          test ! -e "$G2C_ROOT/tier"
+          env -i PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" HOME="$G2C_ROOT/home" LANG=C.UTF-8 TZ=UTC PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=src:. \
+            python -B -m tools.ema_pullback_v2_g2c_supervised_v51 --tier 5000 --binding-sha256 "$BINDING_SHA" \
+            --execute-plan-sha256 "$PLAN_SHA" --output "$G2C_ROOT/tier"
+
+      - name: Preserve measured evidence and a digest for every omitted member
+        if: ${{ always() && env.G2C_ROOT != '' }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/engine"
+          env -i PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" HOME="$G2C_ROOT/home" LANG=C.UTF-8 TZ=UTC PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=src:. \
+            prlimit --cpu=60 --as=536870912 --fsize=33554432 -- python -B - "$G2C_ROOT" <<'PY'
+          import hashlib, json, sys, zipfile
+          from pathlib import Path
+          from tools.ema_pullback_v2_g2c_archive import INDEX, retain
+          from agicore.trading.ema_pullback_v2_storage_format import canonical
+          root = Path(sys.argv[1])
+          tier, evidence, archive = root / "tier", root / "evidence", root / "selected.zip"
+          if not tier.exists():
+              print("G2C_ARCHIVE=NO_REPLAY_OUTPUT")
+          else:
+              info = retain(tier, archive)
+              with zipfile.ZipFile(archive) as z:
+                  index = z.read(INDEX)
+              ix = json.loads(index)
+              if not ix["omitted_index_complete"] or len(ix["omitted"]) != info["omitted_count"]:
+                  raise RuntimeError("retention index incomplete")
+              archive.rename(evidence / archive.name)
+              (evidence / INDEX).write_bytes(index)
+              print("G2C_RETENTION_INDEX=" + index.decode("ascii"))
+              (evidence / "archive.json").write_bytes(canonical(info))
+              print("G2C_ARCHIVE=" + json.dumps(info, sort_keys=True, separators=(",", ":")))
+              for n in ("preflight.json", "tier_report.json"):
+                  f = tier / n
+                  if f.is_file():
+                      (evidence / n).write_bytes(f.read_bytes())
+              receipts = {}
+              for case in ("constant-5000", "dense-5000"):
+                  for i in (1, 2):
+                      b = tier / f"{case}-{i}" / "bundle"
+                      for n in ("production.json", "verification.json", "completion.json"):
+                          f = b / n
+                          if f.is_file():
+                              raw = f.read_bytes()
+                              receipts[f.relative_to(tier).as_posix()] = {"sha256": hashlib.sha256(raw).hexdigest(), "receipt": json.loads(raw)}
+              (evidence / "receipts.json").write_bytes(canonical(receipts))
+              print("G2C_RECEIPTS=" + json.dumps(receipts, sort_keys=True, separators=(",", ":")))
+          PY
+
+      - name: Retain the bounded synthetic evidence
+        if: ${{ always() && env.G2C_ROOT != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2c-v51-once-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.G2C_ROOT }}/evidence
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
