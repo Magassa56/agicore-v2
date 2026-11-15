@@ -1,0 +1,93 @@
+{
+  "audit": {
+    "all_cross_field_invariants": "PASS",
+    "native_output_sha256": "ec41516b19e93c324364ce33ee272361df8c43ac859cf0e1c9afbaf976d77222",
+    "observation_count": 57,
+    "status": "PASS",
+    "strategy_recomputed": false
+  },
+  "binding_registration_sha256": "d7b6179c5815286a52479eecf48528f03a32c08ceb1515774395df6854bf2006",
+  "closed_positions": 1,
+  "comparison": "EXACT_AFTER_TEMPORARY_IDENTITY_PROJECTION",
+  "input_sha256": "80d20a90099fe0564255aea18f58aaac0ee5fc4cfe82627fce396676cfaae19b",
+  "limits": {
+    "address_space_bytes": 2147483648,
+    "cpu_seconds": 150,
+    "file_bytes": 67108864,
+    "logical_bytes": 268435456,
+    "physical_bytes": 268435456,
+    "tier_physical_bytes": 1073741824,
+    "wall_seconds": 240
+  },
+  "native_identity_projection_persisted": false,
+  "native_logical_bytes": 75242,
+  "native_sha256": "70f0b076419dc2da4f9a49f9d4591d2eda1ab44af80a0886ed428512010c3f3a",
+  "observations": 57,
+  "pinned_verifier_registration_sha256": "9dc2cfcaf37909004d084456dadbc6c896699033b5e3428d62ae56ece7e87bf6",
+  "predecessor_commit": "8742367f559a160e233376ee72236869a52803ce",
+  "private_test_identities": {
+    "binding_sha256": "b1e1ac8461548bee1c3deba35af419b1f95061c1251edafae1abd43d83305933",
+    "producer_contract_sha256": "9c2d00de5c4d6aeddb63ff254da148ddab17735aca50b07c734fdfbc8bc7079a",
+    "verifier_registration_sha256": "c74c4309ee8e4db25cd6bbed24639ea1fd253c71f08357e60fea16b8a4069b80"
+  },
+  "process_group_selfcheck": {
+    "elapsed_wall_ns": 2009685392,
+    "status": "PASS",
+    "worker_and_descendant_stopped": true
+  },
+  "registered_5000": "NOT_EXECUTED",
+  "repeat_bundle_files_identical": 7,
+  "schema": "agicore:g2c-supervisor-integration-test-evidence:v1",
+  "scope": "Synthetic integration test with private fixture registrations. Production V4/V5.1 do not register a 57-observation fixture. These are test measurements, not a registered tier or release seal. No 1000/5000 replay or capacity claim.",
+  "storage_enforcement": "per-file kernel limit; aggregate disk sampled and checked at exit",
+  "test": "tests/integration/test_ema_pullback_v2_g2c_supervised_v51.py::test_separate_supervised_workers_with_original_canonical_bytes",
+  "witness_logical_bytes": 15660,
+  "witness_sha256": "ba46955352ebfbc775c75f1e28256596e273f827fc937600ef5d3d929e4c527d",
+  "worker_observations": [
+    {
+      "cpu_ns": 412481000,
+      "exit_code": 0,
+      "peak_rss_bytes": 51539968,
+      "physical_bytes": 28672,
+      "role": "producer",
+      "status": "PASS",
+      "wall_ns": 503037431
+    },
+    {
+      "cpu_ns": 369648000,
+      "exit_code": 0,
+      "peak_rss_bytes": 48660480,
+      "physical_bytes": 4096,
+      "role": "verifier",
+      "status": "PASS",
+      "wall_ns": 402512153
+    },
+    {
+      "cpu_ns": 450146999,
+      "exit_code": 0,
+      "peak_rss_bytes": 51523584,
+      "physical_bytes": 28672,
+      "role": "producer",
+      "status": "PASS",
+      "wall_ns": 503664346
+    },
+    {
+      "cpu_ns": 307067000,
+      "exit_code": 0,
+      "peak_rss_bytes": 48660480,
+      "physical_bytes": 4096,
+      "role": "verifier",
+      "status": "PASS",
+      "wall_ns": 402177009
+    },
+    {
+      "cpu_ns": 280481000,
+      "exit_code": 0,
+      "peak_rss_bytes": 44367872,
+      "physical_bytes": 4096,
+      "role": "parity",
+      "status": "PASS",
+      "wall_ns": 301958163
+    }
+  ]
+}
