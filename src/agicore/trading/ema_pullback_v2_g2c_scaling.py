@@ -39,6 +39,8 @@ from .ema_pullback_v2_storage_format import (
 )
 
 CONTRACT_PATH = ROOT / "docs/evidence/EMA_PULLBACK_V2_G2C_SYNTHETIC_CONTRACT_V3.json"
+CONTRACT_V4_PATH = ROOT / "docs/evidence/EMA_PULLBACK_V2_G2C_SYNTHETIC_CONTRACT_V4.json"
+PREDECESSOR_CONTRACT_SHA256 = "5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663"
 PARENT_SHA256 = "1d0a7b3f929825c3a7009d694b02b618643bd22b246b75865be71dc7de1567d4"
 PAGE_BYTES = 33_554_432
 MAX_LOGICAL_BYTES = 268_435_456
@@ -53,12 +55,20 @@ def load_contract(expected_sha256: str) -> dict:
         type(expected_sha256) is str and re.fullmatch(r"[0-9a-f]{64}", expected_sha256),
         "G2C external contract identity",
     )
-    raw = regular_read(CONTRACT_PATH, limit=2_097_152)
-    require(sha(raw) == expected_sha256, "G2C contract mismatch")
+    candidates = [regular_read(CONTRACT_PATH, limit=2_097_152)]
+    if CONTRACT_V4_PATH.is_file():
+        candidates.append(regular_read(CONTRACT_V4_PATH, limit=2_097_152))
+    matches = [candidate for candidate in candidates if sha(candidate) == expected_sha256]
+    require(len(matches) == 1, "G2C contract mismatch")
+    raw = matches[0]
     contract = parse_canonical([raw], limit=2_097_152)
     parent = load_g2b_contract(PARENT_SHA256)
     require(
-        contract["schema"] == "agicore:g2c-invented-scaling-contract:v3"
+        contract["schema"]
+        in {
+            "agicore:g2c-invented-scaling-contract:v3",
+            "agicore:g2c-invented-scaling-contract:v4",
+        }
         and contract["g2b_contract_sha256"] == PARENT_SHA256
         and contract["runner_sha256"] == RUNNER_SHA256
         and contract["strategy_manifest_sha256"] == STRATEGY_SHA256
@@ -69,6 +79,25 @@ def load_contract(expected_sha256: str) -> dict:
         and contract["maximum_logical_bytes"] == MAX_LOGICAL_BYTES,
         "G2C frozen identities and scope",
     )
+    if contract["schema"].endswith(":v4"):
+        previous_raw = regular_read(CONTRACT_PATH, limit=2_097_152)
+        require(sha(previous_raw) == PREDECESSOR_CONTRACT_SHA256, "G2C V3 identity")
+        previous = parse_canonical([previous_raw], limit=2_097_152)
+        require(
+            contract["predecessor"]
+            == {
+                "contract_sha256": PREDECESSOR_CONTRACT_SHA256,
+                "gate_report_sha256": "c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555",
+                "negative_report_sha256": "ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4",
+                "bundles_sha256": "8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7",
+                "implementation_commit": "9e6eadcd81c2aec152872aa7783b5374e9731568",
+            }
+            and all(
+                contract[key] == previous[key]
+                for key in ("fixtures", "tier_fixtures", "tiers", "codec")
+            ),
+            "G2C V4 historical gate and unchanged experiment",
+        )
     entries = contract["source_closure"]
     require(sha(canonical(entries)) == contract["source_closure_sha256"], "G2C closure digest")
     _source_files_match(entries)

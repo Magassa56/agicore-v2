@@ -1,0 +1,147 @@
+{
+  "github_run_url": "https://github.com/Magassa56/agicore-v2/actions/runs/43129493805",
+  "head_sha": "7b93fff9e987ec20c8e31bf4cdb14acbae0c4b0c",
+  "observed": {
+    "archive_sha256": "8dfa4e7aa278cbc1503aae4ea48489f0330c720b2a6f6f0d49966b065c349fa7",
+    "cgroup_hierarchy_diagnostic": {
+      "ancestors": [
+        {
+          "cpu_max": "max 100000",
+          "current_bytes": 377102336,
+          "group": "/system.slice/hosted-compute-agent.service",
+          "headroom_bytes": null,
+          "high_headroom_bytes": null,
+          "limit_bytes": null,
+          "memory_high_bytes": null
+        },
+        {
+          "cpu_max": "max 100000",
+          "current_bytes": 1144778752,
+          "group": "/system.slice",
+          "headroom_bytes": null,
+          "high_headroom_bytes": null,
+          "limit_bytes": null,
+          "memory_high_bytes": null
+        },
+        {
+          "group": "/",
+          "type": "ROOT_NO_MEMORY_MAX_FILE"
+        }
+      ],
+      "minimum_finite_headroom_bytes": null,
+      "mount_root": "/",
+      "scope": "visible cgroup namespace; diagnostic only, V3 guard unchanged",
+      "status": "OBSERVED"
+    },
+    "cgroup_membership": "0::/system.slice/hosted-compute-agent.service",
+    "cgroup_memory": null,
+    "cgroup_namespace": {
+      "pid1": {
+        "reason": "[Errno 13] Permission denied: '/proc/1/ns/cgroup'",
+        "status": "UNAVAILABLE"
+      },
+      "pid1_comm": "systemd",
+      "root_controllers": "cpuset cpu io memory hugetlb pids rdma misc dmem",
+      "self": {
+        "status": "OBSERVED",
+        "value": "cgroup:[4026531835]"
+      }
+    },
+    "codec_profile": {
+      "algorithm": "RAW_DEFLATE",
+      "chunk_size": 1048576,
+      "fallback": "IDENTITY_IF_COMPRESSED_LENGTH_GREATER_THAN_OR_EQUAL_TO_UNCOMPRESSED_LENGTH",
+      "level": 9,
+      "memory_level": 8,
+      "profile_id": "EXACT_NATIVE_BYTE_SHARDS_DEFLATE_V1",
+      "python_executable_sha256": "be9a2a5eada8c89c1c399fdfb8397179e877c20d8db0739c802f726d4d0e69fd",
+      "python_implementation": "CPython",
+      "python_version": "3.14.4",
+      "strategy": "Z_DEFAULT_STRATEGY",
+      "window_bits": -15,
+      "zlib_binary_sha256": "be9a2a5eada8c89c1c399fdfb8397179e877c20d8db0739c802f726d4d0e69fd",
+      "zlib_compile_version": "1.3.1",
+      "zlib_module_origin": "built-in",
+      "zlib_runtime_version": "1.3.1"
+    },
+    "contract_sha256": "5de23f01bb157b2d7575a54dcc0d36033f6ba3ae751f6338067088c895bf6663",
+    "cpu_seconds": null,
+    "descendant_selfcheck": {
+      "elapsed_wall_ns": 2007963124,
+      "status": "PASS",
+      "worker_and_descendant_stopped": true
+    },
+    "disk_free_bytes": 94208696320,
+    "error_type": "RuntimeError",
+    "gate_sha256": "c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555",
+    "inherited_limits": {
+      "address_space": [
+        -1,
+        -1
+      ],
+      "cpu": [
+        -1,
+        -1
+      ],
+      "file": [
+        -1,
+        -1
+      ]
+    },
+    "limit_selfcheck": {
+      "measurement": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 15542000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 34258944,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 100875245
+      },
+      "observed": {
+        "as": [
+          2147483648,
+          2147483648
+        ],
+        "cpu": [
+          150,
+          150
+        ],
+        "file": [
+          67108864,
+          67108864
+        ],
+        "group_leader": true
+      },
+      "status": "PASS"
+    },
+    "memory_available_bytes": 15791742976,
+    "negative_sha256": "ead441231b611d445ece5d4489d748a0fc51e8a2c7c9e39348f2af86070e25f4",
+    "oos_accessed": false,
+    "previous_1000_gate": "PASS",
+    "previous_negative_checks": "PASS",
+    "real_data_accessed": false,
+    "reason": "effective cgroup memory limit is not observable",
+    "replay_1000": "NOT_EXECUTED",
+    "replay_5000": "NOT_EXECUTED",
+    "resource_caps": {
+      "address_space_bytes": 2147483648,
+      "cpu_seconds": 150,
+      "file_bytes": 67108864,
+      "logical_bytes": 268435456,
+      "physical_bytes": 268435456,
+      "tier_physical_bytes": 1073741824,
+      "wall_seconds": 240
+    },
+    "schema": "agicore:g2c-host-preflight-only:v1",
+    "status": "BLOCKED",
+    "utc": "2026-11-12T00:44:35.298190Z",
+    "wall_seconds": null
+  }
+}

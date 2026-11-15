@@ -154,7 +154,11 @@ def test_preflight_uses_tier_disk_budget(tmp_path, monkeypatch):
 
 
 def test_external_contract_and_registered_invented_1000_inputs():
-    digest = sha(g2c.CONTRACT_PATH.read_bytes())
+    # V3 receipts retain their original code closure; V4 is the current closure.
+    assert sha(g2c.CONTRACT_PATH.read_bytes()) == g2c.PREDECESSOR_CONTRACT_SHA256
+    with pytest.raises(StorageProofError):
+        g2c.load_contract(g2c.PREDECESSOR_CONTRACT_SHA256)
+    digest = sha(g2c.CONTRACT_V4_PATH.read_bytes())
     contract = g2c.load_contract(digest)
     assert contract["g2b_contract_sha256"] == g2c.PARENT_SHA256
     assert contract["tier_fixtures"]["5000"] == ["constant-5000", "dense-5000"]
