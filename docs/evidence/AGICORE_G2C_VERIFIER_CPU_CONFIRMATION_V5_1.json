@@ -1,0 +1,50 @@
+{
+  "common": {
+    "audit_sha256": "501de8d6bf77a73fe5afd38e097d82c2428d3b22a69f11eb05b2cf80834ca81d",
+    "audit_status": "PASS",
+    "closed_positions": 10,
+    "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+    "native_bytes": 3569306,
+    "native_output_sha256": "73990ef0f65bbc23f3a0253ddbb571b72b01cbb8b40a71b1a3e4a3440e6608cd",
+    "native_sha256": "9137407aaf887ae7bc0b01d5d2b9956c229bc3c44d1ce9729845dd9ddfa6d808",
+    "observations": 601,
+    "witness_bytes": 166276,
+    "witness_sha256": "7a46b9d763400b284ee3b88f5f446f6dbf384c252c97ae72911cf0222c944cf2"
+  },
+  "measurements": [
+    {
+      "cpu_ns": {
+        "audit_accounting_provenance": 387894985,
+        "native_parse_schema_roundtrip": 1567801662,
+        "parse_witnesses": 61169788,
+        "reconstruct_native_result": 43458546,
+        "reconstruct_source_witnesses": 43366939
+      },
+      "linux_peak_rss_bytes": 62980096,
+      "role": "v4",
+      "timed_cpu_ns": 2103691920
+    },
+    {
+      "cpu_ns": {
+        "audit_accounting_provenance": 387971934,
+        "native_parse_schema_roundtrip": 259993740,
+        "parse_witnesses": 59998755,
+        "reconstruct_native_result": 44000184,
+        "reconstruct_source_witnesses": 39999083
+      },
+      "linux_peak_rss_bytes": 62320640,
+      "role": "v5",
+      "timed_cpu_ns": 791963696
+    }
+  ],
+  "predecessor_commit": "e22e0f6171673aac37f2a75dd037d00b97d6b8ee",
+  "predecessor_profile_sha256": "35f7fb7a726ef491270dd3d9aa7637bff39f21b8563f89477e0f6b63f4154ac1",
+  "schema": "agicore:g2c-verifier-worker-relocation:v5.1",
+  "scope": "One fresh verification process per version on the same existing 601-observation native and witness bytes. Same bounded microprofile and CPU stages as predecessor; neither input production nor 1000/5000 replay repeated.",
+  "unchanged_source_sections_sha256": {
+    "_ContiguousParser": "0c1346a4233941f47c1b887f80f8c2dac39d09f17d4a4fc7397f2e00a0e6fdda",
+    "parse_native": "deccafa9133cc74ba7adc059c8f89187057f736aaa21ba1987a1ab2c251c0179",
+    "verify_bundle": "24bbbbf45ec85d29bfcf9d39428c8618880bdab27915aafe9435dbb7c0b80df6"
+  },
+  "verifier_registration_sha256": "9dc2cfcaf37909004d084456dadbc6c896699033b5e3428d62ae56ece7e87bf6"
+}

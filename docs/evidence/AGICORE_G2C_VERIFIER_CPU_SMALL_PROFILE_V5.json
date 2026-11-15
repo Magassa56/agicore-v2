@@ -1,0 +1,299 @@
+{
+  "base_commit": "629a5a39f0847a37b7dda6cae41567d78d0df7fd",
+  "cases": [
+    {
+      "audit_sha256": "c5472915a0ff0b83dff9eb8c380a7f2fb613c7908c7319e43aa116f800df9204",
+      "audit_status": "PASS",
+      "closed_positions": 3,
+      "input_sha256": "3d7c927e929737bf5fcde6351d41e16ce538be4c988c3e8e89b99df43250e274",
+      "native_bytes": 408462,
+      "native_output_sha256": "a9d9a3f7d2e6a300b2afd2b1dbb21d4b0073442aa24c7c0def45ff6425e45843",
+      "native_sha256": "5a26a16e5d7d51ca88d1add59f1889d8c1cbc29fb4393917dcb7eb69b7d1e99d",
+      "observations": 201,
+      "samples": [
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 87997678,
+            "native_parse_schema_roundtrip": 187186526,
+            "parse_witnesses": 24002184,
+            "reconstruct_native_result": 32977093,
+            "reconstruct_source_witnesses": 23394750
+          },
+          "linux_peak_rss_bytes": 50458624,
+          "role": "v4",
+          "timed_cpu_ns": 355558231
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 91979904,
+            "native_parse_schema_roundtrip": 43999442,
+            "parse_witnesses": 20000333,
+            "reconstruct_native_result": 31942272,
+            "reconstruct_source_witnesses": 19998360
+          },
+          "linux_peak_rss_bytes": 50327552,
+          "role": "v5",
+          "timed_cpu_ns": 207920311
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 87997953,
+            "native_parse_schema_roundtrip": 47992700,
+            "parse_witnesses": 19954605,
+            "reconstruct_native_result": 32001530,
+            "reconstruct_source_witnesses": 20049376
+          },
+          "linux_peak_rss_bytes": 50323456,
+          "role": "v5",
+          "timed_cpu_ns": 207996164
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 93199712,
+            "native_parse_schema_roundtrip": 171997810,
+            "parse_witnesses": 19993753,
+            "reconstruct_native_result": 27998537,
+            "reconstruct_source_witnesses": 23999160
+          },
+          "linux_peak_rss_bytes": 50458624,
+          "role": "v4",
+          "timed_cpu_ns": 337188972
+        }
+      ],
+      "witness_bytes": 55388,
+      "witness_sha256": "ac5d606d319310815f9a143d7bde86b3a6045c2d429b6292518bac1f47430ce0"
+    },
+    {
+      "audit_sha256": "cc524b1c838abacae6914e857574e6c32922a7b3a0efaa18f80f28f37b0de0a1",
+      "audit_status": "PASS",
+      "closed_positions": 7,
+      "input_sha256": "3ff0172bb1cbfdd73da1253792a98c2724d7adb31a16e01746901b1422c3dff9",
+      "native_bytes": 1756637,
+      "native_output_sha256": "c7391b37de16d92f76b119c55d0b678cdf845cc05e651b40395933cf026560c3",
+      "native_sha256": "d74cf6e09161955e51e7974e8e2809a5cc10687c7441b3284741e8143bb8cf3e",
+      "observations": 401,
+      "samples": [
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 203998530,
+            "native_parse_schema_roundtrip": 783921763,
+            "parse_witnesses": 43999011,
+            "reconstruct_native_result": 35479190,
+            "reconstruct_source_witnesses": 35051864
+          },
+          "linux_peak_rss_bytes": 57511936,
+          "role": "v4",
+          "timed_cpu_ns": 1102450358
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 203989757,
+            "native_parse_schema_roundtrip": 135997334,
+            "parse_witnesses": 48000121,
+            "reconstruct_native_result": 40000355,
+            "reconstruct_source_witnesses": 23997948
+          },
+          "linux_peak_rss_bytes": 56877056,
+          "role": "v5",
+          "timed_cpu_ns": 451985515
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 195986936,
+            "native_parse_schema_roundtrip": 127995003,
+            "parse_witnesses": 40000416,
+            "reconstruct_native_result": 36001038,
+            "reconstruct_source_witnesses": 19998720
+          },
+          "linux_peak_rss_bytes": 56881152,
+          "role": "v5",
+          "timed_cpu_ns": 419982113
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 203984119,
+            "native_parse_schema_roundtrip": 755834454,
+            "parse_witnesses": 39999163,
+            "reconstruct_native_result": 35999446,
+            "reconstruct_source_witnesses": 28399850
+          },
+          "linux_peak_rss_bytes": 57536512,
+          "role": "v4",
+          "timed_cpu_ns": 1064217032
+        }
+      ],
+      "witness_bytes": 110838,
+      "witness_sha256": "30ccf85f76c267bc7da860dc4c3f83f4439ad4222dc7a9db136ee9c02777cebf"
+    },
+    {
+      "audit_sha256": "501de8d6bf77a73fe5afd38e097d82c2428d3b22a69f11eb05b2cf80834ca81d",
+      "audit_status": "PASS",
+      "closed_positions": 10,
+      "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+      "native_bytes": 3569306,
+      "native_output_sha256": "73990ef0f65bbc23f3a0253ddbb571b72b01cbb8b40a71b1a3e4a3440e6608cd",
+      "native_sha256": "9137407aaf887ae7bc0b01d5d2b9956c229bc3c44d1ce9729845dd9ddfa6d808",
+      "observations": 601,
+      "samples": [
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 375959004,
+            "native_parse_schema_roundtrip": 1569593697,
+            "parse_witnesses": 59998705,
+            "reconstruct_native_result": 43368703,
+            "reconstruct_source_witnesses": 26383000
+          },
+          "linux_peak_rss_bytes": 62914560,
+          "role": "v4",
+          "timed_cpu_ns": 2075303109
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 381211359,
+            "native_parse_schema_roundtrip": 251995396,
+            "parse_witnesses": 59999516,
+            "reconstruct_native_result": 44000193,
+            "reconstruct_source_witnesses": 19997729
+          },
+          "linux_peak_rss_bytes": 62390272,
+          "role": "v5",
+          "timed_cpu_ns": 757204193
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 367961641,
+            "native_parse_schema_roundtrip": 251966313,
+            "parse_witnesses": 63950823,
+            "reconstruct_native_result": 40001747,
+            "reconstruct_source_witnesses": 28001461
+          },
+          "linux_peak_rss_bytes": 62390272,
+          "role": "v5",
+          "timed_cpu_ns": 751881985
+        },
+        {
+          "cpu_ns": {
+            "audit_accounting_provenance": 371994288,
+            "native_parse_schema_roundtrip": 1524559401,
+            "parse_witnesses": 56000509,
+            "reconstruct_native_result": 40000926,
+            "reconstruct_source_witnesses": 23997086
+          },
+          "linux_peak_rss_bytes": 62988288,
+          "role": "v4",
+          "timed_cpu_ns": 2016552210
+        }
+      ],
+      "witness_bytes": 166276,
+      "witness_sha256": "7a46b9d763400b284ee3b88f5f446f6dbf384c252c97ae72911cf0222c944cf2"
+    }
+  ],
+  "historical_report": {
+    "cpu_ns": 150015925000,
+    "dense_bundle_retained": false,
+    "exit_code": -9,
+    "job": 130897084678,
+    "path": "docs/evidence/AGICORE_G2C_5000_TIER_REPORT_0FF5_20261112.json",
+    "peak_rss_bytes": 508723200,
+    "phase_breakdown": "NOT_RECORDED",
+    "reason": "CPU_LIMIT",
+    "role": "verifier",
+    "run": 43131684773,
+    "sha256": "9e36e021b23c9b9c9b92d330d1ab642727a5d349168b475a2752384412e2f4bc",
+    "wall_ns": 150121180645
+  },
+  "instrumented_dense_401": {
+    "instrumented_frames": [
+      {
+        "calls": 1,
+        "cumulative_s": 0.014995,
+        "file": "ema_pullback_v2_g2b_audit.py",
+        "function": "source_witnesses",
+        "self_s": 0.00218
+      },
+      {
+        "calls": 1625,
+        "cumulative_s": 0.004371,
+        "file": "ema_pullback_v2_storage_audit.py",
+        "function": "rational",
+        "self_s": 0.002438
+      },
+      {
+        "calls": 1,
+        "cumulative_s": 0.107479,
+        "file": "ema_pullback_v2_storage_audit.py",
+        "function": "_lifecycle_audit",
+        "self_s": 0.000381
+      },
+      {
+        "calls": 7,
+        "cumulative_s": 0.001461,
+        "file": "ema_pullback_v2_storage_audit.py",
+        "function": "_audit_trade",
+        "self_s": 0.000641
+      },
+      {
+        "calls": 25522,
+        "cumulative_s": 0.27529,
+        "file": "ema_pullback_v2_storage_format.py",
+        "function": "integer_text",
+        "self_s": 0.146591
+      },
+      {
+        "calls": 4888598,
+        "cumulative_s": 1.043803,
+        "file": "ema_pullback_v2_storage_format.py",
+        "function": "peek",
+        "self_s": 0.743659
+      },
+      {
+        "calls": 2079345,
+        "cumulative_s": 1.270008,
+        "file": "ema_pullback_v2_storage_format.py",
+        "function": "take",
+        "self_s": 0.719205
+      },
+      {
+        "calls": 27990,
+        "cumulative_s": 3.337089,
+        "file": "ema_pullback_v2_storage_format.py",
+        "function": "value",
+        "self_s": 0.872204
+      },
+      {
+        "calls": 2836,
+        "cumulative_s": 0.010749,
+        "file": "ema_pullback_v2_storage_format.py",
+        "function": "_validate_rational_contracts",
+        "self_s": 0.00503
+      }
+    ],
+    "native_sha256": "d74cf6e09161955e51e7974e8e2809a5cc10687c7441b3284741e8143bb8cf3e",
+    "observations": 401,
+    "role": "v4"
+  },
+  "profile": {
+    "caps": {
+      "address_space_bytes": 1073741824,
+      "cpu_seconds": 60,
+      "single_file_bytes": 33554432,
+      "wall_seconds": 75
+    },
+    "modes": "prepare once per size in a fresh directory, then v4/v5/v5/v4. profile-v4 only at 401.",
+    "order": [
+      "v4",
+      "v5",
+      "v5",
+      "v4"
+    ],
+    "platform": "Linux x86_64",
+    "python": "3.12.14",
+    "reproduce": "PYTHONPATH=src:. timeout 75s python -B -m tools.ema_pullback_v2_g2c_verifier_microprofile DIR COUNT MODE 95e836f3897a973d08e8a38e3845bc4e15d53e67996f03f718dc6f9f05445a35",
+    "scope": "CPU of page reconstruction, native parse/schema/canonical round-trip, witness parse, and unmodified independent audit. Excludes producer, outer contract/receipt/file inventory, and process startup. One process per timed sample; cProfile recorded separately. These miniature probe streams are not V4 or V5 seals.",
+    "tool": "tools/ema_pullback_v2_g2c_verifier_microprofile.py",
+    "tool_sha256": "06a3f05d123ff10d8eedb1af86035a6296906bc8292444c36ddd59a8178e2f65"
+  },
+  "schema": "agicore:g2c-verifier-cpu-small-profile:v1",
+  "tier_5000_result": "NOT_EXECUTED_NO_CAPACITY_CLAIM",
+  "verifier_registration_sha256": "95e836f3897a973d08e8a38e3845bc4e15d53e67996f03f718dc6f9f05445a35"
+}
