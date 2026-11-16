@@ -1,0 +1,1051 @@
+{
+  "base_commit": "ef6d7ed22bada2bdb9f67648e6eec19ea079c501",
+  "baseline_v2_profiles": [
+    {
+      "cprofile": [
+        {
+          "calls": 47,
+          "cumulative_cpu_s": 0.08415662600000001,
+          "file": "ema20_pullback_v2.py",
+          "function": "evaluate_ema20_v2",
+          "line": 127,
+          "own_cpu_s": 0.004000409
+        },
+        {
+          "calls": 5,
+          "cumulative_cpu_s": 0.031998928,
+          "file": "ema_pullback_entry_confirmation_v2.py",
+          "function": "evaluate_macd_v2",
+          "line": 197,
+          "own_cpu_s": 0.004005466
+        },
+        {
+          "calls": 202,
+          "cumulative_cpu_s": 0.301180322,
+          "file": "ema_pullback_regime_gated_baseline_v2.py",
+          "function": "_raw_regime_decision",
+          "line": 305,
+          "own_cpu_s": 0.019997256
+        },
+        {
+          "calls": 18096,
+          "cumulative_cpu_s": 0.10789773500000001,
+          "file": "ema_pullback_v2_development_replay.py",
+          "function": "_integer_text",
+          "line": 88,
+          "own_cpu_s": 0.055989492
+        }
+      ],
+      "indicators": {
+        "EMA20": {
+          "calls": 47,
+          "max_requested_prefix_length": 154,
+          "min_requested_prefix_length": 33,
+          "prefix_length_histogram_100_bar_bins": {
+            "1-100": 29,
+            "101-200": 18
+          },
+          "repeated_same_selector_calls": 0,
+          "sum_requested_prefix_lengths": 3881,
+          "total_inclusive_cpu_ns_instrumented": 84156627
+        },
+        "MACD": {
+          "calls": 5,
+          "max_requested_prefix_length": 150,
+          "min_requested_prefix_length": 35,
+          "prefix_length_histogram_100_bar_bins": {
+            "1-100": 3,
+            "101-200": 2
+          },
+          "repeated_same_selector_calls": 0,
+          "sum_requested_prefix_lengths": 463,
+          "total_inclusive_cpu_ns_instrumented": 31998928
+        }
+      },
+      "input_sha256": "3d7c927e929737bf5fcde6351d41e16ce538be4c988c3e8e89b99df43250e274",
+      "integers": {
+        "calls": 18096,
+        "calls_after_first_equal_value": 17757,
+        "decimal_digit_buckets": {
+          "1-3": 10944,
+          "10-99": 2288,
+          "100-999": 3136,
+          "4-9": 1728
+        },
+        "distinct_values": 339,
+        "integer_output_characters": 887652,
+        "largest_decimal_digits": 394,
+        "max_occurrences_of_one_value": 2256
+      },
+      "mode": "cprofile_with_counters",
+      "observations": 201,
+      "peak_rss_bytes": 35516416,
+      "profiled_process_cpu_ns": 1289398296,
+      "raw_regime": {
+        "calls": 202,
+        "constructed_rejection_views": 20502,
+        "finalization_calls": 1,
+        "maximum_prefix": 201,
+        "minimum_prefix": 1
+      },
+      "reference_bytes": 408462,
+      "reference_sha256": "0b9f34a0bed7ac6bb663348d888dfd3d8fb52b65f5867e7eeaefa0e097158f26"
+    },
+    {
+      "cprofile": [
+        {
+          "calls": 63,
+          "cumulative_cpu_s": 0.21652401400000001,
+          "file": "ema20_pullback_v2.py",
+          "function": "evaluate_ema20_v2",
+          "line": 127,
+          "own_cpu_s": 0.025251481000000003
+        },
+        {
+          "calls": 11,
+          "cumulative_cpu_s": 0.24411120400000003,
+          "file": "ema_pullback_entry_confirmation_v2.py",
+          "function": "evaluate_macd_v2",
+          "line": 197,
+          "own_cpu_s": 0.012022036000000002
+        },
+        {
+          "calls": 402,
+          "cumulative_cpu_s": 0.7764917330000001,
+          "file": "ema_pullback_regime_gated_baseline_v2.py",
+          "function": "_raw_regime_decision",
+          "line": 305,
+          "own_cpu_s": 0.057869306
+        },
+        {
+          "calls": 38512,
+          "cumulative_cpu_s": 0.8382262100000001,
+          "file": "ema_pullback_v2_development_replay.py",
+          "function": "_integer_text",
+          "line": 88,
+          "own_cpu_s": 0.468406772
+        }
+      ],
+      "indicators": {
+        "EMA20": {
+          "calls": 63,
+          "max_requested_prefix_length": 375,
+          "min_requested_prefix_length": 33,
+          "prefix_length_histogram_100_bar_bins": {
+            "1-100": 29,
+            "101-200": 18,
+            "201-300": 10,
+            "301-400": 6
+          },
+          "repeated_same_selector_calls": 0,
+          "sum_requested_prefix_lengths": 8239,
+          "total_inclusive_cpu_ns_instrumented": 216524011
+        },
+        "MACD": {
+          "calls": 11,
+          "max_requested_prefix_length": 378,
+          "min_requested_prefix_length": 35,
+          "prefix_length_histogram_100_bar_bins": {
+            "1-100": 3,
+            "101-200": 2,
+            "201-300": 3,
+            "301-400": 3
+          },
+          "repeated_same_selector_calls": 0,
+          "sum_requested_prefix_lengths": 2273,
+          "total_inclusive_cpu_ns_instrumented": 244111205
+        }
+      },
+      "input_sha256": "3ff0172bb1cbfdd73da1253792a98c2724d7adb31a16e01746901b1422c3dff9",
+      "integers": {
+        "calls": 38512,
+        "calls_after_first_equal_value": 37882,
+        "decimal_digit_buckets": {
+          "1-3": 21740,
+          "10-99": 2288,
+          "100-999": 9360,
+          "1000+": 720,
+          "4-9": 4404
+        },
+        "distinct_values": 630,
+        "integer_output_characters": 5417368,
+        "largest_decimal_digits": 1133,
+        "max_occurrences_of_one_value": 4292
+      },
+      "mode": "cprofile_with_counters",
+      "observations": 401,
+      "peak_rss_bytes": 42246144,
+      "profiled_process_cpu_ns": 4022372155,
+      "raw_regime": {
+        "calls": 402,
+        "constructed_rejection_views": 81002,
+        "finalization_calls": 1,
+        "maximum_prefix": 401,
+        "minimum_prefix": 1
+      },
+      "reference_bytes": 1756637,
+      "reference_sha256": "027314e29b9ae6d17e7d2c3ea9b68a2b0f3f41369c42390587949064c9c07d04"
+    },
+    {
+      "cprofile": [
+        {
+          "calls": 106,
+          "cumulative_cpu_s": 0.9114394210000001,
+          "file": "ema20_pullback_v2.py",
+          "function": "evaluate_ema20_v2",
+          "line": 127,
+          "own_cpu_s": 0.043867408000000004
+        },
+        {
+          "calls": 15,
+          "cumulative_cpu_s": 0.48753221,
+          "file": "ema_pullback_entry_confirmation_v2.py",
+          "function": "evaluate_macd_v2",
+          "line": 197,
+          "own_cpu_s": 0.023993717
+        },
+        {
+          "calls": 602,
+          "cumulative_cpu_s": 1.213282403,
+          "file": "ema_pullback_regime_gated_baseline_v2.py",
+          "function": "_raw_regime_decision",
+          "line": 305,
+          "own_cpu_s": 0.11902662600000001
+        },
+        {
+          "calls": 55988,
+          "cumulative_cpu_s": 1.9098710200000002,
+          "file": "ema_pullback_v2_development_replay.py",
+          "function": "_integer_text",
+          "line": 88,
+          "own_cpu_s": 0.99537536
+        }
+      ],
+      "indicators": {
+        "EMA20": {
+          "calls": 106,
+          "max_requested_prefix_length": 569,
+          "min_requested_prefix_length": 33,
+          "prefix_length_histogram_100_bar_bins": {
+            "1-100": 29,
+            "101-200": 18,
+            "201-300": 10,
+            "301-400": 6,
+            "401-500": 10,
+            "501-600": 33
+          },
+          "repeated_same_selector_calls": 0,
+          "sum_requested_prefix_lengths": 30948,
+          "total_inclusive_cpu_ns_instrumented": 911439420
+        },
+        "MACD": {
+          "calls": 15,
+          "max_requested_prefix_length": 549,
+          "min_requested_prefix_length": 35,
+          "prefix_length_histogram_100_bar_bins": {
+            "1-100": 3,
+            "101-200": 2,
+            "201-300": 3,
+            "301-400": 3,
+            "401-500": 3,
+            "501-600": 1
+          },
+          "repeated_same_selector_calls": 0,
+          "sum_requested_prefix_lengths": 4240,
+          "total_inclusive_cpu_ns_instrumented": 487532211
+        }
+      },
+      "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+      "integers": {
+        "calls": 55988,
+        "calls_after_first_equal_value": 55065,
+        "decimal_digit_buckets": {
+          "1-3": 31024,
+          "10-99": 2288,
+          "100-999": 11128,
+          "1000+": 4640,
+          "4-9": 6908
+        },
+        "distinct_values": 923,
+        "integer_output_characters": 11946672,
+        "largest_decimal_digits": 1688,
+        "max_occurrences_of_one_value": 6004
+      },
+      "mode": "cprofile_with_counters",
+      "observations": 601,
+      "peak_rss_bytes": 52367360,
+      "profiled_process_cpu_ns": 8179868740,
+      "raw_regime": {
+        "calls": 602,
+        "constructed_rejection_views": 181502,
+        "finalization_calls": 1,
+        "maximum_prefix": 601,
+        "minimum_prefix": 1
+      },
+      "reference_bytes": 3569306,
+      "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b"
+    }
+  ],
+  "baseline_v2_tracemalloc": [
+    {
+      "current_traced_bytes": 1095373,
+      "input_sha256": "3d7c927e929737bf5fcde6351d41e16ce538be4c988c3e8e89b99df43250e274",
+      "integer_text_retained_allocation_differences": [
+        {
+          "count_diff": 7,
+          "line": 97,
+          "retained_bytes_diff": 392
+        },
+        {
+          "count_diff": 6,
+          "line": 93,
+          "retained_bytes_diff": 336
+        }
+      ],
+      "mode": "tracemalloc",
+      "observations": 201,
+      "peak_rss_bytes": 38572032,
+      "peak_traced_bytes": 3722141,
+      "reference_sha256": "0b9f34a0bed7ac6bb663348d888dfd3d8fb52b65f5867e7eeaefa0e097158f26",
+      "traced_cpu_ns": 7431247123
+    },
+    {
+      "current_traced_bytes": 2273793,
+      "input_sha256": "3ff0172bb1cbfdd73da1253792a98c2724d7adb31a16e01746901b1422c3dff9",
+      "integer_text_retained_allocation_differences": [
+        {
+          "count_diff": 7,
+          "line": 97,
+          "retained_bytes_diff": 392
+        },
+        {
+          "count_diff": 6,
+          "line": 93,
+          "retained_bytes_diff": 336
+        }
+      ],
+      "mode": "tracemalloc",
+      "observations": 401,
+      "peak_rss_bytes": 47435776,
+      "peak_traced_bytes": 8639497,
+      "reference_sha256": "027314e29b9ae6d17e7d2c3ea9b68a2b0f3f41369c42390587949064c9c07d04",
+      "traced_cpu_ns": 22254772313
+    },
+    {
+      "current_traced_bytes": 4618171,
+      "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+      "integer_text_retained_allocation_differences": [
+        {
+          "count_diff": 7,
+          "line": 97,
+          "retained_bytes_diff": 392
+        },
+        {
+          "count_diff": 6,
+          "line": 93,
+          "retained_bytes_diff": 336
+        }
+      ],
+      "mode": "tracemalloc",
+      "observations": 601,
+      "peak_rss_bytes": 61501440,
+      "peak_traced_bytes": 15068759,
+      "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+      "traced_cpu_ns": 42844825676
+    }
+  ],
+  "complete_workers_final_four_pairs": [
+    {
+      "input_sha256": "3d7c927e929737bf5fcde6351d41e16ce538be4c988c3e8e89b99df43250e274",
+      "median_cpu_ns": {
+        "v2": 1263472000.0,
+        "v3": 1153079500.0
+      },
+      "median_wall_ns": {
+        "v2": 1308381017.5,
+        "v3": 1158607209.0
+      },
+      "observations": 201,
+      "optimized_native_sha256": "5a26a16e5d7d51ca88d1add59f1889d8c1cbc29fb4393917dcb7eb69b7d1e99d",
+      "reduction_pct": 8.737233591246973,
+      "reference_native_sha256": "0b9f34a0bed7ac6bb663348d888dfd3d8fb52b65f5867e7eeaefa0e097158f26",
+      "samples": [
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1336201000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 40607744,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "431b36a51c90e1c9e284f934097752e1f9f01e23a59cf2da1a7b7b6f42657323",
+          "repeat": 1,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1408523609
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1099175000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "998a917c71dede81200992a7eb98be09a0f841b6b65e893a32bf4a7abfded372",
+          "repeat": 1,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1108523572
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1206984000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "998a917c71dede81200992a7eb98be09a0f841b6b65e893a32bf4a7abfded372",
+          "repeat": 2,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1208690846
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1364750000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "431b36a51c90e1c9e284f934097752e1f9f01e23a59cf2da1a7b7b6f42657323",
+          "repeat": 2,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1427432898
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1159339000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "431b36a51c90e1c9e284f934097752e1f9f01e23a59cf2da1a7b7b6f42657323",
+          "repeat": 3,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1208238426
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1255471000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "998a917c71dede81200992a7eb98be09a0f841b6b65e893a32bf4a7abfded372",
+          "repeat": 3,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1307449702
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1054810000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "998a917c71dede81200992a7eb98be09a0f841b6b65e893a32bf4a7abfded372",
+          "repeat": 4,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1107021967
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1190743000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 40652800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "431b36a51c90e1c9e284f934097752e1f9f01e23a59cf2da1a7b7b6f42657323",
+          "repeat": 4,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1206818508
+        }
+      ]
+    },
+    {
+      "input_sha256": "3ff0172bb1cbfdd73da1253792a98c2724d7adb31a16e01746901b1422c3dff9",
+      "median_cpu_ns": {
+        "v2": 2013631000.0,
+        "v3": 1778385500.0
+      },
+      "median_wall_ns": {
+        "v2": 2064262480.5,
+        "v3": 1858543443.0
+      },
+      "observations": 401,
+      "optimized_native_sha256": "d74cf6e09161955e51e7974e8e2809a5cc10687c7441b3284741e8143bb8cf3e",
+      "reduction_pct": 11.682651886070483,
+      "reference_native_sha256": "027314e29b9ae6d17e7d2c3ea9b68a2b0f3f41369c42390587949064c9c07d04",
+      "samples": [
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 2193013000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 49147904,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f0b90436c07ebee698a7fb72052d241c4ef29c07976a831976e238745a92a620",
+          "repeat": 1,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 2210471773
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1963352000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 49119232,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "d430b3bbbfc1e4329d34164a59745d4bf693ed3ecfd8b16cf213b5b12ce528af",
+          "repeat": 1,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 2011434260
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1705487000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 49123328,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "d430b3bbbfc1e4329d34164a59745d4bf693ed3ecfd8b16cf213b5b12ce528af",
+          "repeat": 2,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1810299820
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1892297000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 49397760,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f0b90436c07ebee698a7fb72052d241c4ef29c07976a831976e238745a92a620",
+          "repeat": 2,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1907916082
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 2043271000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 49315840,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f0b90436c07ebee698a7fb72052d241c4ef29c07976a831976e238745a92a620",
+          "repeat": 3,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 2118000287
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1851284000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 49119232,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "d430b3bbbfc1e4329d34164a59745d4bf693ed3ecfd8b16cf213b5b12ce528af",
+          "repeat": 3,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1906787066
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1671617000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 49115136,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "d430b3bbbfc1e4329d34164a59745d4bf693ed3ecfd8b16cf213b5b12ce528af",
+          "repeat": 4,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 1706999271
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 1983991000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 49397760,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f0b90436c07ebee698a7fb72052d241c4ef29c07976a831976e238745a92a620",
+          "repeat": 4,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 2010524674
+        }
+      ]
+    },
+    {
+      "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+      "median_cpu_ns": {
+        "v2": 3372192500.0,
+        "v3": 2980204000.0
+      },
+      "median_wall_ns": {
+        "v2": 3469586106.0,
+        "v3": 3065205486.0
+      },
+      "observations": 601,
+      "optimized_native_sha256": "9137407aaf887ae7bc0b01d5d2b9956c229bc3c44d1ce9729845dd9ddfa6d808",
+      "reduction_pct": 11.624143639486773,
+      "reference_native_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+      "samples": [
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 3332262000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 61644800,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "8f381b579ab2f4f3cf23a44ef8b740ce19642d5fe2a7d6b9e42580b130f72f39",
+          "repeat": 1,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3420197881
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 3097509000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 61308928,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f04a3230168936f39def45abd545441bf8ba68ef003151aa74f803ae279f87a8",
+          "repeat": 1,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3115143816
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 2947915000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 61321216,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f04a3230168936f39def45abd545441bf8ba68ef003151aa74f803ae279f87a8",
+          "repeat": 2,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3015267156
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 3273963000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 61636608,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "8f381b579ab2f4f3cf23a44ef8b740ce19642d5fe2a7d6b9e42580b130f72f39",
+          "repeat": 2,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3311504215
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 3412123000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 61530112,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "8f381b579ab2f4f3cf23a44ef8b740ce19642d5fe2a7d6b9e42580b130f72f39",
+          "repeat": 3,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3518974331
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 2902844999,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 61128704,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f04a3230168936f39def45abd545441bf8ba68ef003151aa74f803ae279f87a8",
+          "repeat": 3,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 2916721898
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 3012493000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v3",
+          "peak_rss_bytes": 61308928,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "f04a3230168936f39def45abd545441bf8ba68ef003151aa74f803ae279f87a8",
+          "repeat": 4,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3128121530
+        },
+        {
+          "address_space_limit_bytes": 2147483648,
+          "cpu_limit_seconds": 150,
+          "cpu_ns": 3677087000,
+          "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+          "exit_code": 0,
+          "file_limit_bytes": 67108864,
+          "mode": "v2",
+          "peak_rss_bytes": 61595648,
+          "physical_bytes": 4096,
+          "physical_limit_bytes": 268435456,
+          "reason": null,
+          "receipt_sha256": "8f381b579ab2f4f3cf23a44ef8b740ce19642d5fe2a7d6b9e42580b130f72f39",
+          "repeat": 4,
+          "status": "PASS",
+          "wall_limit_seconds": 240,
+          "wall_ns": 3718009295
+        }
+      ]
+    }
+  ],
+  "dense_5000_reference_parity": "NOT_PROVEN",
+  "historical_contracts_and_receipts_modified": false,
+  "independent_four_pair_summary": {
+    "orders": "alternating",
+    "pairs_per_size": 4,
+    "results": [
+      {
+        "input_sha256": "3d7c927e929737bf5fcde6351d41e16ce538be4c988c3e8e89b99df43250e274",
+        "median_cpu_ns": {
+          "v2": 1281317000.0,
+          "v3": 1221774500.0
+        },
+        "observations": 201,
+        "reduction_pct": 4.646976509325951,
+        "reference_sha256": "0b9f34a0bed7ac6bb663348d888dfd3d8fb52b65f5867e7eeaefa0e097158f26"
+      },
+      {
+        "input_sha256": "3ff0172bb1cbfdd73da1253792a98c2724d7adb31a16e01746901b1422c3dff9",
+        "median_cpu_ns": {
+          "v2": 2167974499.5,
+          "v3": 1995535999.5
+        },
+        "observations": 401,
+        "reduction_pct": 7.953898906088119,
+        "reference_sha256": "027314e29b9ae6d17e7d2c3ea9b68a2b0f3f41369c42390587949064c9c07d04"
+      },
+      {
+        "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+        "median_cpu_ns": {
+          "v2": 3543164499.5,
+          "v3": 2837095500.0
+        },
+        "observations": 601,
+        "reduction_pct": 19.927638121222945,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b"
+      }
+    ]
+  },
+  "isolated_rejection_rebuild_601": {
+    "constructions": 181502,
+    "isolated_cpu_ns": 340082858,
+    "observations": 601
+  },
+  "method": {
+    "allocations": "Separate tracemalloc runs record global traced peak and allocation differences still retained at the end. They do not count every temporary allocation or give an uninstrumented runtime.",
+    "cache": "The existing encoder's text-byte cache is limited to 16777216 bytes per evaluator. Its dictionary keys and object overhead are additional; the existing process address-space limit still applies.",
+    "causality": "For each size, mutate a later invented bar and compare the earlier complete strategy state after temporary in-memory projection of the dataset identifier, which hashes the full input.",
+    "indicators": "Through-index, mapping size and clock bound are recorded for every call. Prefix totals show overlapping work; a repeated selector is only a matching recorded selector, not a proof of identical data. The evidence retains 100-bar prefix-length bins and aggregate CPU; the profiler prints all individual selectors.",
+    "integers": "Each return from the frozen integer converter is counted. Distinct values use exact integer equality. Character totals count returned decimal characters, including signs, across the reference evaluation.",
+    "profile": "Isolated V2 reference evaluations under cProfile and counters. Self and cumulative CPU are separately recorded. Instrumentation overhead is substantial and cumulative functions overlap.",
+    "prototype": "Four alternating runs of each candidate measured only the reference evaluator. The selection was confirmed by separate complete worker measurements.",
+    "rejection_views": "Separately reconstruct the exact RejectionBarV2 dictionaries for each prefix and finalization; input dictionary construction is outside the measurement.",
+    "reproducibility": "Run the three parametrizations of test_alternating_complete_workers for four alternating pairs per size. Run the bounded profile tool with 201, 401 or 601 and optionally --allocation.",
+    "scope": "Invented dense prefixes of 201, 401 and 601 observations; no registered 1000 or 5000 replay.",
+    "worker_comparison": "Four alternating V2/V3 process pairs per size under the original supervisor, CPU, wall, memory, file and physical limits. CPU includes startup, fixture generation, test bootstrap, registration checks, both engines, byte comparison and receipt output. Small test-only fixtures are substituted at the contract boundary and do not constitute a production-tier receipt."
+  },
+  "oos_accessed": false,
+  "parity_v3_registration_sha256": "cff5ae162ec68b03904b0f8fb18e8fb68c456ecc97214da500d41206fd195424",
+  "platform": "Linux x86_64",
+  "post_merge_ci_run": 43805370000,
+  "predecessor_parity_registration_sha256": "a7debadeec3b5038699216b3abb6142086617296677dcb37b9fd01f6010c9699",
+  "prior_pr": 337,
+  "producer_contract_sha256": "e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f",
+  "producer_source_closure_sha256": "437a99fdd57700376dfa5de5e6a4cf73ce3c69b6d114672e3c951456f7c8ddad",
+  "profile_source_sha256": "b7b4f743519834f60d247f6c73a29fa6d61d5c993abd4149c60849dee255b73b",
+  "prototype_reference_only_601": {
+    "measure": "reference evaluation only, uninstrumented, separate process",
+    "median_cpu_ns": {
+      "cache": 1647725095.0,
+      "fast": 1868643088.5,
+      "v2": 2373923357.0
+    },
+    "rows": [
+      {
+        "cpu_ns": 2319918220,
+        "mode": "v2",
+        "observations": 601,
+        "peak_rss_bytes": 51159040,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 1,
+        "wall_ns": 2320628049
+      },
+      {
+        "cpu_ns": 1815905018,
+        "mode": "fast",
+        "observations": 601,
+        "peak_rss_bytes": 51154944,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 1,
+        "wall_ns": 1815202021
+      },
+      {
+        "cpu_ns": 1695716075,
+        "mode": "cache",
+        "observations": 601,
+        "peak_rss_bytes": 51060736,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 1,
+        "wall_ns": 1700772960
+      },
+      {
+        "cpu_ns": 1599734115,
+        "mode": "cache",
+        "observations": 601,
+        "peak_rss_bytes": 51163136,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 2,
+        "wall_ns": 1602669755
+      },
+      {
+        "cpu_ns": 1643802149,
+        "mode": "fast",
+        "observations": 601,
+        "peak_rss_bytes": 51240960,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 2,
+        "wall_ns": 1646598211
+      },
+      {
+        "cpu_ns": 2219523903,
+        "mode": "v2",
+        "observations": 601,
+        "peak_rss_bytes": 50978816,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 2,
+        "wall_ns": 2223052857
+      },
+      {
+        "cpu_ns": 1989413832,
+        "mode": "fast",
+        "observations": 601,
+        "peak_rss_bytes": 51048448,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 3,
+        "wall_ns": 1995259615
+      },
+      {
+        "cpu_ns": 2427928494,
+        "mode": "v2",
+        "observations": 601,
+        "peak_rss_bytes": 51154944,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 3,
+        "wall_ns": 2435224319
+      },
+      {
+        "cpu_ns": 1512141255,
+        "mode": "cache",
+        "observations": 601,
+        "peak_rss_bytes": 51138560,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 3,
+        "wall_ns": 1516987104
+      },
+      {
+        "cpu_ns": 1843918976,
+        "mode": "cache",
+        "observations": 601,
+        "peak_rss_bytes": 51286016,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 4,
+        "wall_ns": 1852246958
+      },
+      {
+        "cpu_ns": 2638717694,
+        "mode": "v2",
+        "observations": 601,
+        "peak_rss_bytes": 51122176,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 4,
+        "wall_ns": 2646028968
+      },
+      {
+        "cpu_ns": 1921381159,
+        "mode": "fast",
+        "observations": 601,
+        "peak_rss_bytes": 51113984,
+        "reference_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b",
+        "repeat": 4,
+        "wall_ns": 1921343364
+      }
+    ]
+  },
+  "python": "3.12.14",
+  "ranking": [
+    "EXACT_INTEGER_SERIALIZATION",
+    "RAW_REGIME_REJECTION_VIEWS",
+    "EMA20_AND_MACD_PREFIXES"
+  ],
+  "real_development_accessed": false,
+  "recorded_utc": "2026-11-16T16:28:35.423817+00:00",
+  "registered_1000_5000_replayed": false,
+  "schema": "agicore:g2c-reference-cpu-hotspot:v3",
+  "selection": "Reuse the existing exact integer encoder and its invocation-local bounded text cache.",
+  "test_source_sha256": "4cfeaaf61bcaca34428db59bb85e0311ce226dae0e85b358d92b42411be4c199",
+  "v3_test_bootstrap_sha256": "97199fa713b5955ae14a8f54e24aa6ae23573f20d21a703d60ac0ac5416b9f65",
+  "validation": {
+    "causal_and_financial_parity": "PASS_201_401_601",
+    "falsification_and_source_checks": "PASS",
+    "final_four_pair_parametrizations": "3_PASS",
+    "local_targeted_and_regression_tests": {
+      "duration": "110.20s (0:01:50)",
+      "note": "The combined suite passed with two pairs per size; the final version with four pairs was then rerun for all three parametrizations.",
+      "passed": 133
+    },
+    "profiling_tool_201_under_limits": "PASS",
+    "same_reference_bytes": "PASS_201_401_601_AND_12_EOF_CASES"
+  },
+  "worker_sha256": "655e1b28fe44f50ccc851f7ff5565c1f2126b51349aa54e91f9f144a35dd12a9"
+}
