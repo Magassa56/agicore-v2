@@ -1,0 +1,361 @@
+{
+  "base_commit": "58aa8bc6295cbf00bbe2a8c42e9c66f194b0b083",
+  "complete_worker_601_repeated": {
+    "median_cpu_ns": {
+      "v1": 4916418000.0,
+      "v2": 4608252500.0
+    },
+    "observations": 601,
+    "ordering": "alternating",
+    "samples": [
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4933832000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v1",
+        "peak_rss_bytes": 61145088,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 1,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 5025477808
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4598247000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v2",
+        "peak_rss_bytes": 61636608,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 1,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4622544283
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4618258000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v2",
+        "peak_rss_bytes": 61591552,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 2,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4720867692
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4899004000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v1",
+        "peak_rss_bytes": 61120512,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 2,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4921993229
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 5995596000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v1",
+        "peak_rss_bytes": 61145088,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 3,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 6098472415
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 5812747000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v2",
+        "peak_rss_bytes": 61636608,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 3,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 5840135281
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4534979000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v2",
+        "peak_rss_bytes": 61628416,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 4,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4621090627
+      },
+      {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4857508000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "mode": "v1",
+        "peak_rss_bytes": 61149184,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "repeat": 4,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4926861341
+      }
+    ]
+  },
+  "complete_worker_single_samples": [
+    {
+      "observations": 201,
+      "v1": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 1499143000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 83251200,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 1509078438
+      },
+      "v2": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 1469541000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 83251200,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 1507963035
+      }
+    },
+    {
+      "observations": 401,
+      "v1": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 2955986000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 83251200,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 3015697064
+      },
+      "v2": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 2979023000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 83251200,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 3014595881
+      }
+    },
+    {
+      "observations": 601,
+      "v1": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4700747000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 83251200,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4795477064
+      },
+      "v2": {
+        "address_space_limit_bytes": 2147483648,
+        "cpu_limit_seconds": 150,
+        "cpu_ns": 4363227000,
+        "disk_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+        "exit_code": 0,
+        "file_limit_bytes": 67108864,
+        "peak_rss_bytes": 83251200,
+        "physical_bytes": 4096,
+        "physical_limit_bytes": 268435456,
+        "reason": null,
+        "status": "PASS",
+        "wall_limit_seconds": 240,
+        "wall_ns": 4419514429
+      }
+    }
+  ],
+  "dense_5000_reference_parity": "NOT_PROVEN",
+  "fixture_evidence": [
+    {
+      "closed_trades": 3,
+      "financial_invariants": "PASS",
+      "future_mutation_check": "PASS",
+      "input_sha256": "3d7c927e929737bf5fcde6351d41e16ce538be4c988c3e8e89b99df43250e274",
+      "observations": 201,
+      "reference_bytes_equal": true,
+      "reference_native_sha256": "0b9f34a0bed7ac6bb663348d888dfd3d8fb52b65f5867e7eeaefa0e097158f26"
+    },
+    {
+      "closed_trades": 7,
+      "financial_invariants": "PASS",
+      "future_mutation_check": "PASS",
+      "input_sha256": "3ff0172bb1cbfdd73da1253792a98c2724d7adb31a16e01746901b1422c3dff9",
+      "observations": 401,
+      "reference_bytes_equal": true,
+      "reference_native_sha256": "027314e29b9ae6d17e7d2c3ea9b68a2b0f3f41369c42390587949064c9c07d04"
+    },
+    {
+      "closed_trades": 10,
+      "financial_invariants": "PASS",
+      "future_mutation_check": "PASS",
+      "input_sha256": "2a01c33f65dd0ebf3efa42f38302d45daba6f115bf34352cbb371419a1706d88",
+      "observations": 601,
+      "reference_bytes_equal": true,
+      "reference_native_sha256": "ba4db224998e792ea64b5c6726b9c2232211847fcd530cdf66b36c441348af9b"
+    }
+  ],
+  "historical_archive_sha256": "6bbc7d63f1d6946c4804088772e3afc933bfcd1871fcc650e221f1b5db95a1b5",
+  "historical_contracts_modified": false,
+  "historical_dense_input_sha256": "5ca76d6d3fe70d2209c72c34f3199aa378e9d3d5ef9aa4f9a6723af469799ddc",
+  "historical_pr": 336,
+  "interruption_restart": "PASS_ON_601_INVENTED_OBSERVATIONS",
+  "measured_utc": "2026-11-16T04:04:46.435779+00:00",
+  "method": {
+    "causality": "For each size, changing a later bar retained the earlier strategy state after in-memory projection of the dataset identifier, which necessarily hashes the full source.",
+    "cprofile": "Separate 601-observation cached-reference run with process CPU timer. Instrumentation increases cost and cumulative entries overlap; do not sum them or equate them with unprofiled worker time.",
+    "financial": "The complete projected canonical bytes equal the frozen reference. Exact gross PnL, fees and net PnL invariants are also checked for each closed trade and aggregate.",
+    "fixtures": "Freshly generated from the historical deterministic dense fixture; input hashes equal the archived prefixes.",
+    "full_worker": "Separate process per version, supervised from startup to exit. CPU includes fixture generation, startup, test bootstrap, reference and optimized calculations, comparison, source checks and receipt output. Test-only fixture identities are distinct from registered production tiers.",
+    "rejection_views": "A separate loop reconstructs the same RejectionBarV2 dictionaries from the 601 invented closed bars for each prefix and the final pass. Timing excludes construction of the input dictionaries.",
+    "repeated_601": "Four additional fresh processes per version, alternating order. The reported medians use these eight processes.",
+    "scope": "Invented dense prefixes only. No registered 1000 or 5000 replay.",
+    "single_samples": "One sample of each version at 201, 401 and 601 observations in the final targeted test run."
+  },
+  "parity_registration_sha256": "a7debadeec3b5038699216b3abb6142086617296677dcb37b9fd01f6010c9699",
+  "platform": "Linux x86_64",
+  "producer_contract_sha256": "e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f",
+  "producer_source_closure_sha256": "437a99fdd57700376dfa5de5e6a4cf73ce3c69b6d114672e3c951456f7c8ddad",
+  "python_version": "3.12.14",
+  "reference_cprofile_601": [
+    {
+      "calls": 602,
+      "cumulative_cpu_s": 2.3557997320000004,
+      "file": "ema_pullback_regime_gated_baseline_v2.py",
+      "function": "_raw_regime_decision",
+      "line": 305,
+      "own_cpu_s": 0.179598749
+    },
+    {
+      "calls": 106,
+      "cumulative_cpu_s": 1.6663140790000002,
+      "file": "ema20_pullback_v2.py",
+      "function": "evaluate_ema20_v2",
+      "line": 127,
+      "own_cpu_s": 0.136829418
+    },
+    {
+      "calls": 15,
+      "cumulative_cpu_s": 0.812621542,
+      "file": "ema_pullback_entry_confirmation_v2.py",
+      "function": "evaluate_macd_v2",
+      "line": 197,
+      "own_cpu_s": 0.048659917000000004
+    },
+    {
+      "calls": 601,
+      "cumulative_cpu_s": 0.007561033000000001,
+      "file": "ema_pullback_regime_gated_baseline_v2.py",
+      "function": "_price_views",
+      "line": 296,
+      "own_cpu_s": 0.002247018
+    },
+    {
+      "calls": 55988,
+      "cumulative_cpu_s": 3.053284761,
+      "file": "ema_pullback_v2_development_replay.py",
+      "function": "_integer_text",
+      "line": 88,
+      "own_cpu_s": 1.4640123950000001
+    }
+  ],
+  "registered_1000_5000_replayed": false,
+  "rejection_rebuild_601": {
+    "constructions": 181502,
+    "isolated_cpu_ns": 239994842,
+    "observations": 601
+  },
+  "schema": "agicore:g2c-reference-parity-v2-small-profile:v1",
+  "targeted_and_regression_tests": {
+    "duration": "79.18s (0:01:19)",
+    "passed": 96
+  },
+  "test_bootstrap_sha256": {
+    "v1": "5987012723209670ba0bd9add280d956ee147f5bb266d10d2cd5cbefccff3d6a",
+    "v2": "8549966d99c638d19c9983f7d619b091563831b15a726b4ef6d5baa8ba3cf556"
+  },
+  "tests_sha256": "047c1fc80fbcc19a40b2cba1de1000acedbe9064c30fa2fa1222297b151d7cc8",
+  "worker_sha256": "3ecef3e945676d1f2a7109dacd278eabec3092640fa167661d68ea7e682a08a4"
+}
