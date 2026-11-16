@@ -1,0 +1,113 @@
+{
+  "base_main_sha": "f9a6483488a8047bf4371031f5b7ddd66da0de68",
+  "future_execution_requirements": {
+    "descendant_stop_test": "NOT_RUN",
+    "execution_host_preflight": "NOT_RUN",
+    "failure_handling": "STOP_AT_FIRST_FAILURE_AND_PRESERVE_AVAILABLE_EVIDENCE",
+    "historical_1000_gate_recheck": "REQUIRED_BEFORE_EXECUTION",
+    "minimum_effective_memory_bytes": 4294967296,
+    "minimum_free_disk_bytes": 2147483648,
+    "output": "NEW_ISOLATED_DIRECTORY_EXCLUDING_DATA",
+    "output_directory": "NOT_CREATED",
+    "physical_storage_control": "SAMPLED_AND_FINAL_NOT_A_REAL_TIME_FILESYSTEM_QUOTA",
+    "process_group_and_descendant_stop": "REQUIRED_BEFORE_EXECUTION",
+    "runner": "LINUX_CGROUP_V2_WITH_VERIFIABLE_MEMORY_ANCESTRY",
+    "source_and_contract_recheck": "REQUIRED_BEFORE_EXECUTION"
+  },
+  "github_actions_for_this_plan_commit": {
+    "commit_directive": "[skip ci]",
+    "later_pr_updates": "A later commit needs its own evaluation; no campaign trigger is defined here.",
+    "reason": "The existing PR regression workflow launches workers.",
+    "scope": "Only the commit carrying the directive; required checks may remain pending."
+  },
+  "merge_executed": false,
+  "mission": "AGICORE_G2C_PARITY_V3_5000_READONLY_PLAN",
+  "oos_accessed": false,
+  "plan": {
+    "file_sha256": "056fc349af0258132af5ced20b114db42bcdfc9ae4817ff2ddc6b4d3fa1a3774",
+    "generation": "Exact canonical stdout from the V3 plan command at the pinned base.",
+    "path": "docs/evidence/AGICORE_G2C_PARITY_V3_5000_REGISTERED_PLAN_20261116.json",
+    "plan_sha256": "4baa39605bd3b05bd177681d0c382e923237541c770af648f35b83f47dcf552c",
+    "v2_plan_sha256": "6fd2b2bdbb53675ac11ab1e85572a87aa35c5bd8a22160b0108752a69d25ca9c",
+    "v51_plan_sha256": "1d61eb19a074877006a742a46e757e82695906d69f87ea22def9dbd2ac76c4ac"
+  },
+  "postmerge_ci": {
+    "jobs": [
+      {
+        "id": 133494791451,
+        "status": "PASS"
+      },
+      {
+        "id": 133494791932,
+        "status": "PASS"
+      }
+    ],
+    "status": "PASS",
+    "url": "https://github.com/Magassa56/agicore-v2/actions/runs/43922958817",
+    "workflow_run": 43922958817
+  },
+  "read_only_check": {
+    "canonical_output_sha256": "79b6364395e3c3634afaf78d60048d32fe1d318f772db75b5a87600110895423",
+    "path": "tools/ema_pullback_v2_g2c_parity_v3_plan_check.py",
+    "result": {
+      "fixtures": {
+        "constant-5000": {
+          "input_sha256": "1814dda83d238dbd2b11872a87b014caece63088534d234a53b8c5ee19c8e831",
+          "observations": 5000
+        },
+        "dense-5000": {
+          "input_sha256": "5ca76d6d3fe70d2209c72c34f3199aa378e9d3d5ef9aa4f9a6723af469799ddc",
+          "observations": 5000
+        }
+      },
+      "historical_gate_sha256": "c7b1c48c69f81439892082cc23bb7ddb34190775b93f528177df6a6d49dad555",
+      "host_execution_preflight": "NOT_RUN",
+      "limits": {
+        "address_space_bytes": 2147483648,
+        "cpu_seconds": 150,
+        "file_bytes": 67108864,
+        "logical_bytes": 268435456,
+        "physical_bytes": 268435456,
+        "tier_physical_bytes": 1073741824,
+        "wall_seconds": 240
+      },
+      "plan_file_sha256": "056fc349af0258132af5ced20b114db42bcdfc9ae4817ff2ddc6b4d3fa1a3774",
+      "plan_sha256": "4baa39605bd3b05bd177681d0c382e923237541c770af648f35b83f47dcf552c",
+      "producer_contract_sha256": "e36c6a8985c383c9794cf3188e49940ddf28d7074d070f042661f6534629961f",
+      "replay_executed": false,
+      "schema": "agicore:g2c-parity-v3-5000-plan-check:v1",
+      "source_closure_sha256": "437a99fdd57700376dfa5de5e6a4cf73ce3c69b6d114672e3c951456f7c8ddad",
+      "status": "PASS",
+      "v3_registration_sha256": "cff5ae162ec68b03904b0f8fb18e8fb68c456ecc97214da500d41206fd195424",
+      "v3_worker_sha256": "655e1b28fe44f50ccc851f7ff5565c1f2126b51349aa54e91f9f144a35dd12a9",
+      "verifier_registration_sha256": "9dc2cfcaf37909004d084456dadbc6c896699033b5e3428d62ae56ece7e87bf6",
+      "workers_launched": 0
+    },
+    "sha256": "ea175fd6c9f0cb4eea5d662b3b94310bc1eaca5635a092c0f7fbe57638f0a89d"
+  },
+  "real_development_accessed": false,
+  "recorded_utc": "2026-11-16T18:11:30.007246+00:00",
+  "replay_executed": false,
+  "schema": "agicore:g2c-parity-v3-5000-readonly-validation:v1",
+  "trigger": {
+    "automatic_retries": "NOT_AUTHORIZED",
+    "execution_workflow_added": false,
+    "pr_opening_or_updates_must_not_start_campaign": true,
+    "single_campaign_and_separate_authorization": "REQUIRED_FOR_ANY_FUTURE_TRIGGER",
+    "status": "INACTIVE_NOT_IMPLEMENTED"
+  },
+  "verification_tests": {
+    "passed": 6,
+    "path": "tests/unit/test_ema_pullback_v2_g2c_parity_v3_plan_check.py",
+    "scope": [
+      "no worker or subprocess in the successful check",
+      "external SHA mismatch",
+      "changed V3 registration",
+      "rehash and canonicality forgery",
+      "forged 1000 gate",
+      "altered fixture bytes"
+    ],
+    "sha256": "e47c42b96674c9295ae65799f6f4b7c90ff0650d41eecc3b3353488a34e845a7"
+  },
+  "workers_launched": 0
+}
