@@ -1,0 +1,59 @@
+{
+  "name": "G2C V3 one-shot — INERT PROPOSAL",
+  "on": {
+    "workflow_dispatch": {}
+  },
+  "permissions": {},
+  "concurrency": {
+    "group": "g2c-parity-v3-5000-campaign-1",
+    "cancel-in-progress": false
+  },
+  "jobs": {
+    "reserve": {
+      "if": "${{ false && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'Magassa56/agicore-v2' && github.run_attempt == 1 && github.actor_id == '166902290' && github.triggering_actor == 'Magassa56' }}",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 5,
+      "permissions": {
+        "contents": "write"
+      },
+      "steps": [
+        {
+          "name": "INERT: independent owner run approval, claim ruleset and live adapter absent",
+          "run": "exit 1"
+        }
+      ]
+    },
+    "calculate": {
+      "needs": "reserve",
+      "if": "${{ false && needs.reserve.result == 'success' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'Magassa56/agicore-v2' && github.run_attempt == 1 && github.actor_id == '166902290' && github.triggering_actor == 'Magassa56' }}",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 45,
+      "permissions": {
+        "contents": "read"
+      },
+      "steps": [
+        {
+          "name": "INERT: recheck run_attempt, claim run_id, identities, preflight and receipt before any worker",
+          "run": "exit 1"
+        }
+      ]
+    },
+    "evidence": {
+      "needs": [
+        "reserve",
+        "calculate"
+      ],
+      "if": "${{ false && always() }}",
+      "runs-on": "ubuntu-latest",
+      "permissions": {
+        "contents": "read"
+      },
+      "steps": [
+        {
+          "name": "INERT: future always-on preservation of bounded partial evidence",
+          "run": "exit 1"
+        }
+      ]
+    }
+  }
+}
