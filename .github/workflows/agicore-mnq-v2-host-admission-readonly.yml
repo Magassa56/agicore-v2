@@ -1,0 +1,180 @@
+name: AGIcore MNQ V2 - Host admission READ ONLY
+
+# This file is an inert proposal until installed on the repository's default branch.
+# One manual invocation only; no checkout, no strategy inputs, no worker, no sentinel.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agicore-mnq-v2-readonly-admission
+  cancel-in-progress: false
+
+jobs:
+  inspect-host:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Inspect kernel resources (read-only, no checkout)
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import shutil
+
+          REQUIRED = 4_429_185_024  # 4 GiB + 128 MiB
+          errors = []
+
+          def read_text(path):
+              try:
+                  return Path(path).read_text(encoding='utf-8').strip()
+              except (OSError, UnicodeError) as exc:
+                  return {'unavailable': type(exc).__name__}
+
+          def finite_limit(text):
+              if not isinstance(text, str) or text == 'max':
+                  return None
+              try:
+                  return int(text)
+              except ValueError:
+                  return None
+
+          raw_membership = read_text('/proc/self/cgroup')
+          membership = None
+          if isinstance(raw_membership, str):
+              memberships = [line[3:] for line in raw_membership.splitlines() if line.startswith('0::')]
+              if len(memberships) == 1 and memberships[0].startswith('/'):
+                  membership = memberships[0]
+          if membership is None:
+              errors.append('CGROUP_V2_MEMBERSHIP_UNKNOWN')
+
+          # Parse only the cgroup2 mount. No network or privileged mount inspection.
+          mount_lines = read_text('/proc/self/mountinfo')
+          mounts = []
+          if isinstance(mount_lines, str):
+              for line in mount_lines.splitlines():
+                  left, sep, right = line.partition(' - ')
+                  if not sep or not right.startswith('cgroup2 '):
+                      continue
+                  fields = left.split()
+                  if len(fields) >= 5:
+                      mounts.append({'root': fields[3], 'mountpoint': fields[4]})
+          root = None
+          if len(mounts) == 1 and mounts[0]['root'] == '/' and mounts[0]['mountpoint'] == '/sys/fs/cgroup':
+              root = Path('/sys/fs/cgroup')
+          else:
+              errors.append('FULL_VISIBLE_CGROUP2_MOUNT_NOT_PROVEN')
+
+          ancestors = []
+          if root is not None and membership is not None:
+              # Refuse ambiguous/unsafe path components rather than walking beyond the mount.
+              parts = membership.strip('/').split('/') if membership != '/' else []
+              if any(part in ('', '.', '..') or '\\' in part for part in parts):
+                  errors.append('INVALID_CGROUP_MEMBERSHIP_PATH')
+              else:
+                  for index in range(len(parts), -1, -1):
+                      current = root.joinpath(*parts[:index])
+                      if current.is_symlink() or not current.is_dir():
+                          errors.append('CGROUP_ANCESTOR_NOT_ACCESSIBLE')
+                          break
+                      max_raw = read_text(current / 'memory.max')
+                      current_raw = read_text(current / 'memory.current')
+                      high_raw = read_text(current / 'memory.high')
+                      cpu_raw = read_text(current / 'cpu.max')
+                      pids_raw = read_text(current / 'pids.max')
+                      pids_current_raw = read_text(current / 'pids.current')
+                      controllers = read_text(current / 'cgroup.controllers')
+                      enabled = read_text(current / 'cgroup.subtree_control')
+                      try:
+                          current_value = int(current_raw) if isinstance(current_raw, str) else None
+                      except ValueError:
+                          current_value = None
+                      # Kernel cgroup v2 root legitimately need not expose memory.max.
+                      is_root = index == 0
+                      if current_value is None and not is_root:
+                          errors.append('CGROUP_MEMORY_CURRENT_UNAVAILABLE')
+                      headrooms = []
+                      for text in (max_raw, high_raw):
+                          value = finite_limit(text)
+                          if value is not None and current_value is not None:
+                              headrooms.append(value - current_value)
+                          elif isinstance(text, dict) and not is_root:
+                              errors.append('CGROUP_MEMORY_LIMIT_UNREADABLE')
+                      ancestors.append({
+                          'path': '/' + '/'.join(parts[:index]),
+                          'memory_max_bytes': max_raw,
+                          'memory_high_bytes': high_raw,
+                          'memory_current_bytes': current_value,
+                          'finite_headroom_bytes': min(headrooms) if headrooms else None,
+                          'cpu_max': cpu_raw,
+                          'pids_max': pids_raw,
+                          'pids_current': pids_current_raw,
+                          'controllers': controllers,
+                          'subtree_control': enabled,
+                      })
+
+          mem_available_bytes = None
+          meminfo = read_text('/proc/meminfo')
+          if isinstance(meminfo, str):
+              for line in meminfo.splitlines():
+                  if line.startswith('MemAvailable:'):
+                      try:
+                          mem_available_bytes = int(line.split()[1]) * 1024
+                      except (ValueError, IndexError):
+                          pass
+          if mem_available_bytes is None:
+              errors.append('HOST_MEMAVAILABLE_UNKNOWN')
+          finite = [a['finite_headroom_bytes'] for a in ancestors if a['finite_headroom_bytes'] is not None]
+          # Diagnostic lower bound, not proof of admin delegation or of hidden ancestors.
+          observed_candidate_headroom = min(finite + [mem_available_bytes]) if mem_available_bytes is not None else None
+          if observed_candidate_headroom is None or observed_candidate_headroom < REQUIRED:
+              errors.append('OBSERVED_MEMORY_HEADROOM_BELOW_MINIMUM_OR_UNKNOWN')
+
+          try:
+              disk = shutil.disk_usage('/home/runner/work')
+              disk_free = disk.free
+          except OSError:
+              disk_free = None
+              errors.append('WORKSPACE_DISK_UNAVAILABLE')
+          try:
+              cpu_affinity = len(os.sched_getaffinity(0))
+          except (AttributeError, OSError):
+              cpu_affinity = None
+
+          boot = read_text('/proc/sys/kernel/random/boot_id')
+          boot_hash = hashlib.sha256(boot.encode('ascii')).hexdigest() if isinstance(boot, str) else None
+          result = {
+              'schema': 'agicore:mnq-v2-host-readonly-inspection:v1',
+              'purpose': 'ONE_ADMISSION_DIAGNOSTIC_ONLY',
+              'required_memory_headroom_bytes': REQUIRED,
+              'architecture': platform.machine(),
+              'kernel': platform.release(),
+              'boot_id_sha256': boot_hash,
+              'cgroup_membership': membership,
+              'cgroup2_mounts': mounts,
+              'visible_cgroup_ancestors': ancestors,
+              'host_memavailable_bytes': mem_available_bytes,
+              'observed_candidate_headroom_bytes': observed_candidate_headroom,
+              'cpu_affinity_count': cpu_affinity,
+              'workspace_disk_free_bytes': disk_free,
+              'read_only_diagnostic_flags': sorted(set(errors)),
+              'read_only_precheck': 'NO_VISIBLE_BLOCKERS' if not errors else 'BLOCKED_OR_INCOMPLETE',
+              'delegation_proven': False,
+              'supervisor_loss_sentinel_executed': False,
+              'deadline_sentinel_executed': False,
+              'data_accessed': False,
+              'replay_executed': False,
+              'host_admission': 'NOT_QUALIFIED_READ_ONLY_DIAGNOSTIC',
+              'next': 'AGICOREMANAGER_REVIEW_BEFORE_SEPARATE_SENTINEL_AUTHORIZATION',
+          }
+          print('AGICORE_HOST_READONLY_REPORT=' + json.dumps(result, sort_keys=True, separators=(',', ':')))
+          print('HOST_ADMISSION=NOT_QUALIFIED_READ_ONLY_DIAGNOSTIC')
+          PY
