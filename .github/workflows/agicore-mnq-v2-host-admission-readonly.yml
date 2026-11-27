@@ -2,6 +2,7 @@ name: AGIcore MNQ V2 - Host admission READ ONLY
 
 # This file is an inert proposal until installed on the repository's default branch.
 # One manual invocation only; no checkout, no strategy inputs, no worker, no sentinel.
+# CI validation trigger only; this diagnostic remains manual and is not dispatched.
 on:
   workflow_dispatch:
 
